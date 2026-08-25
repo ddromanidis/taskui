@@ -1,0 +1,148 @@
+# taskui's own Taskfile — which is also the smallest honest test of taskui itself.
+#
+# Deliberately shaped to exercise the things it claims to handle: `build` and `test` are
+# both runnable tasks *and* parents of `build:release`/`test:one`, `check` and `lint` and
+# `fmt` are the cross-cutting verbs the verb pivot collects, and `test:one`/`search` use
+# `requires:` so the args prompt has something real to pre-fill.
+version: "3"
+
+vars:
+  PROBE: '{{.ROOT_DIR}}/probe'
+
+tasks:
+  default:
+    desc: "List every available task"
+    cmds:
+      - task --list-all
+    silent: true
+
+  #########################################################################################
+  #                                     DAILY DRIVERS
+  #########################################################################################
+  build:
+    desc: "Debug build"
+    aliases: [b]
+    cmds:
+      - cargo build
+
+  build:release:
+    desc: "Optimised build — what `install` puts on your PATH"
+    cmds:
+      - cargo build --release
+
+  install:
+    desc: "Build and install to ~/.cargo/bin/taskui"
+    cmds:
+      - cargo install --path .
+
+  test:
+    desc: "Run the whole suite"
+    aliases: [t]
+    cmds:
+      - cargo test
+
+  test:one:
+    desc: "Run tests matching a filter (FILTER=redact)"
+    requires: { vars: [FILTER] }
+    cmds:
+      - cargo test {{.FILTER}} -- --nocapture
+
+  fmt:
+    desc: "Format the source (writes changes)"
+    cmds:
+      - cargo fmt --all
+
+  lint:
+    desc: "Clippy, warnings are errors, plus a format check"
+    cmds:
+      - cargo clippy --all-targets -- -D warnings
+      - cargo fmt --all -- --check
+
+  check:
+    desc: "Type-check only — fastest feedback"
+    aliases: [c]
+    cmds:
+      - cargo check --all-targets
+
+  all:
+    desc: "Everything: format, lint, test, build"
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+      - task: build:release
+
+  clean:
+    desc: "Remove build artifacts and Task's own run cache"
+    cmds:
+      - cargo clean
+      - rm -rf .task
+
+  #########################################################################################
+  #                              DRIVING TASKUI ITSELF
+  #########################################################################################
+  run:
+    desc: 'Open taskui on a directory (task run -- ~/Documents/atlas)'
+    cmds:
+      - cargo run --quiet -- {{.CLI_ARGS | default "."}}
+
+  search:
+    desc: 'Grep every stored run (PATTERN=FAIL)'
+    requires: { vars: [PATTERN] }
+    cmds:
+      - cargo run --quiet -- --search '{{.PATTERN}}'
+
+  shot:
+    desc: 'Render one frame to stdout without a terminal (task shot -- --keys g)'
+    cmds:
+      - cargo run --quiet -- --screenshot 100x30 {{.CLI_ARGS}} .
+
+  graph:
+    desc: 'Print the execution graph reachable from a task (TASK=all)'
+    requires: { vars: [TASK] }
+    cmds:
+      - cargo run --quiet -- --graph '{{.TASK}}'
+
+  #########################################################################################
+  #                                     PROBE TASKFILE
+  #########################################################################################
+  # A throwaway Taskfile with a failing pipeline in it — the fixture used to verify
+  # capture, folding and search against a real `task` process rather than a mock.
+  probe:make:
+    desc: "Write a scratch Taskfile with a deliberately failing pipeline into ./probe"
+    cmds:
+      - mkdir -p {{.PROBE}}
+      - |
+        cat > {{.PROBE}}/Taskfile.yml <<'EOF'
+        version: "3"
+        tasks:
+          build:
+            cmds: ['echo "compiling core"', 'echo "compiling api"']
+          test:
+            cmds:
+              - 'echo "running 42 tests"'
+              - 'echo "--- FAIL: TestOrderTotal"'
+              - 'echo "    order_test.go:88: want 1200, got 1180"'
+              - 'echo "3 migrations pending, refusing to start" >&2'
+              - 'exit 1'
+          ci:
+            cmds: [{task: build}, {task: test}]
+        EOF
+      - 'echo "wrote {{.PROBE}}/Taskfile.yml"'
+
+  probe:run:
+    desc: "Capture the probe's failing pipeline headlessly and print the tree"
+    deps: [probe:make]
+    cmds:
+      - cargo run --quiet -- --run ci {{.PROBE}}
+
+  probe:open:
+    desc: "Open taskui on the probe Taskfile"
+    deps: [probe:make]
+    cmds:
+      - cargo run --quiet -- {{.PROBE}}
+
+  probe:clean:
+    desc: "Remove the scratch Taskfile"
+    cmds:
+      - rm -rf {{.PROBE}}

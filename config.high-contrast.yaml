@@ -1,0 +1,42 @@
+# A louder taskui, for terminals where the defaults wash out — embedded terminals
+# (Neovim's :terminal, IDE panes) often render the dimmer half of the ANSI palette very
+# close to the background.
+#
+# Install with:
+#   mkdir -p ~/.config/taskui && cp config.high-contrast.yaml ~/.config/taskui/config.yaml
+#
+# Every key is optional. `taskui --dump-config` prints all of them with their defaults.
+
+colors:
+  # Secondary text — descriptions, counts, key hints. This is most of the words on
+  # screen, so it is the one worth turning up first.
+  dim: bright-white
+
+  # Line numbers and fold glyphs. Slightly quieter than the text they sit beside, but
+  # still meant to be readable.
+  gutter: bright-cyan
+
+  # `default` means reverse video, which cannot be invisible whatever your colourscheme
+  # is. Swap in a real colour only if you know it contrasts with your background.
+  selection: default
+
+  # Status glyphs. The bright variants survive dark backgrounds better than the base
+  # sixteen.
+  status-ok: bright-green
+  status-running: bright-yellow
+  status-failed: bright-red
+  status-skipped: bright-white
+  status-pending: bright-white
+
+  # Search and match highlighting.
+  search: bright-magenta
+  match-bg: bright-magenta
+  match-fg: black
+
+  accent: bright-cyan
+  mode: bright-yellow
+  alias: bright-blue
+  command: bright-blue
+  notice: bright-yellow
+  stored: bright-blue
+  interactive: bright-green
