@@ -43,6 +43,11 @@ cargo install --path .
 
 To update, re-run whichever of those you used. To remove it, `cargo uninstall taskui`.
 
+A man page ships in the repository as `taskui.1`. The Homebrew formula installs it, so
+`man taskui` works after `brew install`; with a `cargo install` there is nowhere standard
+to put it, so read it in place with `man ./taskui.1` or copy it somewhere on your
+`MANPATH`.
+
 There is no tested minimum Rust version. It is developed on 1.97, and the dependencies put
 the floor somewhere around 1.77 — if an older toolchain fails to build it, that is the
 likely reason.
@@ -84,7 +89,8 @@ taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
 ```
 
-`?` from any screen lists every binding, grouped by context. The footer shows a subset of
+`man taskui` covers the options, the keys and the files. `?` from any screen lists every
+binding, grouped by context. The footer shows a subset of
 the same table — one source of truth, so the two cannot disagree.
 
 The picker lays itself out in up to three columns when the list does not fit the terminal,

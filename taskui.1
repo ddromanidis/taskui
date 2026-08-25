@@ -1,0 +1,287 @@
+.TH TASKUI 1 "August 2026" "taskui 0.1.1" "User Commands"
+.SH NAME
+taskui \- folding, searchable front end for go\-task
+.SH SYNOPSIS
+.B taskui
+.RI [ OPTIONS ]
+.RI [ DIR ]
+.SH DESCRIPTION
+.B taskui
+browses the Taskfile in
+.IR DIR
+(the current directory by default), runs tasks from it, and keeps their output
+around to fold and search afterwards \(em both while a task is running and
+across previous runs.
+.PP
+It requires
+.BR task (1)
+from https://taskfile.dev on
+.BR PATH ;
+everything it knows comes from asking go\-task rather than parsing Taskfiles
+itself.
+.PP
+Existing Taskfile front ends are launchers: they pick a task, exit, and hand the
+terminal over.
+.B taskui
+is meant to be the thing you sit in.
+.SH OPTIONS
+.TP
+.BR \-\-list
+Print the discovered tasks and exit.
+.TP
+.BI \-\-dump " MODE"
+Print a pivot fully expanded and exit.
+.I MODE
+is
+.B domain
+or
+.BR verb .
+.TP
+.BI \-\-graph " TASK"
+Print the execution graph reachable from
+.I TASK
+and exit.
+.TP
+.BI \-\-run " TASK"
+Run
+.I TASK
+without a terminal and print the captured tree. The run is stored as if it had
+been run interactively.
+.TP
+.BI \-\-args " ARGS"
+Arguments for
+.BR \-\-run ,
+split shell\-style, so
+.RB \(dq \-\- \(dq
+and quoted values survive.
+.TP
+.B \-\-last
+Open the most recent stored run for this project instead of the picker.
+.TP
+.BI \-\-search " PATTERN"
+Search every stored run for
+.I PATTERN
+and exit. Works from any directory, since it reads the archive rather than the
+project.
+.TP
+.BI \-\-screenshot " WxH"
+Render one frame to standard output and exit. With
+.B \-\-run
+the keys given to
+.B \-\-keys
+are played into the live run, so interactive flows can be driven from a script.
+.TP
+.BI \-\-keys " KEYS"
+Keys to press before a
+.BR \-\-screenshot .
+.TP
+.BI \-\-config " PATH"
+Read colours and keybindings from
+.I PATH
+instead of the default location.
+.TP
+.B \-\-dump\-config
+Print every colour and keybinding at its default, annotated, and exit. Redirect
+it to create a config file to edit.
+.TP
+.BR \-h ", " \-\-help
+Print a summary of the options and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the version and exit.
+.SH KEYS
+.B ?
+inside taskui lists every binding, grouped by context, and is authoritative:
+it and the footer are generated from one table, so neither can drift. The
+bindings below are the defaults.
+.SS Picker
+.TP
+.BR j ", " k ", " gg ", " G ", " ^d ", " ^u
+Move; first and last row; half a screen.
+.TP
+.B space
+Fold or unfold a group.
+.TP
+.B Enter
+Run the task.
+.TP
+.B a
+Run it with arguments. Variables the task declares with
+.B requires
+are pre\-filled.
+.TP
+.B s
+Show what the task is and what it will run, before running it.
+.TP
+.B p
+Toggle the pivot: group by domain or by verb.
+.TP
+.B /
+Filter the list down to matching tasks.
+.TP
+.B t
+Jump to a task, leaving the list intact.
+.TP
+.B i
+Arm interactive mode for the next run.
+.TP
+.B F
+Arm
+.BR \-\-force ,
+so go\-task's up\-to\-date checks do not skip the run.
+.TP
+.B v
+Go back to a run already in progress.
+.TP
+.B h
+Past runs.
+.SS Run
+.TP
+.B space
+Fold or unfold a task's output.
+.TP
+.B /
+Search the output;
+.B n
+and
+.B N
+step through matches.
+.TP
+.B f
+Filter to matching lines only;
+.B [
+and
+.B ]
+change how much context each match keeps.
+.TP
+.B r
+Re\-run this task with the same arguments.
+.TP
+.B i
+Type at the running task. This works even when the prompt is not visible.
+.TP
+.B I
+Re\-run interactively, so prompts are visible from the start.
+.TP
+.B W
+Watch: re\-run whenever the source changes.
+.TP
+.B x
+Stop the run, signalling the whole process group.
+.TP
+.BR y ", " Y
+Copy the line under the cursor, or everything the task printed.
+.TP
+.B Esc
+Back to the picker. The run keeps going.
+.SS History
+.TP
+.B Enter
+Reopen the run.
+.TP
+.B /
+Search across every stored run.
+.TP
+.B a
+Widen to all projects.
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/taskui/config.yaml
+Colours and keybindings. Defaults to
+.IR ~/.config/taskui/config.yaml .
+The file is optional, and so is every key in it.
+.TP
+.I $XDG_STATE_HOME/taskui/runs
+Stored runs, most recent 50. Defaults to
+.IR ~/.local/state/taskui/runs .
+One directory per run, holding a
+.I manifest.json
+and, per task, the ANSI\-stripped output and a sidecar keeping the escape
+sequences. The stripped half is plain text on purpose: the archive is meant to
+be greppable without taskui. Created with owner\-only permissions.
+.TP
+.I .taskui-danger
+In the project root. One pattern per line, where
+.B *
+matches any characters and
+.B #
+starts a comment. Matching tasks need a confirmation before they run. The
+presence of this file replaces taskui's own guess entirely.
+.SH ENVIRONMENT
+.TP
+.B XDG_CONFIG_HOME
+.TQ
+.B XDG_STATE_HOME
+Override where the config and the run archive live.
+.PP
+Runs are started with
+.BR CARGO_TERM_COLOR ,
+.B CLICOLOR_FORCE
+and
+.B FORCE_COLOR
+set, because output is captured through a pipe and tools that auto\-detect a
+terminal would otherwise drop their colour.
+.SH NOTES
+.SS Credentials
+.BR "task \-\-summary" ,
+which taskui runs to build the execution graph, prints the resolved
+environment. For a Taskfile using
+.B dotenv
+that is live credentials. Values that look like secrets are masked before a line
+reaches the screen, the buffers or the disk, and the run view reports how many
+were masked. Zero means none were found, not that the output was checked and
+cleared.
+.SS Interactive tasks
+Under go\-task's prefixing writer an unterminated prompt is never flushed, so a
+task waiting for input appears to hang. Standard input still reaches it, so
+.B i
+answers it blind;
+.B I
+re\-runs the task with interleaved output so prompts are visible, at the cost of
+attributing lines by the last task to announce itself rather than per line.
+.SH EXIT STATUS
+The exit status of the task that was run, or 0 when taskui exits without
+running anything.
+.SH EXAMPLES
+.PP
+Browse another project:
+.PP
+.RS
+.EX
+taskui ~/src/myrepo
+.EE
+.RE
+.PP
+Find when something started failing, without opening the interface:
+.PP
+.RS
+.EX
+taskui \-\-search 'migration.*pending'
+.EE
+.RE
+.PP
+Run a task with arguments and print the captured tree:
+.PP
+.RS
+.EX
+taskui \-\-run backend:test \-\-args '\-\- \-p ingest'
+.EE
+.RE
+.PP
+Answer a prompt from a script:
+.PP
+.RS
+.EX
+taskui \-\-run deploy \-\-screenshot 100x20 \-\-keys $'iy\en'
+.EE
+.RE
+.SH SEE ALSO
+.BR task (1),
+https://taskfile.dev
+.PP
+.I EXAMPLES.md
+in the source tree works through each feature with real output.
+.SH LICENSE
+MIT.
+.SH AUTHOR
+Dmitry Romanidis.
