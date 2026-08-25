@@ -11,6 +11,56 @@ Worked examples of every feature: [EXAMPLES.md](EXAMPLES.md).
 
 Browse, pivot, filter, run, fold, and search — live and across stored runs.
 
+## Installing
+
+taskui drives [go-task](https://taskfile.dev), so that has to be installed and on your
+`PATH` first:
+
+```
+brew install go-task            # or see https://taskfile.dev/installation
+task --version
+```
+
+Then, with a Rust toolchain:
+
+```
+cargo install --git https://github.com/ddromanidis/taskui
+```
+
+That puts `taskui` in `~/.cargo/bin`, which is on your `PATH` if you installed Rust via
+[rustup](https://rustup.rs). Check with `taskui --version`.
+
+From a clone, which is what you want if you are changing it:
+
+```
+git clone https://github.com/ddromanidis/taskui
+cd taskui
+cargo install --path .
+```
+
+To update, re-run whichever of those you used. To remove it, `cargo uninstall taskui`.
+
+There is no tested minimum Rust version. It is developed on 1.97, and the dependencies put
+the floor somewhere around 1.77 — if an older toolchain fails to build it, that is the
+likely reason.
+
+Nothing else is required. Configuration is optional and taskui creates it only if you ask
+for it; stored runs land in `$XDG_STATE_HOME/taskui` or `~/.local/state/taskui`, and
+`cargo uninstall` leaves them behind — delete that directory if you want them gone.
+
+### Platforms
+
+Developed and tested on macOS. Linux should work: the only platform-specific parts are the
+pty (via `portable-pty`), the process-group signal used to stop a run, and the clipboard,
+which shells out to whichever of `pbcopy`, `wl-copy`, `xclip` or `xsel` it finds. Windows
+is not supported — `libc::killpg` has no equivalent there, so stopping a run would leave
+the task's children behind.
+
+### Homebrew
+
+Not yet. A tap needs the repository to be public, a licence, and a tagged release; see
+[Not built yet](#not-built-yet).
+
 ## Usage
 
 ```
@@ -412,6 +462,9 @@ worse to grep. It is recomputed on load from the shape of go-task's own echo lin
 
 ## Not built yet
 
+- **Distribution.** No licence file, no tagged release, no Homebrew tap, and no
+  `description`/`repository`/`license` in `Cargo.toml`. All four are prerequisites for
+  `brew install ddromanidis/tap/taskui`, and the repository would need to be public.
 - A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
   this", which the domain tree gets wrong for `sec:*` and `wt:*`.
 - Cross-run search inside the TUI. `--search` covers it from the shell, but `/` in the
