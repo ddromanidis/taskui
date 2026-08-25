@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build a release for"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binaries:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Named by target so the three archives can coexist on one release.
+      - name: Archive
+        run: |
+          set -euo pipefail
+          name="taskui-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp "target/${{ matrix.target }}/release/taskui" "dist/$name/"
+          cp README.md EXAMPLES.md LICENSE "dist/$name/"
+          tar -C dist -czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: taskui-${{ matrix.target }}
+          path: |
+            taskui-*.tar.gz
+            taskui-*.tar.gz.sha256
+
+  publish:
+    name: publish
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Attach binaries to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "taskui $TAG" --generate-notes
+          gh release upload "$TAG" dist/* --clobber
+
+      # The formula builds from the source tarball, so this is the hash it needs. GitHub
+      # generates that tarball on demand, so it is fetched rather than built here.
+      - name: Hash the source tarball
+        id: src
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          curl --location --fail --silent --output source.tar.gz "$url"
+          echo "sha256=$(shasum -a 256 source.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Bumping the tap means pushing to a different repository, which the default token
+      # cannot do. Without TAP_TOKEN the job prints exactly what to change instead of
+      # failing — a release should not go red because an optional convenience is unset.
+      - name: Bump the Homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          SHA: ${{ steps.src.outputs.sha256 }}
+          URL: ${{ steps.src.outputs.url }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "TAP_TOKEN is not set, so the tap was not updated."
+            echo "Update Formula/taskui.rb in ddromanidis/homebrew-tap by hand:"
+            echo "  url \"$URL\""
+            echo "  sha256 \"$SHA\""
+            exit 0
+          fi
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/ddromanidis/homebrew-tap.git" tap
+          cd tap
+
+          # Rewrite only the two lines that change between releases.
+          sed -i "s|^  url \".*\"$|  url \"$URL\"|" Formula/taskui.rb
+          sed -i "s|^  sha256 \".*\"$|  sha256 \"$SHA\"|" Formula/taskui.rb
+
+          if git diff --quiet; then
+            echo "Formula already points at $TAG."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -aqm "taskui $TAG"
+          git push -q
+          echo "Tap updated to $TAG."

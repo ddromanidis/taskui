@@ -7,6 +7,7 @@ output around to fold and search afterwards.
 
 Worked examples of every feature: [EXAMPLES.md](EXAMPLES.md).
 
+[![CI](https://github.com/ddromanidis/taskui/actions/workflows/ci.yml/badge.svg)](https://github.com/ddromanidis/taskui/actions/workflows/ci.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Status
@@ -52,11 +53,12 @@ for it; stored runs land in `$XDG_STATE_HOME/taskui` or `~/.local/state/taskui`,
 
 ### Platforms
 
-Developed and tested on macOS. Linux should work: the only platform-specific parts are the
-pty (via `portable-pty`), the process-group signal used to stop a run, and the clipboard,
-which shells out to whichever of `pbcopy`, `wl-copy`, `xclip` or `xsel` it finds. Windows
-is not supported — `libc::killpg` has no equivalent there, so stopping a run would leave
-the task's children behind.
+macOS and Linux, both covered by CI: the suite runs on `macos-latest` and `ubuntu-latest`
+on every push, including the tests that spawn a real `task` process to cancel a run and
+answer an interactive prompt.
+
+Windows is not supported. Stopping a run signals the process group via `libc::killpg`,
+which has no Windows equivalent, so `x` would kill `task` and leave its children running.
 
 ### Homebrew
 
@@ -469,11 +471,40 @@ since that is nearly always why you went looking. Colour survives the round trip
 `is_command` is not stored, because a marker in the `.txt` file would make the archive
 worse to grep. It is recomputed on load from the shape of go-task's own echo line.
 
+## Releasing
+
+`ci.yml` runs fmt, clippy and the tests on macOS and Linux, and separately runs the
+project's own `task all` — the tool exists to run Taskfiles, so running its own is a test
+of both.
+
+`release.yml` fires on a `v*` tag: it builds binaries for `aarch64-apple-darwin`,
+`x86_64-apple-darwin` and `x86_64-unknown-linux-gnu`, attaches them to the release with
+checksums, hashes the source tarball, and updates the Homebrew formula to point at the new
+tag.
+
+That last step pushes to a *different* repository, which the default workflow token cannot
+do. It needs a `TAP_TOKEN` secret — a fine-grained personal access token with contents
+write on `ddromanidis/homebrew-tap`:
+
+```
+gh secret set TAP_TOKEN --repo ddromanidis/taskui
+```
+
+Without it the release still succeeds and prints the two lines to change by hand. A
+release going red because an optional convenience is unset would be worse than doing it
+manually.
+
+So cutting a release is:
+
+```
+git tag -a v0.2.0 -m "taskui v0.2.0" && git push origin v0.2.0
+```
+
 ## Not built yet
 
-- **Prebuilt binaries.** The Homebrew tap compiles from source, which takes a minute.
-  Attaching per-platform binaries to each release from CI would make `brew install`
-  instant, but it is an optimisation rather than a prerequisite.
+- **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
+  compiles from source. Pointing the formula at those archives per platform would make
+  `brew install` instant instead of a minute.
 - **crates.io.** `cargo install taskui` would reach anyone with Rust without a tap at all.
 - A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
   this", which the domain tree gets wrong for `sec:*` and `wt:*`.
