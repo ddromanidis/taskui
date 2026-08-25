@@ -7,6 +7,8 @@ output around to fold and search afterwards.
 
 Worked examples of every feature: [EXAMPLES.md](EXAMPLES.md).
 
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## Status
 
 Browse, pivot, filter, run, fold, and search — live and across stored runs.
@@ -58,8 +60,15 @@ the task's children behind.
 
 ### Homebrew
 
-Not yet. A tap needs the repository to be public, a licence, and a tagged release; see
-[Not built yet](#not-built-yet).
+```
+brew install ddromanidis/tap/taskui
+```
+
+The tap builds from source, so it needs a Rust toolchain and takes a minute or so the
+first time; it pulls in `go-task` as a dependency, so that arrives with it.
+
+To update, `brew upgrade taskui`. To remove, `brew uninstall taskui` — and
+`brew untap ddromanidis/tap` if you want the tap gone too.
 
 ## Usage
 
@@ -462,9 +471,10 @@ worse to grep. It is recomputed on load from the shape of go-task's own echo lin
 
 ## Not built yet
 
-- **Distribution.** No licence file, no tagged release, no Homebrew tap, and no
-  `description`/`repository`/`license` in `Cargo.toml`. All four are prerequisites for
-  `brew install ddromanidis/tap/taskui`, and the repository would need to be public.
+- **Prebuilt binaries.** The Homebrew tap compiles from source, which takes a minute.
+  Attaching per-platform binaries to each release from CI would make `brew install`
+  instant, but it is an optimisation rather than a prerequisite.
+- **crates.io.** `cargo install taskui` would reach anyone with Rust without a tap at all.
 - A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
   this", which the domain tree gets wrong for `sec:*` and `wt:*`.
 - Cross-run search inside the TUI. `--search` covers it from the shell, but `/` in the

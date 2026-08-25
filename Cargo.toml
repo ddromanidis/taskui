@@ -2,6 +2,14 @@
 name = "taskui"
 version = "0.1.0"
 edition = "2021"
+description = "A folding, searchable front end for go-task: browse a Taskfile, run tasks, and fold and search their output"
+repository = "https://github.com/ddromanidis/taskui"
+homepage = "https://github.com/ddromanidis/taskui"
+license = "MIT"
+readme = "README.md"
+keywords = ["taskfile", "go-task", "tui", "task-runner", "ratatui"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["probe", "config.high-contrast.yaml"]
 
 [dependencies]
 anyhow = "1"
