@@ -3,6 +3,10 @@
 Worked examples, in the order you are likely to need them. Every screenshot here is real
 output, not a mock-up.
 
+`taskui examples` prints a shorter version of this in your terminal, rendered live at your
+width and in your theme — that one cannot go stale, because the frames are drawn when you
+run it rather than written down here.
+
 ---
 
 ## Finding a task in a Taskfile you did not write

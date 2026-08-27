@@ -188,7 +188,13 @@ taskui --diff test            # what changed since it last passed
 taskui --flaky                # tasks that went both ways at one commit
 taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
+taskui examples               # worked examples, rendered at your terminal's width
+taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 ```
+
+`taskui examples` walks through the whole thing — eight worked examples, every frame drawn
+by the real renderer at your terminal's width and in your theme, so nothing in it can go
+stale. `taskui examples <topic>` prints just one.
 
 `man taskui` covers the options, the keys and the files. `?` from any screen lists every
 binding, grouped by context. The footer shows a subset of

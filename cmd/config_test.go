@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/viper"
+
 	"github.com/ddromanidis/taskui/internal/theme"
 )
 
@@ -20,8 +22,15 @@ func inTempConfig(t *testing.T) string {
 }
 
 // execute drives a command the way cobra would, capturing what it printed.
+//
+// The viper instance is replaced first. It is package-level and filled by cobra's
+// OnInitialize, so in a test binary — where several commands run in one process — whatever
+// the previous test's config said survives into the next one. A real invocation is one
+// command in a fresh process, and this makes the tests agree with that: without it, a test
+// that wrote `theme: synthwave` made a later test render in synthwave.
 func execute(t *testing.T, args ...string) (string, error) {
 	t.Helper()
+	v = viper.New()
 	var out bytes.Buffer
 	rootCmd.SetOut(&out)
 	rootCmd.SetErr(&out)
