@@ -25,22 +25,37 @@ func TestFootersAreBuiltFromTheSameTable(t *testing.T) {
 	}
 }
 
-// A binding shown in the footer still carries its long form for the `?` screen.
+// A binding shown in the footer still carries its long form for the `?` screen. Every one
+// of them, rather than one chosen example — this used to name `i`, and stopped meaning
+// anything the moment `i` was demoted out of the footer for space.
 func TestFooterBindingsKeepTheirFullExplanation(t *testing.T) {
-	var input *Binding
-	for i := range Run.Bindings {
-		if Run.Bindings[i].Keys == "i" {
-			input = &Run.Bindings[i]
+	for _, section := range Sections {
+		for _, b := range section.Bindings {
+			if b.Footer == "" {
+				continue
+			}
+			if b.What == "" {
+				t.Errorf("%s: `%s` has a footer label and no explanation", section.Title, b.Keys)
+			}
+			// The footer label is the abbreviation; if it is not shorter, one of them is
+			// doing the other's job.
+			if len(b.What) <= len(b.Footer) {
+				t.Errorf("%s: `%s` explains itself as %q, no longer than its label %q",
+					section.Title, b.Keys, b.What, b.Footer)
+			}
 		}
 	}
-	if input == nil {
-		t.Fatal("no `i` binding in the run section")
-	}
-	if input.Footer != "input" {
-		t.Errorf("footer label = %q", input.Footer)
-	}
-	if !strings.Contains(input.What, "cannot see the prompt") {
-		t.Errorf("what = %q", input.What)
+}
+
+// A binding kept out of the footer still has to be in the `?` screen, which is the only
+// place left that names it.
+func TestDemotedBindingsAreStillExplained(t *testing.T) {
+	for _, section := range Sections {
+		for _, b := range section.Bindings {
+			if b.Keys == "" || b.What == "" {
+				t.Errorf("%s: %+v is missing a key or an explanation", section.Title, b)
+			}
+		}
 	}
 }
 

@@ -3,7 +3,9 @@ package search
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/store"
@@ -202,4 +204,90 @@ func TestAVeryLongLineDoesNotTruncateTheSearch(t *testing.T) {
 	if results[0].Hits[0].LineNo != 2 {
 		t.Errorf("line numbering drifted: %d", results[0].Hits[0].LineNo)
 	}
+}
+
+// --- scoping the archive search -----------------------------------------------------------
+
+// Grepping every stored run is the right default and the wrong thing to do twice: once you
+// know it is `backend:test` that has been failing, every hit from every other task is
+// something to scroll past.
+func TestScopingTheSearchToOneTask(t *testing.T) {
+	base := t.TempDir()
+	archive(t, base, "/proj", 0, [][2]string{
+		{"a", "FAIL: TestOrderTotal"},
+		{"b", "FAIL: broken link"},
+	})
+
+	all, _ := InStore(base, mustQuery(t, "FAIL"), 50)
+	if hits := countHits(all); hits != 2 {
+		t.Fatalf("unscoped found %d hits, want 2", hits)
+	}
+
+	scoped, _ := InStoreScoped(base, mustQuery(t, "FAIL"), 50, Scope{Task: "a"})
+	if hits := countHits(scoped); hits != 1 {
+		t.Errorf("scoped found %d hits, want just the one task's", hits)
+	}
+	for _, r := range scoped {
+		for _, h := range r.Hits {
+			if h.Task != "a" {
+				t.Errorf("a hit from %q leaked in", h.Task)
+			}
+		}
+	}
+}
+
+func TestScopingTheSearchByAge(t *testing.T) {
+	base := t.TempDir()
+	archive(t, base, "/proj", 3*24*time.Hour, [][2]string{{"a", "FAIL old"}})
+	archive(t, base, "/proj", time.Hour, [][2]string{{"a", "FAIL new"}})
+
+	recent, _ := InStoreScoped(base, mustQuery(t, "FAIL"), 50, Scope{Since: time.Now().Add(-24 * time.Hour)})
+	if hits := countHits(recent); hits != 1 {
+		t.Fatalf("found %d hits, want only the recent one", hits)
+	}
+	if !strings.Contains(recent[0].Hits[0].Text, "new") {
+		t.Errorf("kept the wrong one: %q", recent[0].Hits[0].Text)
+	}
+}
+
+func TestScopingTheSearchToOneProject(t *testing.T) {
+	base := t.TempDir()
+	archive(t, base, "/proj", 0, [][2]string{{"a", "FAIL here"}})
+	archive(t, base, "/elsewhere", 0, [][2]string{{"a", "FAIL there"}})
+
+	mine, _ := InStoreScoped(base, mustQuery(t, "FAIL"), 50, Scope{Project: "/proj"})
+	if hits := countHits(mine); hits != 1 {
+		t.Errorf("found %d hits, want only this project's", hits)
+	}
+}
+
+// The zero Scope is what InStore has always done, and must stay that way.
+func TestAnEmptyScopeLooksAtEverything(t *testing.T) {
+	base := t.TempDir()
+	archive(t, base, "/proj", 0, [][2]string{{"a", "FAIL one"}, {"b", "FAIL two"}})
+
+	scoped, _ := InStoreScoped(base, mustQuery(t, "FAIL"), 50, Scope{})
+	unscoped, _ := InStore(base, mustQuery(t, "FAIL"), 50)
+	if countHits(scoped) != countHits(unscoped) {
+		t.Errorf("scoped %d, unscoped %d", countHits(scoped), countHits(unscoped))
+	}
+}
+
+// archive stores a finished run, aged so several in one test second get distinct ids.
+func archive(t *testing.T, base, project string, ago time.Duration, lines [][2]string) {
+	t.Helper()
+	r := runWith(lines)
+	r.Finish(1)
+	r.Duration, r.HasDuration = ago, true
+	if _, err := store.Save(base, project, r); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func countHits(runs []RunHits) int {
+	n := 0
+	for _, r := range runs {
+		n += len(r.Hits)
+	}
+	return n
 }

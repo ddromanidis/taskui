@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/viper"
 
@@ -191,5 +192,38 @@ func TestEditReportsAnEditorThatWillNotRun(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "could not run") {
 		t.Errorf("error = %q", err)
+	}
+}
+
+// --since takes the units people actually use for an archive; [time.ParseDuration] stops at
+// hours, and "two days ago" is the natural way to ask.
+func TestParseSince(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		want time.Duration
+	}{
+		{"90m", 90 * time.Minute},
+		{"2h", 2 * time.Hour},
+		{"2d", 48 * time.Hour},
+		{"3w", 21 * 24 * time.Hour},
+		{" 1d ", 24 * time.Hour},
+		{"", 0},
+	} {
+		got, err := parseSince(c.text)
+		if err != nil {
+			t.Errorf("%q: %v", c.text, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%q = %v, want %v", c.text, got, c.want)
+		}
+	}
+}
+
+func TestParseSinceRejectsNonsense(t *testing.T) {
+	for _, text := range []string{"banana", "-2d", "d", "2y", "-3h"} {
+		if _, err := parseSince(text); err == nil {
+			t.Errorf("%q was accepted", text)
+		}
 	}
 }

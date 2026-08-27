@@ -1,6 +1,8 @@
 package app
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -57,7 +59,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.PollWatch()
 		a.collectDetails()
 		a.refreshProfile()
-		return a, a.tick()
+		a.noteFinished()
+		return a, tea.Batch(a.tick(), a.ringBell())
 
 	case tea.KeyMsg:
 		if a.handleKey(fromTea(msg)) {
@@ -67,9 +70,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.PollRun()
 		a.PollWatch()
 		a.refreshProfile()
-		return a, a.launchEditor()
+		a.noteFinished()
+		return a, tea.Batch(a.launchEditor(), a.ringBell())
 	}
 	return a, nil
+}
+
+// ringBell writes a BEL, if one is owed.
+//
+// From a command rather than from the model: Update is the only place allowed to touch the
+// terminal, and a stray byte written mid-frame lands in the middle of whatever was being
+// drawn. BEL is safe to send inside the alternate screen — it moves no cursor and occupies
+// no cell — so what the terminal does with it, flash or beep or nothing, stays the
+// terminal's business.
+func (a *App) ringBell() tea.Cmd {
+	if !a.TakeBell() {
+		return nil
+	}
+	return func() tea.Msg {
+		fmt.Fprint(os.Stdout, "\a")
+		return nil
+	}
 }
 
 // launchEditor runs whatever `e` asked for, if anything.
@@ -901,6 +922,10 @@ func (a *App) handleRunKey(k Key) bool {
 	// came back green without having run anything.
 	case act() == keys.ForceRerun:
 		a.ForceRerunSelected()
+
+	// Everything that broke, at once. After a red `task all` this is the whole loop.
+	case act() == keys.RerunFailed:
+		a.RerunFailed()
 
 	// Re-run with different arguments.
 	case act() == keys.Args:

@@ -442,6 +442,8 @@ type Config struct {
 	PeekLines int
 	// Pivots are extra groupings from the config file, appended after the built-ins.
 	Pivots []pivot.Spec
+	// Bell is when to ring the terminal for a run you are not watching.
+	Bell BellMode
 	// Problems lists anything wrong with the file, surfaced in the UI rather than
 	// swallowed — a colour that silently does nothing is worse than one that says why.
 	Problems []string
@@ -452,6 +454,47 @@ func DefaultConfig() Config {
 		Theme:     DefaultTheme(),
 		Keymap:    keys.NewKeymap(),
 		PeekLines: DefaultPeekLines,
+		Bell:      BellUnwatched,
+	}
+}
+
+// BellMode says when a finished run should ring the terminal.
+type BellMode int
+
+const (
+	// BellUnwatched rings for a run that finishes while you are looking at something else.
+	// The default, and deliberately narrow: a run you are watching finish needs no bell, and
+	// the whole reason to want one is that you walked away from a long one.
+	BellUnwatched BellMode = iota
+	// BellNever is silence.
+	BellNever
+	// BellFailed rings only for the ones that broke.
+	BellFailed
+)
+
+func (b BellMode) String() string {
+	switch b {
+	case BellNever:
+		return "off"
+	case BellFailed:
+		return "failed"
+	default:
+		return "on"
+	}
+}
+
+// ParseBell reads the setting. Reported rather than guessed at: a bell that silently never
+// rings is indistinguishable from one that is broken.
+func ParseBell(text string) (BellMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "on", "true", "yes", "unwatched":
+		return BellUnwatched, true
+	case "off", "false", "no", "never":
+		return BellNever, true
+	case "failed", "failures":
+		return BellFailed, true
+	default:
+		return BellUnwatched, false
 	}
 }
 
@@ -638,6 +681,15 @@ func FromViper(v *viper.Viper) Config {
 	config.Problems = append(config.Problems, applyKeys(config.Keymap, v.GetStringMapString("keys"))...)
 	config.Problems = append(config.Problems, config.Keymap.Conflicts()...)
 
+	if v.IsSet("bell") {
+		if mode, ok := ParseBell(v.GetString("bell")); ok {
+			config.Bell = mode
+		} else {
+			config.Problems = append(config.Problems,
+				fmt.Sprintf("bell: %q is not on, off or failed", v.GetString("bell")))
+		}
+	}
+
 	pivots, problems := readPivots(v)
 	config.Pivots = pivots
 	config.Problems = append(config.Problems, problems...)
@@ -675,6 +727,9 @@ func DumpConfig() string {
 	b.WriteString("\n")
 	b.WriteString(DefaultGlyphs().ToYAML())
 	b.WriteString("\n")
+	b.WriteString("# Ring the terminal when a run finishes while you are looking at something else.\n")
+	b.WriteString("# `on`, `off`, or `failed` for only the ones that broke.\n")
+	b.WriteString("bell: on\n\n")
 	b.WriteString("# Rebind any action to a different single character.\n")
 	b.WriteString("# The same action keeps its meaning on every screen that offers it.\n")
 	b.WriteString("keys:\n")

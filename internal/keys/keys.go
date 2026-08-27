@@ -61,6 +61,7 @@ const (
 	Mark
 	ClearMarks
 	Detach
+	RerunFailed
 )
 
 type binding struct {
@@ -111,6 +112,7 @@ var defaults = []binding{
 	{Mark, 'm', "mark"},
 	{ClearMarks, 'M', "clear-marks"},
 	{Detach, 'A', "detach"},
+	{RerunFailed, 'F', "rerun-failed"},
 }
 
 var pickerActions = []Action{
@@ -149,6 +151,7 @@ var runActions = []Action{
 	ContextLess,
 	Rerun,
 	ForceRerun,
+	RerunFailed,
 	Args,
 	Stop,
 	StopAll,
@@ -366,12 +369,14 @@ var Picker = Section{
 		// is more use than the word "pivot" and would otherwise be printed twice.
 		b("p", "toggle the pivot: by domain / by verb"),
 		f("space o", "fold or unfold a group", "fold"),
-		b("⇧O ⇥", "fold or unfold everything"),
+		f("⇧O ⇥", "fold or unfold everything", "all"),
 		f("⏎", "run the task, or every marked one", "run"),
 		f("m", "mark a task to run alongside others", "mark"),
 		b("⇧M", "clear every mark"),
 		f("a", "run it with arguments", "args"),
-		f("i", "arm interactive mode for the next run", "interactive"),
+		// No footer label: arming a modifier for the next run is secondary to running one, and
+		// the footer is the one place where everything competes for the same line.
+		b("i", "arm interactive mode for the next run"),
 		b("⇧F", "arm --force: ignore go-task's up-to-date checks"),
 		f("/", "filter the list down to matching tasks", "filter"),
 		f("t", "jump to a task, leaving the list intact", "jump"),
@@ -396,7 +401,7 @@ var Run = Section{
 		b("gg G", "first / last row"),
 		b("^d ^u", "half a screen down / up"),
 		f("space o", "how much output: hidden, a peek at the last few lines, all of it", "fold"),
-		b("⇧O", "move every task through the same three states"),
+		f("⇧O", "move every task through the same three states", "all"),
 		f("/", "search the output", "search"),
 		// No footer label: like `[ ]`, it only means anything once a search is running, and
 		// the footer has to make room for the slot switcher.
@@ -407,8 +412,12 @@ var Run = Section{
 		b("[ ]", "less / more context around each hit"),
 		f("r", "re-run this task, same arguments", "rerun"),
 		b("⇧R", "the same, with --force — ignore go-task's up-to-date checks"),
-		f("a", "re-run it with different arguments", "args"),
-		f("i", "type at the running task — works even when you cannot see the prompt", "input"),
+		f("⇧F", "re-run everything in this run that failed, each in its own slot", "failed"),
+		b("a", "re-run it with different arguments"),
+		// No footer label: when a task actually is waiting, the run view says so in a bar of
+		// its own that names this key — which is the moment you need to be told, and the
+		// footer is not it.
+		b("i", "type at the running task — works even when you cannot see the prompt"),
 		b("⇧I", "re-run this task interactively, so prompts are visible"),
 		f("x", "stop the run — press it again to SIGKILL the group", "stop"),
 		b("⇧K", "stop every run, not just this one"),
@@ -455,7 +464,7 @@ var TimelineSection = Section{
 		f("⏎", "open that run", "open"),
 		f("⇧D", "what changed at this run — against the last one that went differently", "diff"),
 		b("?", "this screen"),
-		f("esc", "back", "back"),
+		f("esc", "back to wherever you opened this from", "back"),
 		b("q", "quit"),
 	},
 }
@@ -469,7 +478,7 @@ var DiffSection = Section{
 		f("[ ]", "less / more unchanged context", "context"),
 		f("e", "open the file:line under the cursor in $EDITOR", "edit"),
 		b("?", "this screen"),
-		f("esc", "back", "back"),
+		f("esc", "back to the run, or to the timeline", "back"),
 		b("q", "quit"),
 	},
 }
@@ -496,7 +505,7 @@ var DetailSection = Section{
 		f("⏎", "run it", "run"),
 		f("a", "run it with arguments", "args"),
 		f("e", "open this task's own definition in $EDITOR", "edit"),
-		f("s esc", "back", "back"),
+		f("s esc", "back to the picker", "back"),
 		b("q", "quit"),
 	},
 }

@@ -1123,11 +1123,21 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 		room := width - nameColumn - signalWidth - 2
 		if task.Desc != "" && room >= 12 {
 			chunks := wrap(task.Desc, room)
-			l = append(l,
-				plain(strings.Repeat(" ", max(1, nameColumn-used))),
-				styled(chunks[0], fg(t.Colors.Dim)),
-			)
-			used = nameColumn + utf8.RuneCountInString(chunks[0])
+			// A label wider than the column it was given pushes its description sideways and
+			// squeezes the signals off the end — which is how `✓ 9h ago` came out as `✓ 9h`.
+			// The domain pivot never hits this, because its labels are single segments; the
+			// verb and custom pivots show whole colon paths and hit it constantly. Where the
+			// name does not fit, it keeps the row to itself and the description starts on the
+			// next one, in the column it belongs to.
+			first := 0
+			if used <= nameColumn {
+				l = append(l,
+					plain(strings.Repeat(" ", max(1, nameColumn-used))),
+					styled(chunks[0], fg(t.Colors.Dim)),
+				)
+				used = nameColumn + utf8.RuneCountInString(chunks[0])
+				first = 1
+			}
 			// A wrapped description used to leave the guide column blank, which broke the
 			// run of branches in half: the eye follows the vertical down the list, and a
 			// task with a two-line description put a gap in it that read as the end of the
@@ -1139,7 +1149,7 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 				cont = " "
 			}
 			prefix := indent + cont + " "
-			for _, chunk := range chunks[1:] {
+			for _, chunk := range chunks[first:] {
 				extra = append(extra, line{
 					styled(prefix, fg(t.Colors.Faint)),
 					plain(strings.Repeat(" ", max(0, nameColumn-utf8.RuneCountInString(prefix)))),

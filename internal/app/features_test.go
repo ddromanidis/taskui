@@ -10,6 +10,7 @@ import (
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/ddromanidis/taskui/internal/theme"
 )
 
 // --- marks ---------------------------------------------------------------------------
@@ -389,5 +390,178 @@ func TestUpToDateComesFromTheListing(t *testing.T) {
 	}
 	if a.UpToDate("app:lint") {
 		t.Error("a task the listing says nothing about is not up to date")
+	}
+}
+
+// --- re-running what failed ------------------------------------------------------------
+
+// broken is a run of `all` where two of its three children failed.
+func broken(t *testing.T, a *App) {
+	t.Helper()
+	r := run.Detached("all", run.GraphFrom(
+		run.Edge{Parent: "all", Children: []string{"fmt", "lint", "test"}},
+	))
+	r.Feed("fmt", "formatted")
+	r.Feed("lint", "boom")
+	r.ApplyFailed("lint")
+	r.Feed("test", "boom too")
+	r.ApplyFailed("test")
+	r.Finish(1)
+	a.OpenRunForTest(r)
+	a.Screen = ScreenRun
+}
+
+// An aggregate is failed because its child was. Re-running the aggregate runs everything
+// again, which is precisely what this key exists to avoid.
+func TestTheFailuresAreTheTasksThatBrokeNotTheOnesBlamed(t *testing.T) {
+	a := appWith(t, []string{"all", "fmt", "lint", "test"})
+	broken(t, a)
+
+	got := a.FailedTasks()
+	want := map[string]bool{"lint": true, "test": true}
+	if len(got) != 2 {
+		t.Fatalf("got %v, want lint and test", got)
+	}
+	for _, name := range got {
+		if !want[name] {
+			t.Errorf("%q is not one of the tasks that broke", name)
+		}
+	}
+}
+
+func TestRerunFailedStartsEachInItsOwnSlot(t *testing.T) {
+	a := appWith(t, []string{"all", "fmt", "lint", "test"})
+	broken(t, a)
+	press(a, Char('F'))
+
+	roots := map[string]int{}
+	for _, s := range a.Slots() {
+		roots[s.Root]++
+	}
+	if roots["lint"] != 1 || roots["test"] != 1 {
+		t.Errorf("slots hold %v, want one each of lint and test", roots)
+	}
+	if roots["fmt"] != 0 {
+		t.Error("it restarted a task that passed")
+	}
+	// The original run keeps its slot; what must not happen is a *second* `all`, which is
+	// the whole pipeline again and the thing this key exists to avoid.
+	if roots["all"] != 1 {
+		t.Errorf("`all` occupies %d slots, want just the run it came from", roots["all"])
+	}
+}
+
+func TestRerunFailedOnAGreenRunSaysSo(t *testing.T) {
+	a := appWith(t, []string{"all", "fmt"})
+	r := run.Detached("all", run.GraphFrom(run.Edge{Parent: "all", Children: []string{"fmt"}}))
+	r.Feed("fmt", "fine")
+	r.Finish(0)
+	a.OpenRunForTest(r)
+	a.Screen = ScreenRun
+	press(a, Char('F'))
+
+	if !strings.Contains(a.Status, "nothing in") {
+		t.Errorf("status = %q", a.Status)
+	}
+}
+
+// `F` in the picker arms --force. The two are different actions on different screens, which
+// is what per-screen keymaps are for — but the run view must not have quietly inherited it.
+func TestFInThePickerStillArmsForce(t *testing.T) {
+	a := sample(t)
+	press(a, Char('F'))
+	if !a.ForceNext {
+		t.Error("F in the picker should arm --force")
+	}
+}
+
+// --- the bell ---------------------------------------------------------------------------
+
+// ringing builds an app with one run that is about to finish somewhere you are not looking.
+func ringing(t *testing.T, mode theme.BellMode, exit int) *App {
+	t.Helper()
+	a := sample(t)
+	a.Bell = mode
+	r := run.Detached("build", run.GraphFrom(run.Edge{Parent: "build"}))
+	r.Feed("build", "working")
+	a.OpenRunForTest(r)
+	a.Screen = ScreenPicker // looking at something else
+	a.noteFinished()        // not finished yet — nothing owed
+	r.Finish(exit)
+	return a
+}
+
+func TestARunThatFinishesWhileYouAreElsewhereRings(t *testing.T) {
+	a := ringing(t, theme.BellUnwatched, 0)
+	a.noteFinished()
+	if !a.TakeBell() {
+		t.Error("no bell for a run that finished off screen")
+	}
+}
+
+// A run you watched finish needs no announcing — you watched it. The whole reason to want a
+// bell is that you walked away from a long one.
+func TestARunYouAreWatchingDoesNotRing(t *testing.T) {
+	a := ringing(t, theme.BellUnwatched, 0)
+	a.Screen = ScreenRun
+	a.noteFinished()
+	if a.TakeBell() {
+		t.Error("it rang for a run that was on screen")
+	}
+}
+
+// A finished run stays finished. Polling it forty times a second is not forty pieces of news.
+func TestItRingsOnceNotOnEveryPoll(t *testing.T) {
+	a := ringing(t, theme.BellUnwatched, 0)
+	a.noteFinished()
+	if !a.TakeBell() {
+		t.Fatal("no first bell")
+	}
+	for range 5 {
+		a.noteFinished()
+	}
+	if a.TakeBell() {
+		t.Error("it rang again for the same run")
+	}
+}
+
+func TestBellOffIsSilent(t *testing.T) {
+	a := ringing(t, theme.BellNever, 1)
+	a.noteFinished()
+	if a.TakeBell() {
+		t.Error("it rang with the bell off")
+	}
+}
+
+func TestBellFailedOnlyRingsForFailures(t *testing.T) {
+	green := ringing(t, theme.BellFailed, 0)
+	green.noteFinished()
+	if green.TakeBell() {
+		t.Error("`failed` rang for a run that passed")
+	}
+
+	red := ringing(t, theme.BellFailed, 1)
+	red.noteFinished()
+	if !red.TakeBell() {
+		t.Error("`failed` did not ring for a run that failed")
+	}
+}
+
+func TestBellSettingParses(t *testing.T) {
+	for _, c := range []struct {
+		text string
+		want theme.BellMode
+	}{
+		{"on", theme.BellUnwatched}, {"true", theme.BellUnwatched},
+		{"off", theme.BellNever}, {"false", theme.BellNever}, {"never", theme.BellNever},
+		{"failed", theme.BellFailed}, {" FAILED ", theme.BellFailed},
+	} {
+		got, ok := theme.ParseBell(c.text)
+		if !ok || got != c.want {
+			t.Errorf("%q parsed to %v (ok=%v), want %v", c.text, got, ok, c.want)
+		}
+	}
+	if _, ok := theme.ParseBell("sometimes"); ok {
+		t.Error("a value it does not understand should be reported, not guessed at")
 	}
 }

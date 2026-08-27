@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/ddromanidis/taskui/internal/run"
 )
 
 // ToggleMark marks or unmarks the task under the cursor.
@@ -142,4 +144,73 @@ func (a *App) startMarked(names []string, room int) {
 	default:
 		a.Status = fmt.Sprintf("started %d %s", started, plural(started, "task", "tasks"))
 	}
+}
+
+// FailedTasks are the tasks of the run on screen that did not pass, in the order the run
+// reached them.
+func (a *App) FailedTasks() []string {
+	if a.Run == nil {
+		return nil
+	}
+	var out []string
+	for _, name := range a.Run.Order {
+		if t, ok := a.Run.Tasks[name]; ok && t.Status == run.Failed {
+			out = append(out, name)
+		}
+	}
+	// A parent is failed because its child was, and re-running the parent runs everything
+	// again — which is the thing this key exists to avoid. Only the tasks with no failed
+	// task under them are the ones that actually broke.
+	var leaves []string
+	for _, name := range out {
+		blamed := false
+		for _, child := range a.Run.Graph.Children(name) {
+			if t, ok := a.Run.Tasks[child]; ok && t.Status == run.Failed {
+				blamed = true
+				break
+			}
+		}
+		if !blamed {
+			leaves = append(leaves, name)
+		}
+	}
+	return leaves
+}
+
+// RerunFailed starts everything in this run that broke, each in its own slot.
+//
+// The tightest loop there is after a big red run: `task all` fails in three places, you fix
+// them, and what you want is those three — not the whole pipeline again, and not three trips
+// back through the tree. The run already knows exactly which they were.
+//
+// It starts the tasks that actually failed rather than the ones merely reported as failing:
+// an aggregate is failed because its child was, and re-running the aggregate would run
+// everything, which is what this exists to avoid.
+func (a *App) RerunFailed() {
+	if a.Run == nil {
+		a.Status = "no run to take the failures from"
+		return
+	}
+	failed := a.FailedTasks()
+	if len(failed) == 0 {
+		if a.Run.Finished() && a.Run.Exit == 0 {
+			a.Status = "nothing in `" + a.Run.Command() + "` failed"
+		} else {
+			a.Status = "nothing has failed yet"
+		}
+		return
+	}
+
+	room := MaxSlots - a.openSlots()
+	for _, name := range failed {
+		if a.liveSlot(name) {
+			room++
+		}
+	}
+	if room <= 0 {
+		a.Status = fmt.Sprintf("every slot is taken — ⇧X closes one (%s failed)",
+			plural(len(failed), "1 task", fmt.Sprintf("%d tasks", len(failed))))
+		return
+	}
+	a.startMarked(failed, room)
 }

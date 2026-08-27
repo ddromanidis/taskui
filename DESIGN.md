@@ -638,6 +638,46 @@ a filter does not spawn a process. And it is bounded by a timeout, because a hun
 would hang the UI with it. A program that is missing, fails, or times out pools everything
 into `(other)`: a grouping that cannot answer should leave a usable list, not an empty one.
 
+## Four small things
+
+**Completion that completes something.** cobra hands over `taskui completion zsh` for free,
+and what it hands over completes flag names — which you can already read in `--help`. The
+hundred task names in somebody else's Taskfile are the part you cannot, and discovery is
+already a function. Wiring it up found its own bug immediately: Go runs a package's init
+functions in file-name order, so `completion.go` ran before `root.go` had registered any
+flags, and `RegisterFlagCompletionFunc` against a flag that does not exist yet fails. Silently,
+if you let it — a completion that offers nothing looks exactly like a shell that has none.
+
+**Re-running what failed.** After a red `task all` you want the three tasks that broke, not
+the pipeline. The subtlety is that an aggregate is *reported* as failed because its child
+was, so the naive reading of the status map re-runs everything — which is the thing the key
+exists to avoid. Only the tasks with no failed task beneath them actually broke.
+
+**A bell.** A run finishing while you are elsewhere changes a column and nothing else. The
+rule is narrow on purpose: it rings only for a run that ended while you were *not* watching
+it, because a run you watched finish needs no announcing, and the whole reason to want one is
+that you walked away. It rings once per run — a finished run stays finished, and polling it
+forty times a second is not forty pieces of news. The byte goes out from a Bubble Tea command
+rather than from the model: Update is the only thing allowed to touch the terminal, and a
+stray write lands in the middle of a frame.
+
+**Scoping the archive search.** Grepping every stored run is the right default and the wrong
+thing to do twice. `--task` and `--since` were already answerable from the manifests, which
+carry the task name and the start time.
+
+### A column that only one pivot could keep
+
+The picker gives a task's label seventeen columns and its description everything after. The
+domain pivot never tests that, because its labels are single segments — `check`, `migrate`.
+The verb and custom pivots show whole colon paths, and `backend:migrate:control:check` is
+twenty-nine, so the description started wherever the name happened to end and the signals
+were squeezed off the end of the row: `✓ 9h ago` rendered as `✓ 9h`.
+
+A name that does not fit keeps the row to itself now, and its description starts on the next
+one in the column it belongs to — reusing the continuation rows that a wrapped description
+already had. Every description starts in the same place again, which is the entire reason
+there is a column.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
@@ -648,6 +688,10 @@ into `(other)`: a grouping that cannot answer should leave a usable list, not an
 - A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
   this", which the domain tree gets wrong for `sec:*` and `wt:*`.
 - An explicit production marker in the Taskfile to replace the `⚠` heuristic.
+- Shift+space, or any other modified key, as a binding. Terminals send the same byte for
+  space and shift+space; telling them apart needs the kitty keyboard protocol, which Bubble
+  Tea v1 does not decode. Fold-everything lives on `⇧O` and `⇥`, which now say so in the
+  footer — the request was really a discoverability bug.
 - Diffing two runs of a task that are not adjacent — the timeline can only compare a run
   with the one below it, and "against the run from before the refactor" needs a mark.
 - Normalising timestamps and durations out of a diff. Today they show as changes, because

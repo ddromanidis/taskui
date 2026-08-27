@@ -57,6 +57,8 @@ type options struct {
 	timeline   string
 	diffTask   string
 	flaky      bool
+	searchTask string
+	since      string
 	keys       string
 	themeName  string
 	listThemes bool
@@ -81,6 +83,7 @@ and search afterwards — live and across previous runs.`,
 	Example: `  taskui                        browse the Taskfile here
   taskui ~/src/myrepo           …or somewhere else
   taskui --search 'FAIL|error'  grep every stored run, from anywhere
+  taskui --search FAIL --task test --since 2d
   taskui --run all              run headlessly and print the captured tree
   taskui --timeline test        how ` + "`test`" + ` has been going, run after run
   taskui --diff test            what changed since ` + "`test`" + ` last passed
@@ -131,7 +134,7 @@ func init() {
 
 	f := rootCmd.Flags()
 	f.BoolVar(&opts.list, "list", false, "print the tasks and exit — useful for checking discovery without a terminal")
-	f.StringVar(&opts.dump, "dump", "", "print a pivot fully expanded and exit: domain|verb")
+	f.StringVar(&opts.dump, "dump", "", "print a pivot fully expanded and exit: domain|verb|file|…")
 	f.StringVar(&opts.graph, "graph", "", "print the execution graph reachable from a task and exit")
 	f.StringVar(&opts.runTask, "run", "", "run a task headlessly and print the captured tree")
 	f.StringVar(&opts.screenshot, "screenshot", "", "render one frame to stdout and exit, e.g. 90x30")
@@ -148,6 +151,8 @@ func init() {
 	f.StringVar(&opts.timeline, "timeline", "", "print how one task has gone, run after run")
 	f.StringVar(&opts.diffTask, "diff", "", "print what changed in one task since it last passed")
 	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
+	f.StringVar(&opts.searchTask, "task", "", "narrow --search to one task's output")
+	f.StringVar(&opts.since, "since", "", "narrow --search to runs newer than this: 90m, 2d, 3w")
 	f.StringVar(
 		&opts.keys,
 		"keys",
@@ -172,6 +177,9 @@ func init() {
 	)
 
 	rootCmd.SetVersionTemplate("taskui {{.Version}}\n")
+
+	// Last, because it needs every flag above to exist.
+	registerCompletions()
 }
 
 // initConfig points Viper at the config file and binds `TASKUI_*` to the same keys.
@@ -223,7 +231,15 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	// Searching the archive reads stored runs, not the project — it must work from
 	// anywhere, including a directory with no Taskfile in it.
 	if opts.searchFor != "" {
-		return searchStored(opts.searchFor)
+		scope := search.Scope{Task: opts.searchTask}
+		if opts.since != "" {
+			ago, err := parseSince(opts.since)
+			if err != nil {
+				return err
+			}
+			scope.Since = time.Now().Add(-ago)
+		}
+		return searchStored(opts.searchFor, scope)
 	}
 
 	// Like --search, these read the archive rather than the project — but unlike it they
@@ -319,16 +335,23 @@ func listThemes(cmd *cobra.Command) error {
 }
 
 // searchStored greps every stored run, newest first, grouped by run and task.
-func searchStored(pattern string) error {
+func searchStored(pattern string, scope search.Scope) error {
 	base := store.StateDir()
 	query, err := search.NewQuery(pattern)
 	if err != nil {
 		return err
 	}
-	results, dropped := search.InStore(base, query, 50)
+	results, dropped := search.InStoreScoped(base, query, 50, scope)
 
 	if len(results) == 0 {
-		fmt.Printf("no matches for /%s/ in %d stored runs\n", pattern, len(store.List(base)))
+		where := ""
+		if scope.Task != "" {
+			where += " in `" + scope.Task + "`"
+		}
+		if !scope.Since.IsZero() {
+			where += " since " + scope.Since.Format("2006-01-02 15:04")
+		}
+		fmt.Printf("no matches for /%s/%s in %d stored runs\n", pattern, where, len(store.List(base)))
 		return nil
 	}
 
@@ -360,15 +383,14 @@ func searchStored(pattern string) error {
 
 func dumpPivot(mode string, pivots []pivot.Pivot, tasks []task.Task) error {
 	var chosen pivot.Pivot
-	var names []string
 	for _, p := range pivots {
-		names = append(names, p.Name)
 		if p.Name == mode {
 			chosen = p
 		}
 	}
 	if chosen.Name == "" {
-		return fmt.Errorf("--dump expects one of %s, not %q", strings.Join(names, ", "), mode)
+		return fmt.Errorf("--dump expects one of %s, not %q",
+			strings.Join(pivotNamesFor(pivots), ", "), mode)
 	}
 
 	all := make([]int, len(tasks))
@@ -522,6 +544,40 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// parseSince reads a span. Go's own durations plus the units people actually use for an
+// archive: `2d` and `3w` are the natural way to say how far back to look, and
+// [time.ParseDuration] stops at hours.
+func parseSince(text string) (time.Duration, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return 0, nil
+	}
+	unit := trimmed[len(trimmed)-1]
+	scale := time.Duration(0)
+	switch unit {
+	case 'd':
+		scale = 24 * time.Hour
+	case 'w':
+		scale = 7 * 24 * time.Hour
+	}
+	if scale > 0 {
+		n, err := strconv.Atoi(strings.TrimSpace(trimmed[:len(trimmed)-1]))
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("--since %q: expected a number before %q", text, string(unit))
+		}
+		return time.Duration(n) * scale, nil
+	}
+
+	d, err := time.ParseDuration(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("--since %q: try 90m, 2d or 3w", text)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("--since %q: cannot look forwards", text)
+	}
+	return d, nil
 }
 
 // ago is a rough "how long back", for the headless output. The TUI has its own; this one

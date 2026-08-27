@@ -183,6 +183,7 @@ taskui --dump domain|verb     # print a pivot fully expanded and exit
 taskui --graph all            # print the execution graph reachable from a task
 taskui --run all              # run headlessly and print the captured tree
 taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
+taskui --search FAIL --task backend:test --since 2d
 taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
 taskui --flaky                # tasks that went both ways at one commit
@@ -242,6 +243,7 @@ In a run:
 | `[` `]` | less / more context around each hit |
 | `r` | re-run the task under the cursor |
 | `⇧R` | the same, with `--force` |
+| `⇧F` | re-run everything in this run that failed, each in its own slot |
 | `a` | re-run with different arguments |
 | `i` | answer the task, or re-run it interactively |
 | `x` | stop the run (again to kill it) |
@@ -473,6 +475,55 @@ What it cannot do is keep showing you the output: once taskui is gone the pty is
 everything printed after that is lost. Which is why detaching archives what it has at that
 moment — otherwise a two-hour run leaves nothing behind.
 
+## Odds and ends that turned out to matter
+
+### Completion
+
+```
+taskui completion zsh > "${fpath[1]}/_taskui"     # or bash, fish, powershell
+```
+
+cobra gives the command away free and what it gives away completes *flag names* — the half
+you did not need, since `--help` lists them. The values are the useful part, and taskui
+already knows how to discover them: `--run`, `--graph`, `--timeline` and `--diff` complete
+task names from the Taskfile in the current directory, with their descriptions; `--dump`
+completes pivot names including any your config added; `--theme` completes themes.
+
+### Re-running what failed
+
+`⇧F` in a run starts everything in it that broke, each in its own slot. After a red
+`task all` that is the whole loop: you do not want the pipeline again, and you do not want
+three trips back through the tree.
+
+It starts the tasks that *actually* failed, not the ones merely reported as failing — an
+aggregate is failed because its child was, and re-running the aggregate would run
+everything, which is the thing this exists to avoid.
+
+### Being told when it is done
+
+A run that finishes while you are looking at something else rings the terminal:
+
+```yaml
+bell: on        # or `off`, or `failed` for only the ones that broke
+```
+
+Deliberately narrow. A run you watched finish needs no announcing — you watched it — and the
+whole reason to want a bell is that you left a long one going and went to read something.
+Each run rings once; what your terminal does with the BEL, flash or beep or nothing, stays
+your terminal's business.
+
+### Narrowing the archive search
+
+`--search 'FAIL'` greps every stored run, which is the right default and the wrong thing to
+do twice. Once you know which task has been failing:
+
+```
+taskui --search 'FAIL' --task backend:test --since 2d
+```
+
+`--since` takes Go durations plus the units an archive actually gets asked about — `2d`,
+`3w`.
+
 ## Pivots
 
 Grouping is a pivot, not a set of bespoke views: one flat list of tasks plus a key
@@ -628,6 +679,7 @@ shows. All of it lives in one optional file at `~/.config/taskui/config.yaml`
 file is the normal case rather than an error.
 
 ```
+taskui completion zsh  # shell completion — and it completes task names, not just flags
 taskui config          # where it is, and whether anything is there yet
 taskui config edit     # open it in $EDITOR, creating it from the defaults first
 taskui config init     # just create it

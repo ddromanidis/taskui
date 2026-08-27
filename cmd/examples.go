@@ -49,9 +49,10 @@ Every frame is real output: the sample project below is built in memory and draw
 same renderer the live UI uses, at your terminal's width and in your theme.
 
 With no topic, every example is printed. Name one to see just that.`,
-	Args:          cobra.MaximumNArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Args:              cobra.MaximumNArgs(1),
+	ValidArgsFunction: completeExamples,
+	SilenceUsage:      true,
+	SilenceErrors:     true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out := cmd.OutOrStdout()
 		width := exampleWidth()

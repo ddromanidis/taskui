@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/store"
@@ -122,15 +123,49 @@ type RunHits struct {
 // maxPerRun caps how much of a single noisy run can crowd out the others; the count of
 // what was dropped is reported so a truncated result never reads as a complete one.
 func InStore(base string, q *Query, maxPerRun int) ([]RunHits, int) {
+	return InStoreScoped(base, q, maxPerRun, Scope{})
+}
+
+// Scope narrows what InStore looks at. The zero value looks at everything, which is what
+// InStore has always done.
+type Scope struct {
+	// Task keeps only this task's output. `backend:test` rather than every task of every run
+	// that happened to contain it.
+	Task string
+	// Project keeps only runs from one directory.
+	Project string
+	// Since keeps only runs no older than this. Zero means no limit.
+	Since time.Time
+}
+
+func (s Scope) keeps(m store.Manifest) bool {
+	if s.Project != "" && m.Dir != s.Project {
+		return false
+	}
+	if !s.Since.IsZero() && time.Unix(m.StartedUnix, 0).Before(s.Since) {
+		return false
+	}
+	return true
+}
+
+// InStoreScoped is InStore with the search narrowed.
+//
+// Grepping every stored run is the right default and the wrong thing to do twice. Once you
+// know it is `backend:test` that has been failing, every hit from every other task is
+// something to scroll past — and the manifests already hold the task name and the time.
+func InStoreScoped(base string, q *Query, maxPerRun int, scope Scope) ([]RunHits, int) {
 	var out []RunHits
 	dropped := 0
 
 	for _, manifest := range store.List(base) {
+		if !scope.keeps(manifest) {
+			continue
+		}
 		dir := store.RunDir(base, manifest.ID)
 		var hits []StoredHit
 
 		for _, entry := range manifest.Tasks {
-			if entry.Lines == 0 {
+			if entry.Lines == 0 || (scope.Task != "" && entry.Name != scope.Task) {
 				continue
 			}
 			// The `.txt` sidecar, not `.ansi`: searching escape sequences is how you miss

@@ -247,6 +247,15 @@ type App struct {
 	Run *run.Run
 	// Parked holds runs that are open but not on screen, still going.
 	Parked []Parked
+	// Bell says when a finished run should ring the terminal.
+	Bell theme.BellMode
+	// belled remembers which slots have already rung, so a run that stays finished does not
+	// ring on every poll.
+	belled map[uint64]bool
+	// pendingBell is collected by Update, which is the only place that may write to the
+	// terminal — the model itself must not, or the byte lands in the middle of a frame.
+	pendingBell bool
+
 	// detached marks the slots quitting will leave alone. Keyed by slot rather than held on
 	// the run, so the decision survives switching focus and parking.
 	detached map[uint64]bool
@@ -558,6 +567,56 @@ func (a *App) UpToDate(name string) bool {
 	return ok && d.UpToDate
 }
 
+// TakeBell reports whether the terminal should be rung, and clears the request.
+func (a *App) TakeBell() bool {
+	ring := a.pendingBell
+	a.pendingBell = false
+	return ring
+}
+
+// noteFinished rings for a run that ended while you were looking at something else.
+//
+// Narrow on purpose. A run you watched finish does not need announcing — you watched it —
+// and the whole reason to want a bell is that you left a long one going and went to read
+// something. Each slot rings once: a finished run stays finished, and polling it forty times
+// a second is not forty pieces of news.
+func (a *App) noteFinished() {
+	if a.Bell == theme.BellNever {
+		return
+	}
+	if a.belled == nil {
+		a.belled = map[uint64]bool{}
+	}
+	for _, slot := range a.Slots() {
+		r := a.runInSlot(slot.Seq)
+		if r == nil || !r.Finished() || a.belled[slot.Seq] {
+			continue
+		}
+		a.belled[slot.Seq] = true
+		// Watching it happen is not news.
+		if a.Screen == ScreenRun && a.FocusSeq == slot.Seq {
+			continue
+		}
+		if a.Bell == theme.BellFailed && r.Exit == 0 {
+			continue
+		}
+		a.pendingBell = true
+	}
+}
+
+// runInSlot is whichever run occupies a slot, focused or parked.
+func (a *App) runInSlot(seq uint64) *run.Run {
+	if a.FocusSeq == seq {
+		return a.Run
+	}
+	for _, p := range a.Parked {
+		if p.Seq == seq {
+			return p.Run
+		}
+	}
+	return nil
+}
+
 // StateDir is where this app archives its runs.
 func (a *App) StateDir() string { return a.stateDir }
 
@@ -577,6 +636,7 @@ func (a *App) WithConfig(config theme.Config) *App {
 	a.Theme = config.Theme
 	a.Keymap = config.Keymap
 	a.PeekLines = config.PeekLines
+	a.Bell = config.Bell
 	// Custom groupings go after the built-ins, in the order they were written — `p` cycles
 	// through them, so the order in the file is the order at the keyboard.
 	for _, spec := range config.Pivots {

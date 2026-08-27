@@ -818,3 +818,58 @@ func TestTheOutcomeColumnDoesNotMoveForAGroupsCount(t *testing.T) {
 		}
 	}
 }
+
+// A label wider than the column it was given used to push its description sideways and
+// squeeze the signals off the end — `✓ 9h ago` came out as `✓ 9h`. The domain pivot never
+// hits it; the verb and custom pivots show whole colon paths and hit it constantly.
+func TestALongLabelKeepsItsRowAndItsSignals(t *testing.T) {
+	a := appWith(t, []string{"backend:migrate:control:check", "short"})
+	a.Tasks[0].Desc = "Control: history integrity and drift proof"
+	a.Tasks[1].Desc = "A short one"
+	a.Outcomes = map[string]store.Outcome{
+		"backend:migrate:control:check": {Ok: true, WhenUnix: time.Now().Add(-9 * time.Hour).Unix()},
+	}
+	a.SetPivot(pivot.VerbName)
+	a.SetFoldAll(true)
+	lines := a.RenderHeadless(96, 20)
+	page := strings.Join(lines, "\n")
+
+	// The signal survives in full rather than being clipped by the overhanging name.
+	if !strings.Contains(page, "9h ago") {
+		t.Errorf("the outcome was squeezed off the end:\n%s", page)
+	}
+	// The long name's own row carries no description; the description is on the next one.
+	for i, l := range lines {
+		if !strings.Contains(l, "backend:migrate:control:check") {
+			continue
+		}
+		if strings.Contains(l, "Control: history") {
+			t.Errorf("the description is still crammed onto the label's row: %q", l)
+		}
+		if i+1 < len(lines) && !strings.Contains(lines[i+1], "Control: history") {
+			t.Errorf("the description did not move to the next row: %q", lines[i+1])
+		}
+		break
+	}
+}
+
+// Wherever it lands, a description starts in the same column. That is the whole reason the
+// column exists.
+func TestEveryDescriptionStartsInOneColumn(t *testing.T) {
+	a := appWith(t, []string{"backend:migrate:control:check", "api:lint", "short"})
+	for i := range a.Tasks {
+		a.Tasks[i].Desc = "A description long enough to be worth reading"
+	}
+	a.SetPivot(pivot.VerbName)
+	a.SetFoldAll(true)
+
+	columns := map[int]bool{}
+	for _, l := range a.RenderHeadless(96, 20) {
+		if before, _, ok := strings.Cut(l, "A description"); ok {
+			columns[utf8.RuneCountInString(before)] = true
+		}
+	}
+	if len(columns) != 1 {
+		t.Errorf("descriptions start in %d different columns: %v", len(columns), columns)
+	}
+}
