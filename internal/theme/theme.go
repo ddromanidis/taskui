@@ -661,7 +661,10 @@ func FromViper(v *viper.Viper) Config {
 // DumpConfig is the whole annotated file `--dump-config` prints.
 func DumpConfig() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# taskui config. Drop this at %s\n", ConfigPath())
+	// Names the path rather than telling you to put it there: this text is now both what
+	// `--dump-config` prints and what `config init` writes *to* that path, and "drop this
+	// at X" reads oddly in a file that is already X.
+	fmt.Fprintf(&b, "# taskui config — %s\n", ConfigPath())
 	fmt.Fprintf(&b, "# Pick a look with `theme:`. Available: %s\n", strings.Join(ListThemes(), ", "))
 	fmt.Fprintf(&b, "theme: %s\n\n", DefaultThemeName)
 	b.WriteString("# Every key is optional; anything absent keeps its default.\n")

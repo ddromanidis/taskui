@@ -186,6 +186,7 @@ taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
 taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
 taskui --flaky                # tasks that went both ways at one commit
+taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
 ```
 
@@ -619,6 +620,24 @@ Three things are yours: what it looks like, what the keys do, and how much outpu
 shows. All of it lives in one optional file at `~/.config/taskui/config.yaml`
 (`$XDG_CONFIG_HOME/taskui/config.yaml` if that is set, or `--config PATH`), and a missing
 file is the normal case rather than an error.
+
+```
+taskui config          # where it is, and whether anything is there yet
+taskui config edit     # open it in $EDITOR, creating it from the defaults first
+taskui config init     # just create it
+taskui config path     # the path and nothing else, for scripts
+```
+
+`config edit` writes the annotated defaults before opening, because an editor on an empty
+buffer is a worse starting point than one showing every setting there is. It never
+overwrites a file you already have — `--force` is the way to say you meant it.
+
+A subcommand rather than a valueless `--config`, which is the one thing no tool does:
+`--config` takes a path everywhere, and making its value optional means
+`taskui --config my.yaml` parses as `--config` plus a positional `my.yaml`, opening an
+editor and then browsing a Taskfile in a directory named after your config file. `git config
+--edit`, `npm config edit` and `crontab -e` all put the verb where it cannot be mistaken for
+a path.
 
 ```yaml
 theme: synthwave
