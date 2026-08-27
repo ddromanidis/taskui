@@ -168,6 +168,87 @@ tasks:
   #########################################################################################
   #                                      RELEASING
   #########################################################################################
+  release:version:
+    desc: "What version the binary would claim right now"
+    cmds:
+      - 'echo "{{.VERSION}}  (commit {{.COMMIT}})"'
+      - 'echo "last tag: $(git describe --tags --abbrev=0 2>/dev/null || echo none)"'
+    silent: true
+
+  release:notes:
+    desc: "What would go in the changelog — every commit since the last tag"
+    cmds:
+      - |
+        last=$(git describe --tags --abbrev=0 2>/dev/null)
+        if [ -z "$last" ]; then
+          echo "no tags yet — everything is new"
+          git log --oneline
+        else
+          echo "since $last:"
+          git log --oneline "$last..HEAD"
+        fi
+    silent: true
+
+  release:tag:
+    desc: "Cut a version: check, tag and push (VERSION=v0.3.0) — this publishes"
+    requires: { vars: [VERSION] }
+    cmds:
+      # The tag is the version. There is no file to bump: goreleaser reads the tag, and the
+      # Taskfile stamps `git describe` into the binary, so a VERSION file would be a second
+      # answer to a question that already has one — and the two would disagree the first
+      # time someone edited only one of them.
+      - task: release:guard
+        vars: { VERSION: '{{.VERSION}}' }
+      - task: all
+      - 'git tag -a {{.VERSION}} -m "{{.VERSION}}"'
+      - 'git push origin {{.VERSION}}'
+      - |
+        echo
+        echo "pushed {{.VERSION}} — the Release workflow is building it now:"
+        echo "  https://github.com/ddromanidis/taskui/actions/workflows/release.yml"
+        echo
+        echo "if it goes wrong, take the tag back before anyone fetches it:"
+        echo "  task release:untag VERSION={{.VERSION}}"
+
+  release:guard:
+    desc: "The checks release:tag runs before it publishes anything"
+    requires: { vars: [VERSION] }
+    silent: true
+    cmds:
+      - |
+        set -eu
+        case "{{.VERSION}}" in
+          v[0-9]*.[0-9]*.[0-9]*) ;;
+          *) echo "✗ {{.VERSION}} is not vMAJOR.MINOR.PATCH" >&2; exit 1 ;;
+        esac
+        # A tag names a commit, so the commit had better be the one you think it is.
+        test -z "$(git status --porcelain)" \
+          || { echo "✗ working tree is dirty — commit or stash first" >&2; exit 1; }
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        test "$branch" = "main" \
+          || { echo "✗ on $branch, not main" >&2; exit 1; }
+        git fetch --quiet origin main
+        test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" \
+          || { echo "✗ main and origin/main have diverged — push or pull first" >&2; exit 1; }
+        # Reusing a tag is the one mistake that cannot be quietly undone: anyone who already
+        # fetched it keeps the old commit, and their build and yours disagree forever.
+        ! git rev-parse -q --verify "refs/tags/{{.VERSION}}" >/dev/null \
+          || { echo "✗ {{.VERSION}} already exists locally" >&2; exit 1; }
+        test -z "$(git ls-remote --tags origin 'refs/tags/{{.VERSION}}')" \
+          || { echo "✗ {{.VERSION}} already exists on the remote" >&2; exit 1; }
+        last=$(git describe --tags --abbrev=0 2>/dev/null || echo none)
+        echo "✓ {{.VERSION}} — $last → {{.VERSION}}, $(git rev-list --count "$last"..HEAD 2>/dev/null || git rev-list --count HEAD) commits"
+
+  release:untag:
+    desc: "Take back a tag that has just been pushed (VERSION=v0.3.0)"
+    requires: { vars: [VERSION] }
+    cmds:
+      # Only useful in the minutes before anyone fetches it. After that the version is
+      # spent: cut the next patch instead.
+      - 'git tag -d {{.VERSION}}'
+      - 'git push origin :refs/tags/{{.VERSION}}'
+      - 'gh release delete {{.VERSION}} --repo ddromanidis/taskui --yes || true'
+
   release:check:
     desc: "Validate .goreleaser.yaml without building anything"
     cmds:

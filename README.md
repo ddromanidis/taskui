@@ -737,28 +737,49 @@ internal/app          state, key handling, rendering
 project's own `task all` — the tool exists to run Taskfiles, so running its own is a test
 of both.
 
-`release.yml` fires on a `v*` tag: it builds binaries for `aarch64-apple-darwin`,
-`x86_64-apple-darwin` and `x86_64-unknown-linux-gnu`, attaches them to the release with
-checksums, hashes the source tarball, and updates the Homebrew formula to point at the new
-tag.
+`release.yml` fires on a `v*` tag. goreleaser builds darwin and linux binaries for amd64
+and arm64, runs the test suite before it builds anything, attaches the archives and their
+checksums to the GitHub release, and writes a Homebrew cask into `ddromanidis/homebrew-tap`.
 
 That last step pushes to a *different* repository, which the default workflow token cannot
-do. It needs a `TAP_TOKEN` secret — a fine-grained personal access token with contents
-write on `ddromanidis/homebrew-tap`:
+do. It needs a `HOMEBREW_TAP_GITHUB_TOKEN` secret — a fine-grained personal access token
+with contents write on `ddromanidis/homebrew-tap`:
 
 ```
-gh secret set TAP_TOKEN --repo ddromanidis/taskui
+gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo ddromanidis/taskui
 ```
 
-Without it the release still succeeds and prints the two lines to change by hand. A
-release going red because an optional convenience is unset would be worse than doing it
-manually.
+Without it the cask step skips itself and the release still succeeds. A release going red
+because an optional convenience is unset would be worse than publishing the cask by hand.
 
-So cutting a release is:
+### Cutting one
+
+The tag *is* the version. There is no file to bump: goreleaser reads the tag, and the
+Taskfile stamps `git describe` into the binary — a `VERSION` file would be a second answer
+to a question that already has one, and the two would disagree the first time someone
+edited only one of them.
 
 ```
-git tag -a v0.2.0 -m "taskui v0.2.0" && git push origin v0.2.0
+task release:version            # what the binary would call itself right now
+task release:notes              # every commit since the last tag
+task release:tag VERSION=v0.3.0 # check, tag, push — this publishes
 ```
+
+`release:tag` refuses before it does anything irreversible. The version has to be
+`vMAJOR.MINOR.PATCH`, the tree has to be clean, you have to be on `main`, `main` has to
+match `origin/main`, the tag must not already exist locally or on the remote, and `task all`
+has to pass. Reusing a tag is the one mistake that cannot be quietly undone — anyone who
+already fetched it keeps the old commit, and their build and yours disagree forever.
+
+If the release goes wrong in the first few minutes:
+
+```
+task release:untag VERSION=v0.3.0
+```
+
+That deletes the tag locally and remotely and removes the GitHub release. It is only useful
+before anyone has fetched it; after that the version is spent and the answer is to cut the
+next patch.
 
 ## Design notes
 
