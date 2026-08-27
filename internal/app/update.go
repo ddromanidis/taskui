@@ -27,6 +27,12 @@ func (a *App) tick() tea.Cmd {
 	if a.AnyInFlight() {
 		d = liveTick
 	}
+	// A theme that animates needs a frame on its own schedule, and the poll loop is
+	// already the thing that wakes up — so it wakes up a little more often rather than a
+	// second timer racing it.
+	if step := a.Theme.Animation.Interval; a.Theme.Animation.Moves() && step < d {
+		d = step
+	}
 	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{} })
 }
 
@@ -39,6 +45,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tickMsg:
+		if a.Theme.Animation.Moves() {
+			a.Phase++
+		}
 		a.PollRun()
 		a.PollWatch()
 		return a, a.tick()

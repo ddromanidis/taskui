@@ -40,3 +40,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Writing the cask into ddromanidis/homebrew-tap needs a token for *that*
+          # repository; the one above is scoped to this one.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

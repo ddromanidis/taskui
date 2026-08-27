@@ -125,6 +125,37 @@ tasks:
       - go run . --graph '{{.TASK}}'
 
   #########################################################################################
+  #                                       THEMES
+  #########################################################################################
+  themes:
+    desc: "List every theme, built-in and yours"
+    cmds:
+      - go run . --list-themes
+    silent: true
+
+  theme:
+    desc: 'Preview a theme in colour (THEME=90s)'
+    requires: { vars: [THEME] }
+    cmds:
+      - go run . --theme '{{.THEME}}' --screenshot 92x22 --keys O --colour .
+      - go run . --theme '{{.THEME}}' --run ci --screenshot 92x18 --colour ./probe
+    deps: [probe:make]
+    silent: true
+
+  theme:new:
+    desc: 'Start a theme of your own from an existing one (NAME=mine FROM=default)'
+    requires: { vars: [NAME] }
+    vars:
+      FROM: '{{.FROM | default "default"}}'
+      DIR:
+        sh: 'echo "${XDG_CONFIG_HOME:-$HOME/.config}/taskui/themes"'
+    cmds:
+      - mkdir -p '{{.DIR}}'
+      - go run . --dump-theme '{{.FROM}}' > '{{.DIR}}/{{.NAME}}.yaml'
+      - 'echo "wrote {{.DIR}}/{{.NAME}}.yaml — edit it, then: taskui --theme {{.NAME}}"'
+    silent: true
+
+  #########################################################################################
   #                                      RELEASING
   #########################################################################################
   release:check:

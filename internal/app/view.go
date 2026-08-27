@@ -15,13 +15,6 @@ import (
 	"github.com/ddromanidis/taskui/internal/theme"
 )
 
-// gutter is the width of the line-number column in the run view.
-const gutter = 5
-
-// minColumn is the narrowest picker column worth splitting into: a task name plus enough
-// description to be worth reading. Below this, one wide column beats two cramped ones.
-const minColumn = 46
-
 // minRunColumn is the same for output, which needs more width than a task name does, so it
 // splits later than the picker.
 const minRunColumn = 60
@@ -51,6 +44,14 @@ func (a *App) View() string {
 	if slotBar && left > 0 {
 		slotsH = 1
 		left--
+	}
+	// The hairlines are what separate the three bands, but they are the first thing to go
+	// when there is no room: a rule costs a row of content, and on an eight-row terminal
+	// content is the only thing worth spending rows on.
+	rules := 0
+	if left >= minRuledBody+2 {
+		rules = 2
+		left -= 2
 	}
 	bodyH := left
 	a.Viewport = bodyH
@@ -85,10 +86,15 @@ func (a *App) View() string {
 	}
 
 	if headerH == 1 {
-		out = append(out, header.render(width, false, a.Theme.Selection))
+		out = append(out, header.render(width, false, a.Theme.Colors.Selection))
 	}
 	if slotsH == 1 {
-		out = append(out, a.drawSlotBar().render(width, false, a.Theme.Selection))
+		out = append(out, a.drawSlotBar().render(width, false, a.Theme.Colors.Selection))
+	}
+	// The rule closes the header band, so the slot bar sits inside it rather than adrift
+	// between the rule and the body.
+	if rules > 0 {
+		out = append(out, a.hairline(width))
 	}
 	for i := range bodyH {
 		if i < len(body) {
@@ -97,18 +103,42 @@ func (a *App) View() string {
 			out = append(out, blank)
 		}
 	}
+	if rules > 0 {
+		out = append(out, a.hairline(width))
+	}
 	if footerH == 1 {
-		out = append(out, footer.render(width, false, a.Theme.Selection))
+		out = append(out, footer.render(width, false, a.Theme.Colors.Selection))
 	}
 
 	return strings.Join(out, "\n")
 }
 
+// minRuledBody is how much body has to be left over before the hairlines earn their rows.
+const minRuledBody = 4
+
+// hairline is the rule between the bands. It starts one column in, under the cursor rail,
+// so the rail's column stays the only thing that ever appears there.
+func (a *App) hairline(width int) string {
+	return line{
+		plain(" "),
+		styled(strings.Repeat(a.Theme.Glyphs.Rule, max(0, width-1)), fg(a.Theme.Colors.Rule)),
+	}.render(width, false, a.Theme.Colors.Selection)
+}
+
+// RenderFrame renders one frame at a given size, escape sequences and all.
+//
+// The colours are the point when you are writing a theme: the loop is edit the file, run
+// this, look at it. Everything else — the tests, the diffs — wants the text underneath,
+// which is what RenderHeadless returns.
+func (a *App) RenderFrame(w, h int) string {
+	a.Width, a.Height = w, h
+	return a.View()
+}
+
 // RenderHeadless renders one frame to plain text off-screen. It backs both the render
 // tests and `--screenshot`, which is how you look at the real thing without a terminal.
 func (a *App) RenderHeadless(w, h int) []string {
-	a.Width, a.Height = w, h
-	frame := a.View()
+	frame := a.RenderFrame(w, h)
 	rows := strings.Split(frame, "\n")
 	out := make([]string, 0, h)
 	for i := range h {
@@ -123,35 +153,90 @@ func (a *App) RenderHeadless(w, h int) []string {
 
 // --- shared pieces ----------------------------------------------------------------
 
-func (a *App) wordmark() []span {
-	return []span{
-		styled("taskui", fgBold(a.Theme.Accent)),
-		styled(" · ", fg(a.Theme.Dim)),
+// header lays a header out: the wordmark and a subject on the left, state right-anchored
+// against the last column.
+//
+// Right-anchoring is what makes the state block a column rather than a tail. It always ends
+// in the same place, so the eye knows where to look for "how many tasks" or "did it fail"
+// without reading the left-hand side first.
+func (a *App) header(subject string, state []span) line {
+	g := a.Theme.Glyphs
+	l := line{plain(" "), styled(g.Wordmark, fgBold(a.Theme.Colors.Accent))}
+	// `taskui · taskui` — the wordmark, then a directory that happens to share its name —
+	// reads as a bug, and spends the most valuable row on the screen saying it twice.
+	if subject != "" && !strings.EqualFold(subject, plainWordmark(g.Wordmark)) {
+		l = append(l, styled(" "+g.Separator+" ", fg(a.Theme.Colors.Faint)), styled(subject, bold()))
 	}
+	used := 0
+	for _, s := range l {
+		used += utf8.RuneCountInString(s.text)
+	}
+	stateWidth := 0
+	for _, s := range state {
+		stateWidth += utf8.RuneCountInString(s.text)
+	}
+	l = append(l, plain(strings.Repeat(" ", max(1, a.Width-1-used-stateWidth))))
+	return append(l, state...)
+}
+
+func statusChip(status run.Status, t theme.Theme) span {
+	switch status {
+	case run.Ok:
+		return styled(" PASSED ", onBg(t.Colors.WarningFg, t.Colors.StatusOk))
+	case run.Failed:
+		return styled(" FAILED ", onBg(t.Colors.WarningFg, t.Colors.StatusFailed))
+	default:
+		return styled(" RUNNING ", onBg(t.Colors.WarningFg, t.Colors.StatusRunning))
+	}
+}
+
+// statusGlyph is the theme's mark for a status. `run.Status.Glyph()` stays as the default
+// for the headless `--run` output, which is piped and diffed rather than looked at.
+func statusGlyph(status run.Status, t theme.Theme) string {
+	switch status {
+	case run.Pending:
+		return t.Glyphs.StatusPending
+	case run.Running:
+		return t.Glyphs.StatusRunning
+	case run.Ok:
+		return t.Glyphs.StatusOk
+	case run.Failed:
+		return t.Glyphs.StatusFailed
+	default:
+		return t.Glyphs.StatusSkipped
+	}
+}
+
+// plainWordmark is the wordmark with any decoration stripped, so a themed one still
+// recognises the project it is named after.
+func plainWordmark(text string) string {
+	return strings.Trim(text, " ░▒▓█▄▀=-*·»«")
 }
 
 func statusStyle(status run.Status, t theme.Theme) theme.Color {
 	switch status {
 	case run.Pending:
-		return t.StatusPending
+		return t.Colors.StatusPending
 	case run.Running:
-		return t.StatusRunning
+		return t.Colors.StatusRunning
 	case run.Ok:
-		return t.StatusOk
+		return t.Colors.StatusOk
 	case run.Failed:
-		return t.StatusFailed
+		return t.Colors.StatusFailed
 	default:
-		return t.StatusSkipped
+		return t.Colors.StatusSkipped
 	}
 }
 
 // scrollPane clamps an offset and cuts a paragraph down to the visible rows.
-func scrollPane(lines []line, width, height int, offset *int) []string {
+func (a *App) scrollPane(lines []line, width, height int, offset *int) []string {
 	overflow := max(0, len(lines)-height)
 	*offset = min(*offset, overflow)
 	out := make([]string, 0, height)
 	for i := *offset; i < len(lines) && len(out) < height; i++ {
-		out = append(out, lines[i].render(width, false, theme.Default))
+		// renderRow, not render: the blank rail column keeps these panes flush with the
+		// rows on every other screen.
+		out = append(out, lines[i].renderRow(width, false, a.Theme, a.Phase))
 	}
 	return out
 }
@@ -160,16 +245,15 @@ func scrollPane(lines []line, width, height int, offset *int) []string {
 
 func (a *App) detailHeader() line {
 	t := a.Theme
-	l := append(line{}, a.wordmark()...)
-	l = append(l, styled(a.DetailOf, bold()))
+	var state []span
 	if o, ok := a.Outcomes[a.DetailOf]; ok {
-		glyph, colour := "   ✗ ", t.StatusFailed
+		glyph, colour := t.Glyphs.StatusFailed+" ", t.Colors.StatusFailed
 		if o.Ok {
-			glyph, colour = "   ✓ ", t.StatusOk
+			glyph, colour = t.Glyphs.StatusOk+" ", t.Colors.StatusOk
 		}
-		l = append(l, styled(glyph, fgBold(colour)), styled(ago(o.WhenUnix), fg(t.Dim)))
+		state = []span{styled(glyph, fgBold(colour)), styled(ago(o.WhenUnix), fg(t.Colors.Dim))}
 	}
-	return l
+	return a.header(a.DetailOf, state)
 }
 
 func (a *App) drawDetail(width, height int) []string {
@@ -182,12 +266,12 @@ func (a *App) drawDetail(width, height int) []string {
 		if len(lines) > 0 {
 			lines = append(lines, line{})
 		}
-		lines = append(lines, line{styled(title, fgBold(t.Accent))})
+		lines = append(lines, line{styled(title, fgBold(t.Colors.Accent))})
 	}
 
 	for _, para := range d.Summary {
 		for _, chunk := range wrap(para, room) {
-			lines = append(lines, line{styled("  "+chunk, fg(t.Text))})
+			lines = append(lines, line{styled("  "+chunk, fg(t.Colors.Text))})
 		}
 	}
 
@@ -196,8 +280,8 @@ func (a *App) drawDetail(width, height int) []string {
 		for _, v := range d.Requires {
 			lines = append(lines, line{
 				plain("  "),
-				styled(v+"=", fgBold(t.Mode)),
-				styled("   must be supplied with `a`", fg(t.Dim)),
+				styled(v+"=", fgBold(t.Colors.Mode)),
+				styled("   must be supplied with `a`", fg(t.Colors.Dim)),
 			})
 		}
 	}
@@ -205,7 +289,7 @@ func (a *App) drawDetail(width, height int) []string {
 	if len(d.Dependencies) > 0 {
 		section("runs first")
 		for _, dep := range d.Dependencies {
-			lines = append(lines, line{styled("  "+dep, fg(t.Alias))})
+			lines = append(lines, line{styled("  "+dep, fg(t.Colors.Alias))})
 		}
 	}
 
@@ -213,9 +297,9 @@ func (a *App) drawDetail(width, height int) []string {
 		section("will run")
 		for _, cmd := range d.Commands {
 			// Another task, or a shell line — worth telling apart at a glance.
-			style, text := fg(t.Text), "  "+cmd
+			style, text := fg(t.Colors.Text), "  "+cmd
 			if name, ok := strings.CutPrefix(cmd, "Task: "); ok {
-				style, text = fg(t.Alias), "  → "+name
+				style, text = fg(t.Colors.Alias), "  → "+name
 			}
 			for _, chunk := range wrap(text, room) {
 				lines = append(lines, line{styled(chunk, style)})
@@ -224,28 +308,26 @@ func (a *App) drawDetail(width, height int) []string {
 	}
 
 	if len(lines) == 0 {
-		lines = append(lines, line{styled("  go-task reports nothing about this task", fg(t.Dim))})
+		lines = append(lines, line{styled("  go-task reports nothing about this task", fg(t.Colors.Dim))})
 	}
 
-	return scrollPane(lines, width, height, &a.DetailOffset)
+	return a.scrollPane(lines, width, height, &a.DetailOffset)
 }
 
 func (a *App) detailFooter() line {
 	if l, ok := a.confirmBar(); ok {
 		return l
 	}
-	return line{styled("j k scroll   ⏎ run   a args   esc back   q quit", fg(a.Theme.Dim))}
+	return line{plain(" "), styled("j k scroll   ⏎ run   a args   esc back   q quit", fg(a.Theme.Colors.Dim))}
 }
 
 // --- help -------------------------------------------------------------------------
 
 func (a *App) helpHeader() line {
 	t := a.Theme
-	l := append(line{}, a.wordmark()...)
-	return append(l,
-		styled("keys", bold()),
-		styled("   the footer shows a subset; this is all of them", fg(t.Dim)),
-	)
+	return a.header("keys", []span{
+		styled("the footer shows a subset; this is all of them", fg(t.Colors.Dim)),
+	})
 }
 
 func (a *App) drawHelp(width, height int) []string {
@@ -260,20 +342,20 @@ func (a *App) drawHelp(width, height int) []string {
 			lines = append(lines, line{})
 		}
 		lines = append(lines, line{
-			styled(section.Title, fgBold(t.Accent)),
-			styled("  — "+section.Note, fg(t.Dim)),
+			styled(section.Title, fgBold(t.Colors.Accent)),
+			styled("  — "+section.Note, fg(t.Colors.Dim)),
 		})
 		for _, binding := range section.Bindings {
 			lines = append(lines, line{
 				plain("  "),
-				styled(padRight(binding.Keys, pad), fgBold(t.Mode)),
+				styled(padRight(binding.Keys, pad), fgBold(t.Colors.Mode)),
 				plain("  "),
-				styled(binding.What, fg(t.Text)),
+				styled(binding.What, fg(t.Colors.Text)),
 			})
 		}
 	}
 
-	return scrollPane(lines, width, height, &a.HelpOffset)
+	return a.scrollPane(lines, width, height, &a.HelpOffset)
 }
 
 func padRight(s string, width int) string {
@@ -289,7 +371,7 @@ func (a *App) helpFooter() line {
 	if l, ok := a.confirmBar(); ok {
 		return l
 	}
-	return line{styled("j k scroll   ? esc close   q quit", fg(a.Theme.Dim))}
+	return line{plain(" "), styled("j k scroll   ? esc close   q quit", fg(a.Theme.Colors.Dim))}
 }
 
 // --- history ----------------------------------------------------------------------
@@ -309,15 +391,12 @@ func (a *App) historyHeader() line {
 		scope = base
 	}
 
-	l := append(line{}, a.wordmark()...)
-	l = append(l,
-		styled("history", bold()),
-		styled(" · "+scope, fg(t.Stored)),
-	)
+	state := []span{styled(scope, fg(t.Colors.Stored))}
 	if a.HistoryQuery != "" {
-		l = append(l, styled("   /"+a.HistoryQuery, fg(t.Search)))
+		state = append(state, styled("   /"+a.HistoryQuery, fg(t.Colors.Search)))
 	}
-	return append(l, styled(fmt.Sprintf("   %d runs   %d failed", len(a.History), failed), fg(t.Dim)))
+	state = append(state, styled(fmt.Sprintf("   %d runs   %d failed", len(a.History), failed), fg(t.Colors.Dim)))
+	return a.header("history", state)
 }
 
 func (a *App) drawHistory(width, height int) []string {
@@ -331,9 +410,9 @@ func (a *App) drawHistory(width, height int) []string {
 	out := make([]string, 0, height)
 	for i := a.HistoryOffset; i < len(a.History) && len(out) < height; i++ {
 		m := a.History[i]
-		glyph, colour := "✓", t.StatusOk
+		glyph, colour := t.Glyphs.StatusOk, t.Colors.StatusOk
 		if m.Failed() {
-			glyph, colour = "✗", t.StatusFailed
+			glyph, colour = t.Glyphs.StatusFailed, t.Colors.StatusFailed
 		}
 		lines := 0
 		for _, e := range m.Tasks {
@@ -341,13 +420,13 @@ func (a *App) drawHistory(width, height int) []string {
 		}
 		commandStyle := fg(theme.Default)
 		if m.Failed() {
-			commandStyle = fg(t.StatusFailed)
+			commandStyle = fg(t.Colors.StatusFailed)
 		}
 		l := line{
 			styled(glyph+" ", fgBold(colour)),
-			styled(padRight(ago(m.StartedUnix), 10), fg(t.Dim)),
+			styled(padRight(ago(m.StartedUnix), 10), fg(t.Colors.Dim)),
 			styled(padRight(m.Command(), 30), commandStyle),
-			styled(fmt.Sprintf("%8s  %6d lines", duration(millis(m.DurationMs)), lines), fg(t.Dim)),
+			styled(fmt.Sprintf("%8s  %6d lines", duration(millis(m.DurationMs)), lines), fg(t.Colors.Dim)),
 		}
 		// Only present when a cross-run search is narrowing the list.
 		if n, ok := a.HistoryHits[m.ID]; ok {
@@ -355,9 +434,9 @@ func (a *App) drawHistory(width, height int) []string {
 			if n == 1 {
 				suffix = ""
 			}
-			l = append(l, styled(fmt.Sprintf("   %d hit%s", n, suffix), fg(t.Search)))
+			l = append(l, styled(fmt.Sprintf("   %d hit%s", n, suffix), fg(t.Colors.Search)))
 		}
-		out = append(out, l.render(width, i == a.HistoryCursor, t.Selection))
+		out = append(out, l.renderRow(width, i == a.HistoryCursor, t, a.Phase))
 	}
 	return out
 }
@@ -369,17 +448,18 @@ func (a *App) historyFooter() line {
 	}
 	if a.HistorySearching {
 		return line{
-			styled("search runs: ", fg(t.Search)),
+			plain(" "),
+			styled("search runs: ", fg(t.Colors.Search)),
 			plain(a.HistoryQuery),
-			styled("█", fg(t.Search)),
-			styled(fmt.Sprintf("   %d runs matched", len(a.History)), fg(t.Dim)),
-			styled("   ⏎ keep   esc clear", fg(t.Dim)),
+			styled(t.Glyphs.Cursor, fg(t.Colors.Search)),
+			styled(fmt.Sprintf("   %d runs matched", len(a.History)), fg(t.Colors.Dim)),
+			styled("   ⏎ keep   esc clear", fg(t.Colors.Dim)),
 		}
 	}
 	if a.Status != "" {
-		return line{styled(a.Status, fg(t.Notice))}
+		return line{plain(" "), styled(a.Status, fg(t.Colors.Notice))}
 	}
-	return line{styled(keys.Footer(&keys.HistorySection), fg(t.Dim))}
+	return a.hintBar(&keys.HistorySection)
 }
 
 // --- slot bar ---------------------------------------------------------------------
@@ -393,17 +473,17 @@ func (a *App) drawSlotBar() line {
 	l := line{plain("  ")}
 	for i, slot := range a.Slots() {
 		if i > 0 {
-			l = append(l, styled("   ", fg(t.Dim)))
+			l = append(l, styled("   ", fg(t.Colors.Dim)))
 		}
-		nameStyle := fg(t.Dim)
+		nameStyle := fg(t.Colors.Dim)
 		if slot.Focused {
 			nameStyle = bold()
 		}
 		l = append(l,
-			styled(fmt.Sprintf("%d ", i+1), fg(t.Dim)),
-			styled(slot.Status.Glyph()+" ", fgBold(statusStyle(slot.Status, t))),
+			styled(fmt.Sprintf("%d ", i+1), fg(t.Colors.Dim)),
+			styled(statusGlyph(slot.Status, t)+" ", fgBold(statusStyle(slot.Status, t))),
 			styled(slot.Root, nameStyle),
-			styled(" "+duration(slot.Elapsed), fg(t.Dim)),
+			styled(" "+duration(slot.Elapsed), fg(t.Colors.Dim)),
 		)
 	}
 	return l
@@ -418,28 +498,20 @@ func (a *App) runHeader() line {
 		return line{}
 	}
 
-	elapsed := elapsedOf(r)
-	glyph, colour := "▶", t.StatusRunning
+	status := run.Running
 	if r.Finished() {
-		glyph, colour = "✗", t.StatusFailed
+		status = run.Failed
 		if r.Exit == 0 {
-			glyph, colour = "✓", t.StatusOk
+			status = run.Ok
 		}
 	}
 
-	l := append(line{}, a.wordmark()...)
-	l = append(l,
-		styled(glyph, fgBold(colour)),
-		plain(" "),
-		styled(r.Command(), bold()),
-		styled("   "+duration(elapsed), fg(t.Dim)),
-	)
-
+	var l line
 	if r.Interactive && !r.Finished() {
-		l = append(l, styled("   interactive", fg(t.Interactive)))
+		l = append(l, styled("   interactive", fg(t.Colors.Interactive)))
 	}
 	if a.Watching != "" {
-		l = append(l, styled("   watching "+a.Watching, fg(t.Interactive)))
+		l = append(l, styled("   watching "+a.Watching, fg(t.Colors.Interactive)))
 	}
 	switch {
 	case r.Cancelled():
@@ -454,17 +526,13 @@ func (a *App) runHeader() line {
 		case r.Killed():
 			text = "   killed — waiting on the OS"
 		}
-		l = append(l, styled(text, fg(t.StatusFailed)))
+		l = append(l, styled(text, fg(t.Colors.StatusFailed)))
 	case r.IsStored():
-		l = append(l, styled("   from history", fg(t.Stored)))
+		l = append(l, styled("   from history", fg(t.Colors.Stored)))
 	case len(r.Graph.Edges) == 0:
-		l = append(l, styled("   resolving graph…", fg(t.Dim)))
+		l = append(l, styled("   resolving graph…", fg(t.Colors.Dim)))
 	case a.Following && !r.Finished():
-		l = append(l, styled("   following", fg(t.Notice)))
-	}
-
-	if r.HasExit && r.Exit != 0 {
-		l = append(l, styled(fmt.Sprintf("   exit %d", r.Exit), fg(t.StatusFailed)))
+		l = append(l, styled("   following", fg(t.Colors.Notice)))
 	}
 
 	if a.Search != nil {
@@ -473,19 +541,28 @@ func (a *App) runHeader() line {
 			position = fmt.Sprintf("%d/%d", a.SearchIdx+1, len(a.SearchHits))
 		}
 		l = append(l,
-			styled("   /", fg(t.Dim)),
-			styled(a.Search.Pattern, fg(t.Search)),
-			styled("  "+position, fg(t.Dim)),
+			styled("   /", fg(t.Colors.Dim)),
+			styled(a.Search.Pattern, fg(t.Colors.Search)),
+			styled("  "+position, fg(t.Colors.Dim)),
 		)
 		if a.FilterMatches {
-			l = append(l, styled(fmt.Sprintf("  filtered ±%d", a.FilterContext), fg(t.Search)))
+			l = append(l, styled(fmt.Sprintf("  filtered ±%d", a.FilterContext), fg(t.Colors.Search)))
 		}
 	}
 
-	return l
+	state := l
+	if len(state) > 0 {
+		state = append(state, plain("   "))
+	}
+	state = append(state, statusChip(status, t), styled("   "+duration(elapsedOf(r)), fg(t.Colors.Dim)))
+	if r.HasExit && r.Exit != 0 {
+		state = append(state, styled(fmt.Sprintf("   exit %d", r.Exit), fg(t.Colors.StatusFailed)))
+	}
+	return a.header(r.Command(), state)
 }
 
 // runRowLines builds the rendered lines for one run row.
+//
 // splitting them would duplicate the indent, marker and highlight arithmetic.
 //
 //nolint:cyclop // a task row and a line row are two shapes with one gutter between them;
@@ -512,20 +589,20 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 		if hasLines {
 			switch row.Fold {
 			case FoldHidden:
-				glyph = "▸ "
+				glyph = t.Glyphs.FoldClosed + " "
 			case FoldPeek:
-				glyph = "▿ "
+				glyph = t.Glyphs.FoldPeek + " "
 			case FoldFull:
-				glyph = "▾ "
+				glyph = t.Glyphs.FoldOpen + " "
 			}
 		}
 
 		nameStyle := fg(theme.Default)
 		switch status {
 		case run.Failed:
-			nameStyle = fgBold(t.StatusFailed)
+			nameStyle = fgBold(t.Colors.StatusFailed)
 		case run.Skipped:
-			nameStyle = fg(t.Dim)
+			nameStyle = fg(t.Colors.Dim)
 		default:
 			// Pending, running and finished-well all read as ordinary text; the glyph
 			// beside the name is what carries the state.
@@ -533,27 +610,23 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 
 		l := line{
 			plain(indent),
-			styled(glyph, fg(t.Dim)),
-			styled(status.Glyph()+" ", fgBold(statusStyle(status, t))),
+			styled(glyph, fg(t.Colors.Faint)),
+			styled(statusGlyph(status, t)+" ", fgBold(statusStyle(status, t))),
 			styled(row.Name, nameStyle),
 		}
 
 		var tail strings.Builder
 		if hasTask {
-			// Ticking while the task runs, final once it stops.
-			if d, ok := tr.Elapsed(); ok {
-				fmt.Fprintf(&tail, "  %7s", duration(d))
-			}
 			// Closed, say how much there is; ajar, say how much is out of sight. "45
 			// lines" next to five of them on screen reads as a contradiction.
 			switch row.Fold {
 			case FoldHidden:
 				if len(tr.Lines) > 0 {
-					fmt.Fprintf(&tail, "  %d lines", len(tr.Lines))
+					fmt.Fprintf(&tail, "%d lines", len(tr.Lines))
 				}
 			case FoldPeek:
 				if hidden := len(tr.Lines) - a.PeekLines; hidden > 0 {
-					fmt.Fprintf(&tail, "  %d more", hidden)
+					fmt.Fprintf(&tail, "%d more", hidden)
 				}
 			default:
 				// Fully open: the lines are all on screen, so counting them would be
@@ -562,11 +635,30 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 			// Said out loud, open or closed: a buffer that has silently forgotten its
 			// first hour is a buffer you would otherwise search and trust.
 			if tr.Dropped > 0 {
-				fmt.Fprintf(&tail, "  %d earlier dropped", tr.Dropped)
+				if tail.Len() > 0 {
+					tail.WriteString("  ")
+				}
+				fmt.Fprintf(&tail, "%d earlier dropped", tr.Dropped)
+			}
+			// Ticking while the task runs, final once it stops. Sub-10ms figures are
+			// dropped for the same reason `duration` refuses to print `0.00s`: a number
+			// that is always zero is a column of noise, and here it is a column the eye
+			// runs down looking for the slow step.
+			if d, ok := tr.Elapsed(); ok && d >= tooFastToMatter {
+				if tail.Len() > 0 {
+					tail.WriteString("    ")
+				}
+				tail.WriteString(duration(d))
 			}
 		}
+		// Right-anchored, so the whole column ends in the same place on every row.
 		if tail.Len() > 0 {
-			l = append(l, styled(tail.String(), fg(t.Dim)))
+			used := 0
+			for _, sp := range l {
+				used += utf8.RuneCountInString(sp.text)
+			}
+			gap := max(2, width-used-utf8.RuneCountInString(tail.String()))
+			l = append(l, plain(strings.Repeat(" ", gap)), styled(tail.String(), fg(t.Colors.Dim)))
 		}
 		return []line{l}
 	}
@@ -575,23 +667,40 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 	if tr, ok := r.Tasks[row.Task]; ok && row.Index < len(tr.Lines) {
 		text, isCommand = tr.Lines[row.Index].Plain, tr.Lines[row.Index].IsCommand
 	}
+	if isCommand {
+		text = strings.TrimPrefix(text, "task: ")
+		// `[test] ` names the task whose header is a few rows above, on every command it
+		// runs. Fifteen columns of a build log spent restating what the indentation
+		// already says.
+		if _, rest, ok := strings.Cut(text, "] "); ok {
+			text = rest
+		}
+	}
 
 	indent := strings.Repeat("  ", row.Depth)
-	// The gutter distinguishes go-task's own command echo from the command's actual
-	// output.
-	marker := "│ "
-	if isCommand {
-		marker = "$ "
+	// The marker distinguishes go-task's own command echo from the command's actual
+	// output. Output gets nothing: absence of a marker is a marker, and a `│` on every
+	// line of a build log is a column of chrome you stop seeing but keep paying for.
+	marker := "  "
+	switch {
+	case isCommand:
+		marker = t.Glyphs.Command + " "
+	case isFailure(text):
+		marker = t.Glyphs.Warning + " "
 	}
-	// Two cells for the marker, whatever it is made of. `│` is three bytes and one column,
+	// Two cells for the marker, whatever it is made of. `❯` is three bytes and one column,
 	// and measuring it in bytes — as the Rust original did — wrapped output two columns
 	// early and, worse, disagreed with runRowHeight, which always assumed two. A line
 	// measured shorter than it renders is a line that overflows its column.
-	room := max(8, width-(utf8.RuneCountInString(indent)+gutter+2))
+	pad := a.gutterFor(row.Task)
+	room := max(8, width-(utf8.RuneCountInString(indent)+pad+3))
 
 	base := fg(theme.Default)
-	if isCommand {
-		base = fg(t.Alias)
+	switch {
+	case isCommand:
+		base = fg(t.Colors.Alias)
+	case isFailure(text):
+		base = fg(t.Colors.StatusFailed)
 	}
 
 	// One captured line can become several visual rows; the number and the marker belong
@@ -609,12 +718,12 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 		l := line{plain(indent)}
 		if n == 0 {
 			l = append(l,
-				styled(fmt.Sprintf("%*d ", gutter-1, row.Index+1), fg(t.Dim)),
-				styled(marker, fg(t.Dim)),
+				styled(fmt.Sprintf("%*d ", pad, row.Index+1), fg(t.Colors.Faint)),
+				styled(marker, fg(t.Colors.Faint)),
 			)
 		} else {
 			// Continuation: blank gutter, aligned under the text above.
-			l = append(l, plain(strings.Repeat(" ", gutter)), styled("  ", fg(t.Dim)))
+			l = append(l, plain(strings.Repeat(" ", pad+3)))
 		}
 
 		// Highlight per chunk, so a match survives being wrapped.
@@ -622,7 +731,7 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 			if start, end, ok := a.Search.FirstMatch(chunk); ok && end <= len(chunk) {
 				l = append(l,
 					styled(chunk[:start], base),
-					styled(chunk[start:end], onBg(t.MatchFg, t.MatchBg)),
+					styled(chunk[start:end], onBg(t.Colors.MatchFg, t.Colors.MatchBg)),
 					styled(chunk[end:], base),
 				)
 				out = append(out, l)
@@ -632,6 +741,38 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 		out = append(out, append(l, styled(chunk, base)))
 	}
 	return out
+}
+
+// tooFastToMatter is the point below which a duration is noise. `duration` already refuses
+// to print `0.00s` for the same reason.
+const tooFastToMatter = 10 * time.Millisecond
+
+// gutterFor is how wide the line-number column has to be.
+//
+// Sized to the run rather than fixed at five: a run whose longest task printed nine lines
+// numbers in one column, not five, and spends the other four on output. It is the run's
+// widest task rather than each task's own width, because a gutter that changed between
+// tasks would leave their output ragged against each other — and the column is there to be
+// scanned down.
+func (a *App) gutterFor(string) int {
+	longest := 0
+	if a.Run != nil {
+		for _, tr := range a.Run.Tasks {
+			longest = max(longest, len(tr.Lines))
+		}
+	}
+	width := 1
+	for longest >= 10 {
+		longest /= 10
+		width++
+	}
+	return width
+}
+
+// isFailure spots go-task's own report of what broke. The line is left exactly as it
+// arrived — it is real output — but it does not have to look like ordinary output.
+func isFailure(text string) bool {
+	return strings.HasPrefix(text, "task: ") && strings.Contains(text, "Failed to run task")
 }
 
 // runRowHeight is how many terminal rows one run row occupies once wrapped.
@@ -648,7 +789,7 @@ func (a *App) runRowHeight(row RunRow, width int) int {
 			text = t.Lines[row.Index].Plain
 		}
 	}
-	prefix := row.Depth*2 + gutter + 2
+	prefix := row.Depth*2 + a.gutterFor(row.Task) + 3
 	return len(wrap(text, max(8, width-prefix)))
 }
 
@@ -663,7 +804,7 @@ func (a *App) drawRun(width, height int) []string {
 	// measured once to decide and again to lay out.
 	single := 0
 	for _, r := range a.RunRows {
-		single += a.runRowHeight(r, width)
+		single += a.runRowHeight(r, width-frameWidth)
 	}
 	columns := 1
 	if single > height {
@@ -677,7 +818,7 @@ func (a *App) drawRun(width, height int) []string {
 
 	heights := make([]int, len(a.RunRows))
 	for i, r := range a.RunRows {
-		heights[i] = a.runRowHeight(r, colWidth)
+		heights[i] = a.runRowHeight(r, colWidth-frameWidth)
 	}
 
 	a.RunCursor = min(a.RunCursor, max(0, len(a.RunRows)-1))
@@ -687,7 +828,7 @@ func (a *App) drawRun(width, height int) []string {
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.runRowLines(a.RunRows[i], colWidth))
+			out = append(out, a.runRowLines(a.RunRows[i], colWidth-frameWidth))
 		}
 		return out
 	}
@@ -710,20 +851,21 @@ func (a *App) pickerHeader() line {
 		}
 	}
 
-	l := append(line{}, a.wordmark()...)
-	l = append(l,
-		plain(dir),
-		styled("  group: ", fg(t.Dim)),
-		styled(a.Mode.Label(), fgBold(t.Mode)),
+	// The pivot names both sides, with the one you are in accented. It replaces the
+	// header's `group: domain` and the footer's `p group by verb` at once: a toggle that
+	// shows its other position is more use than either half on its own.
+	state := []span{styled("domain", a.pivotStyle(pivot.Domain))}
+	state = append(state,
+		styled(t.Glyphs.Dot, fg(t.Colors.Faint)),
+		styled("verb", a.pivotStyle(pivot.Verb)),
 	)
 
 	if a.Query == "" {
-		l = append(l, styled(fmt.Sprintf("   %d tasks", len(a.Tasks)), fg(t.Dim)))
 		if a.InteractiveNext {
-			l = append(l, styled("   interactive", fg(t.Interactive)))
+			state = append(state, styled("   interactive", fg(t.Colors.Interactive)))
 		}
 		if a.ForceNext {
-			l = append(l, styled("   force", fg(t.Notice)))
+			state = append(state, styled("   force", fg(t.Colors.Notice)))
 		}
 		// Leaving the run view does not stop anything; say so, or it is easy to forget —
 		// and with several slots open the picker is the only screen that would not
@@ -738,34 +880,70 @@ func (a *App) pickerHeader() line {
 					break
 				}
 			}
-			l = append(l, styled("   ▶ "+name+" running", fg(t.Notice)))
+			state = append(state, styled("   ▶ "+name+" running", fg(t.Colors.Notice)))
 		default:
-			l = append(l, styled(fmt.Sprintf("   ▶ %d running", n), fg(t.Notice)))
+			state = append(state, styled(fmt.Sprintf("   ▶ %d running", n), fg(t.Colors.Notice)))
 		}
+		state = append(state, styled(fmt.Sprintf("   %d tasks", len(a.Tasks)), fg(t.Colors.Dim)))
 	} else {
-		l = append(l,
-			styled("   filter: ", fg(t.Dim)),
-			styled(a.Query, fg(t.Search)),
-			styled(fmt.Sprintf("   %d/%d tasks", shown, len(a.Tasks)), fg(t.Dim)),
+		state = append(state,
+			styled("   /", fg(t.Colors.Dim)),
+			styled(a.Query, fg(t.Colors.Search)),
+			styled(fmt.Sprintf("   %d/%d tasks", shown, len(a.Tasks)), fg(t.Colors.Dim)),
 		)
 	}
 
-	return l
+	return a.header(dir, state)
 }
 
-// treeItem builds one row of the task tree.
-func (a *App) treeItem(row pivot.Row, width int) []line {
+func (a *App) pivotStyle(mode pivot.Mode) lipgloss.Style {
+	if a.Mode == mode {
+		return fgBold(a.Theme.Colors.Mode)
+	}
+	return fg(a.Theme.Colors.Faint)
+}
+
+// nameColumn is where a task's description starts, on every row, always.
+//
+// A fixed column is the whole point. It used to be computed from whatever the row had
+// already spent — so a task carrying an outcome badge pushed its description right, and no
+// two rows lined up. There is nothing to scan down when the column moves.
+const nameColumn = 17
+
+// frameWidth is the two columns the cursor's frame occupies — the lit edge on the left and
+// its shade on the right — which every row builder has to leave for it.
+//
+// Both are reserved whatever the theme does with them, so a row is the same width in every
+// look. Geometry that changed with the colours would be a theme that could break a layout.
+const frameWidth = 2
+
+// lastOfParent reports whether the row at i is the final child of whatever contains it, so
+// the guide can be a corner rather than a tee. Without it every branch looks like it has a
+// sibling below, including the ones that do not.
+func (a *App) lastOfParent(i int) bool {
+	return i+1 >= len(a.Rows) || a.Rows[i+1].Depth < a.Rows[i].Depth
+}
+
+// treeItem builds one row of the task tree: guide, label, description, signals.
+func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 	t := a.Theme
 	node := a.Tree.Nodes[row.Node]
-	indent := strings.Repeat("  ", row.Depth)
 
-	// A node can be both a group and a task (`backend:migrate`), so the fold glyph and the
-	// runnable-ness are decided independently.
+	// Tree guides, so depth is something you see rather than something you count. A group
+	// keeps its fold glyph; a leaf gets the branch it hangs off.
+	g := t.Glyphs
+	indent := strings.Repeat(g.GuideVertical+" ", max(0, row.Depth-1))
 	glyph := "  "
-	if node.IsGroup() {
-		glyph = "▸ "
+	switch {
+	case node.IsGroup():
+		glyph = g.FoldClosed + " "
 		if row.Open {
-			glyph = "▾ "
+			glyph = g.FoldOpen + " "
+		}
+	case row.Depth > 0:
+		glyph = g.GuideBranch + " "
+		if last {
+			glyph = g.GuideLast + " "
 		}
 	}
 
@@ -775,104 +953,103 @@ func (a *App) treeItem(row pivot.Row, width int) []line {
 	}
 
 	l := line{
-		plain(indent),
-		styled(glyph, fg(t.Dim)),
+		styled(indent, fg(t.Colors.Faint)),
+		styled(glyph, fg(t.Colors.Faint)),
 		styled(node.Label, labelStyle),
 	}
+	used := max(1, row.Depth)*2 + utf8.RuneCountInString(node.Label)
 
-	used := row.Depth*2 + 2 + utf8.RuneCountInString(node.Label)
-
+	// Everything that is not content — the count, an alias, how it went — right-anchors
+	// into a signal column against the edge, so all of it ends where the eye expects it.
+	var signals line
 	if node.IsGroup() {
-		c := fmt.Sprintf("  %d", node.Count)
-		used += utf8.RuneCountInString(c)
-		l = append(l, styled(c, fg(t.Dim)))
+		signals = append(signals, styled(fmt.Sprintf("%4d", node.Count), fg(t.Colors.Dim)))
 	}
 
 	var extra []line
 
 	if node.Task != pivot.NoTask {
 		task := a.Tasks[node.Task]
+		var badges line
+		if len(task.Aliases) > 0 {
+			badges = append(badges, styled(strings.Join(task.Aliases, ", "), fg(t.Colors.Alias)), plain("  "))
+		}
+		if task.Dangerous {
+			badges = append(badges, styled(g.Danger+" ", fgBold(t.Colors.Danger)))
+		}
 		// Running now takes the column, because it is the more urgent of the two questions
 		// and the only one the list could not previously answer: with runs parked in slots
 		// you are not looking at, the footer could say "3 running" while every row in
-		// front of you showed nothing but history. The elapsed time reads the same as the
-		// slot bar's, so the two agree at a glance.
+		// front of you showed nothing but history.
 		//
 		// Failing that, how it went last time. A blank column means never run, which is
 		// information too — it is not the same as having passed.
 		if elapsed, ok := a.RunningFor(task.Name); ok {
-			l = append(l, styled("  ▶", fgBold(t.StatusRunning)))
-			forHowLong := " " + duration(elapsed)
-			used += 3 + utf8.RuneCountInString(forHowLong)
-			l = append(l, styled(forHowLong, fg(t.Dim)))
+			badges = append(badges,
+				styled(g.StatusRunning+" ", fgBold(t.Colors.StatusRunning)),
+				styled(duration(elapsed), fg(t.Colors.Dim)),
+			)
 		} else if o, ok := a.Outcomes[task.Name]; ok {
-			glyph, colour := "  ✗", t.StatusFailed
+			glyph, colour := g.StatusFailed+" ", t.Colors.StatusFailed
 			if o.Ok {
-				glyph, colour = "  ✓", t.StatusOk
+				glyph, colour = g.StatusOk+" ", t.Colors.StatusOk
 			}
-			l = append(l, styled(glyph, fgBold(colour)))
-			when := " " + ago(o.WhenUnix)
-			used += utf8.RuneCountInString(glyph) + utf8.RuneCountInString(when)
-			l = append(l, styled(when, fg(t.Dim)))
+			badges = append(badges, styled(glyph, fgBold(colour)), styled(ago(o.WhenUnix), fg(t.Colors.Dim)))
 		}
-		if task.Dangerous {
-			l = append(l, styled("  ⚠", fgBold(t.Danger)))
-			used += 3
-		}
-		if len(task.Aliases) > 0 {
-			aliases := "  (" + strings.Join(task.Aliases, ", ") + ")"
-			used += utf8.RuneCountInString(aliases)
-			l = append(l, styled(aliases, fg(t.Alias)))
-		}
+		signals = append(badges, signals...)
+
 		// Descriptions wrap into their own column rather than being cut off mid-word — a
 		// truncated description is the half that does not tell you anything. Continuation
-		// rows are indented to line up under the first.
-		//
-		// Aligned at column 34 when there is room, tightened when there is not — a
-		// three-column layout gives each description about half its column, and starting
-		// it at 34 would leave it nothing.
-		descCol := clamp(width/2, used+2, max(34, used+2))
-		if task.Desc != "" && descCol+12 < width {
-			room := width - descCol - 1
+		// rows hang under the first.
+		signalWidth := 0
+		for _, sp := range signals {
+			signalWidth += utf8.RuneCountInString(sp.text)
+		}
+		room := width - nameColumn - signalWidth - 2
+		if task.Desc != "" && room >= 12 {
 			chunks := wrap(task.Desc, room)
-			if len(chunks) > 0 {
-				l = append(l,
-					plain(strings.Repeat(" ", max(0, descCol-used))),
-					styled(chunks[0], fg(t.Dim)),
-				)
-				for _, chunk := range chunks[1:] {
-					extra = append(extra, line{
-						plain(strings.Repeat(" ", descCol)),
-						styled(chunk, fg(t.Dim)),
-					})
-				}
+			l = append(l,
+				plain(strings.Repeat(" ", max(1, nameColumn-used))),
+				styled(chunks[0], fg(t.Colors.Dim)),
+			)
+			used = nameColumn + utf8.RuneCountInString(chunks[0])
+			for _, chunk := range chunks[1:] {
+				extra = append(extra, line{
+					plain(strings.Repeat(" ", nameColumn)),
+					styled(chunk, fg(t.Colors.Dim)),
+				})
 			}
 		}
+	}
+
+	if len(signals) > 0 {
+		signalWidth := 0
+		for _, sp := range signals {
+			signalWidth += utf8.RuneCountInString(sp.text)
+		}
+		l = append(l, plain(strings.Repeat(" ", max(2, width-used-signalWidth))))
+		l = append(l, signals...)
 	}
 
 	return append([]line{l}, extra...)
 }
 
+// drawTree lays the picker out in one column, whatever the width.
+//
+// A list can be columnised. A tree cannot: the columns fill sequentially, so a group header
+// ends up in one column while its own children continue in the next, and the indentation —
+// the only thing saying which task belongs to what — stops meaning anything the moment it
+// wraps. The width goes to the description instead, which is where it does work.
 func (a *App) drawTree(width, height int) []string {
 	height = max(1, height)
 
-	single := 0
-	for _, r := range a.Rows {
-		single += len(a.treeItem(r, width))
-	}
-	columns := 1
-	if single > height {
-		columns = clamp(width/minColumn, 1, 3)
-	}
+	const columns = 1
 	widths := columnWidths(width, columns)
 	colWidth := widths[0]
-	if columns > 1 {
-		colWidth = max(0, colWidth-2)
-	}
 
 	heights := make([]int, len(a.Rows))
-	for i, r := range a.Rows {
-		heights[i] = len(a.treeItem(r, colWidth))
+	for i := range a.Rows {
+		heights[i] = len(a.treeItem(a.Rows[i], a.lastOfParent(i), colWidth-frameWidth))
 	}
 
 	a.Cursor = min(a.Cursor, max(0, len(a.Rows)-1))
@@ -882,7 +1059,7 @@ func (a *App) drawTree(width, height int) []string {
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.treeItem(a.Rows[i], colWidth))
+			out = append(out, a.treeItem(a.Rows[i], a.lastOfParent(i), colWidth-frameWidth))
 		}
 		return out
 	}
@@ -919,10 +1096,13 @@ func (a *App) composeColumns(
 				if at >= height {
 					break
 				}
-				text := l.render(colWidth, selected, a.Theme.Selection)
+				text := l.renderRow(colWidth, selected, a.Theme, a.Phase)
 				if pad := widths[c] - colWidth; pad > 0 {
 					if selected {
-						text += selectionOf(lipgloss.NewStyle(), a.Theme.Selection).Render(strings.Repeat(" ", pad))
+						text += selectionOf(
+							lipgloss.NewStyle(),
+							a.Theme.Colors.Selection,
+						).Render(strings.Repeat(" ", pad))
 					} else {
 						text += strings.Repeat(" ", pad)
 					}
@@ -1006,13 +1186,43 @@ func (a *App) confirmBar() (line, bool) {
 	}
 
 	return line{
-		styled("  ⚠  ", onBg(t.ConfirmFg, t.ConfirmBg)),
-		styled(verb, fg(t.StatusFailed)),
-		styled(subject, fgBold(t.StatusFailed)),
-		styled(why, fg(t.StatusFailed)),
-		styled("y", fgBold(t.StatusFailed)),
-		styled(does+", anything else cancels", fg(t.Dim)),
+		styled("  "+t.Glyphs.Danger+"  ", onBg(t.Colors.ConfirmFg, t.Colors.ConfirmBg)),
+		styled(verb, fg(t.Colors.StatusFailed)),
+		styled(subject, fgBold(t.Colors.StatusFailed)),
+		styled(why, fg(t.Colors.StatusFailed)),
+		styled("y", fgBold(t.Colors.StatusFailed)),
+		styled(does+", anything else cancels", fg(t.Colors.Dim)),
 	}, true
+}
+
+// hintGap is the space between one hint and the next, and before the pointer to the rest.
+// Wide enough that two hints never read as one.
+const hintGap = 3
+
+// hintBar builds a footer of key hints that fits, and pins `? keys` to the right edge.
+//
+// The keys are accented and the labels are not, so the line reads as a row of controls
+// rather than a paragraph of grey. It stops at a binding boundary: a hint you cannot finish
+// reading — `t jump   s deta` — is worse than one that was never offered, and `?` already
+// documents every last one of them.
+func (a *App) hintBar(section *keys.Section) line {
+	t := a.Theme
+	const tail = "? keys"
+	hints := keys.FooterHints(section)
+	fits := keys.FooterFits(hints, a.Width-1, len(tail)+hintGap)
+
+	l := line{plain(" ")}
+	used := 1
+	for i, b := range hints[:fits] {
+		if i > 0 {
+			l = append(l, plain("   "))
+			used += 3
+		}
+		l = append(l, styled(b.Keys, fg(t.Colors.Accent)), plain(" "), styled(b.Footer, fg(t.Colors.Dim)))
+		used += utf8.RuneCountInString(b.Keys) + 1 + utf8.RuneCountInString(b.Footer)
+	}
+	l = append(l, plain(strings.Repeat(" ", max(hintGap, a.Width-used-len(tail)-1))))
+	return append(l, styled("?", fg(t.Colors.Accent)), styled(" keys", fg(t.Colors.Dim)))
 }
 
 // argsPrompt is shared by both screens that can open it.
@@ -1024,17 +1234,18 @@ func (a *App) argsPrompt() (line, bool) {
 	runes := []rune(a.ArgsInput)
 	at := clamp(a.ArgsCursor, 0, len(runes))
 	l := line{
-		styled("task "+a.ArgsTarget+" ", fg(t.Accent)),
+		plain(" "),
+		styled("task "+a.ArgsTarget+" ", fg(t.Colors.Accent)),
 		plain(string(runes[:at])),
-		styled("█", fg(t.Accent)),
+		styled(t.Glyphs.Cursor, fg(t.Colors.Accent)),
 		plain(string(runes[at:])),
 	}
 	// A hint, not a default: the descriptions trail off into prose often enough that
 	// pre-filling would hand you a subtly wrong command.
 	if hint, ok := a.ArgsHint(); ok {
-		l = append(l, styled("   e.g. "+hint, fg(t.Dim)))
+		l = append(l, styled("   e.g. "+hint, fg(t.Colors.Dim)))
 	} else {
-		l = append(l, styled("   ⏎ run   esc cancel", fg(t.Dim)))
+		l = append(l, styled("   ⏎ run   esc cancel", fg(t.Colors.Dim)))
 	}
 	return l, true
 }
@@ -1046,73 +1257,76 @@ func (a *App) pickerFooter() line {
 	}
 	if a.Jumping {
 		l := line{
-			styled("jump: ", fg(t.Accent)),
+			plain(" "),
+			styled("jump: ", fg(t.Colors.Accent)),
 			plain(a.JumpQuery),
-			styled("█", fg(t.Accent)),
+			styled(t.Glyphs.Cursor, fg(t.Colors.Accent)),
 		}
 		if a.JumpQuery != "" {
 			text := "   no match"
 			if len(a.JumpMatches) > 0 {
 				text = fmt.Sprintf("   %d/%d", a.JumpIdx+1, len(a.JumpMatches))
 			}
-			l = append(l, styled(text, fg(t.Dim)))
+			l = append(l, styled(text, fg(t.Colors.Dim)))
 		}
-		return append(l, styled("   ⇥ next   ⏎ stay   esc go back", fg(t.Dim)))
+		return append(l, styled("   ⇥ next   ⏎ stay   esc go back", fg(t.Colors.Dim)))
 	}
 	if l, ok := a.argsPrompt(); ok {
 		return l
 	}
 	if a.Filtering {
 		return line{
-			styled("/", fg(t.Search)),
+			plain(" "),
+			styled("/", fg(t.Colors.Search)),
 			plain(a.Query),
-			styled("█", fg(t.Search)),
-			styled("   ⏎ accept   esc clear", fg(t.Dim)),
+			styled(t.Glyphs.Cursor, fg(t.Colors.Search)),
+			styled("   ⏎ accept   esc clear", fg(t.Colors.Dim)),
 		}
 	}
 	if a.Status != "" {
-		return line{styled(a.Status, fg(t.Notice))}
+		return line{plain(" "), styled(a.Status, fg(t.Colors.Notice))}
 	}
 
-	hint := "p group by verb"
-	if a.Mode.Toggled() == pivot.Domain {
-		hint = "p group by domain"
-	}
-	return line{styled(hint+"   "+keys.Footer(&keys.Picker), fg(t.Dim))}
+	// No pivot hint here any more: the header's `domain·verb` names both sides and which
+	// one you are in, which is more than this line ever said.
+	return a.hintBar(&keys.Picker)
 }
 
 func (a *App) runFooter() line {
 	t := a.Theme
 
 	if a.SendingInput {
-		l := line{styled("  input  ", onBg(t.WarningFg, t.Interactive))}
+		l := line{styled("  input  ", onBg(t.Colors.WarningFg, t.Colors.Interactive))}
 		if prompt, ok := promptOf(a.Run); ok {
-			l = append(l, styled(" "+prompt, fg(t.Interactive)))
+			l = append(l, styled(" "+prompt, fg(t.Colors.Interactive)))
 		} else {
-			l = append(l, styled(" keys go to the task", fg(t.Interactive)))
+			l = append(l, styled(" keys go to the task", fg(t.Colors.Interactive)))
 		}
 		// The receipt: what has actually gone down the pipe. Without it, "I typed y and
 		// nothing happened" cannot be told apart from "y never left the building".
 		if a.Run != nil && a.Run.Sent != "" {
 			l = append(l,
-				styled("   sent: ", fg(t.Dim)),
-				styled(a.Run.Sent, fgBold(t.Interactive)),
+				styled("   sent: ", fg(t.Colors.Dim)),
+				styled(a.Run.Sent, fgBold(t.Colors.Interactive)),
 			)
 		}
 		// Typing works either way, but in a buffered run you are doing it blind.
 		if a.Run != nil && !a.Run.Interactive {
-			l = append(l, styled("   buffered: ⏎ sends a newline, output may lag   ⇧I re-runs visibly", fg(t.Notice)))
+			l = append(
+				l,
+				styled("   buffered: ⏎ sends a newline, output may lag   ⇧I re-runs visibly", fg(t.Colors.Notice)),
+			)
 		}
-		return append(l, styled("   esc to stop typing", fg(t.Dim)))
+		return append(l, styled("   esc to stop typing", fg(t.Colors.Dim)))
 	}
 
 	// Under `prefixed` a blocked task emits nothing at all, so this is the only warning
 	// available — otherwise it reads as an unusually slow build.
 	if a.PossiblyStuck() {
 		return line{
-			styled("  …  ", onBg(t.WarningFg, t.WarningBg)),
-			styled(" no output for a while", fg(t.Notice)),
-			styled("   waiting for input?  i types at it   ⇧I re-runs so you can see it   x stops", fg(t.Dim)),
+			styled("  …  ", onBg(t.Colors.WarningFg, t.Colors.WarningBg)),
+			styled(" no output for a while", fg(t.Colors.Notice)),
+			styled("   waiting for input?  i types at it   ⇧I re-runs so you can see it   x stops", fg(t.Colors.Dim)),
 		}
 	}
 
@@ -1120,9 +1334,9 @@ func (a *App) runFooter() line {
 	if a.AwaitingInput() {
 		prompt, _ := promptOf(a.Run)
 		return line{
-			styled("  ?  ", onBg(t.WarningFg, t.WarningBg)),
-			styled(" "+prompt, fg(t.Notice)),
-			styled("   i to answer   x to stop", fg(t.Dim)),
+			styled("  ?  ", onBg(t.Colors.WarningFg, t.Colors.WarningBg)),
+			styled(" "+prompt, fg(t.Colors.Notice)),
+			styled("   i to answer   x to stop", fg(t.Colors.Dim)),
 		}
 	}
 
@@ -1141,13 +1355,14 @@ func (a *App) runFooter() line {
 			label = "filter: "
 		}
 		l := line{
-			styled(label, fg(t.Search)),
+			plain(" "),
+			styled(label, fg(t.Colors.Search)),
 			plain(a.SearchInput),
-			styled("█", fg(t.Search)),
+			styled(t.Glyphs.Cursor, fg(t.Colors.Search)),
 		}
 		switch {
 		case a.SearchError != "":
-			l = append(l, styled("   "+a.SearchError, fg(t.StatusFailed)))
+			l = append(l, styled("   "+a.SearchError, fg(t.Colors.StatusFailed)))
 		case a.Search != nil:
 			tasks := map[string]bool{}
 			for _, h := range a.SearchHits {
@@ -1156,15 +1371,15 @@ func (a *App) runFooter() line {
 			n := len(a.SearchHits)
 			l = append(l, styled(fmt.Sprintf("   %d %s in %d %s",
 				n, plural(n, "match", "matches"),
-				len(tasks), plural(len(tasks), "task", "tasks")), fg(t.Dim)))
+				len(tasks), plural(len(tasks), "task", "tasks")), fg(t.Colors.Dim)))
 		}
-		return append(l, styled("   ⏎ keep   esc clear", fg(t.Dim)))
+		return append(l, styled("   ⏎ keep   esc clear", fg(t.Colors.Dim)))
 	}
 
 	if a.Status != "" {
-		return line{styled(a.Status, fg(t.Notice))}
+		return line{plain(" "), styled(a.Status, fg(t.Colors.Notice))}
 	}
-	return line{styled(keys.Footer(&keys.Run), fg(t.Dim))}
+	return a.hintBar(&keys.Run)
 }
 
 func plural(n int, one, many string) string {

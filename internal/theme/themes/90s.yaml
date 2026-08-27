@@ -1,0 +1,80 @@
+# 90s — a Taskfile as seen through a CRT.
+#
+# The reference is the era's web and the DOS software it grew out of: hot magenta and
+# electric cyan on black, double-ruled boxes, blocky arrows, a wordmark in shade blocks.
+# It commits to pinned RGB rather than ANSI names, because the whole point of this look is
+# that it is the same on every terminal — a vaporwave palette that politely followed your
+# Solarized scheme would not be one.
+extends: default
+
+colors:
+  # Magenta leads. Everything structural is drawn in it or in the cyan that answers it.
+  accent: "#ff2fd0"
+  mode: "#00f0ff"
+
+  # Chrome is electric rather than grey: the era did not do subtle, and a grid line was a
+  # feature you could see.
+  dim: "#00c2c8"
+  faint: "#7a2f9e"
+  rule: "#ff2fd0"
+  text: default
+
+  # Reverse video would waste the palette. A saturated indigo bar under the cursor is what
+  # a selected row looked like when selection was a colour somebody chose.
+  selection: "#3a1a78"
+  selection-light: "#ff2fd0"
+  selection-shade: "#1a0b3d"
+
+  alias: "#ffe94a"
+  danger: "#ff3b3b"
+
+  status-ok: "#3dff88"
+  status-running: "#ffe94a"
+  status-failed: "#ff3b3b"
+  status-skipped: "#7a2f9e"
+  status-pending: "#7a2f9e"
+
+  command: "#00f0ff"
+
+  search: "#ff2fd0"
+  match-fg: "#12002a"
+  match-bg: "#ffe94a"
+
+  notice: "#ffe94a"
+  stored: "#00f0ff"
+  interactive: "#3dff88"
+  warning-fg: "#12002a"
+  warning-bg: "#ffe94a"
+  confirm-fg: "#12002a"
+  confirm-bg: "#ff2fd0"
+
+glyphs:
+  # Shade blocks either side, the way every banner and every horizontal rule did it.
+  wordmark: "░▒▓ TASKUI ▓▒░"
+  separator: "»"
+  dot: "•"
+
+  # Solid triangles, not the hairline ones. Filled means open, hollow means ajar.
+  fold-open: "▼"
+  fold-closed: "►"
+  fold-peek: "▽"
+
+  # Double-struck guides and rules — the border style of every table on every page.
+  guide-branch: "╠"
+  guide-last: "╚"
+  guide-vertical: "║"
+
+  rail: "▐"
+  selection-shade: "▌"
+  rule: "═"
+
+  command: "»"
+  warning: "‼"
+  danger: "☢"
+  cursor: "▓"
+
+  status-ok: "√"
+  status-failed: "X"
+  status-running: "►"
+  status-pending: "░"
+  status-skipped: "▪"

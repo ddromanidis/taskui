@@ -46,6 +46,54 @@ archives:
       - taskui.1
       - config.high-contrast.yaml
 
+# The tap. A Homebrew tap is just a GitHub repository called `homebrew-<something>`, and
+# this writes the cask into it on every release — so `brew upgrade` is the same release the
+# binaries above came from, rather than a second thing to remember to update.
+#
+# A cask rather than a formula because goreleaser deprecated `brews:` in 2.18 and Homebrew
+# itself now wants prebuilt binaries in casks. The generated file carries `on_linux` URLs,
+# but Homebrew installs casks on macOS only — Linux goes through `go install` or the
+# archives above, which is where a Linux user was heading anyway.
+#
+# It needs a token with write access to the tap repo, which is not the one GitHub Actions
+# hands you for this one: `GITHUB_TOKEN` is scoped to the repository the workflow runs in,
+# and the tap is a different repository.
+homebrew_casks:
+  - name: taskui
+    repository:
+      owner: ddromanidis
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/ddromanidis/taskui"
+    description: "A folding, searchable front end for go-task"
+    license: "MIT"
+    manpages:
+      - taskui.1
+    # taskui is a front end for go-task, not a replacement: without it on PATH the first
+    # thing it does is fail to find any tasks.
+    dependencies:
+      - formula: go-task
+    commit_author:
+      name: goreleaser
+      email: noreply@github.com
+    commit_msg_template: "taskui {{ .Tag }}"
+    hooks:
+      post:
+        # An unsigned binary downloaded by Homebrew still carries macOS's quarantine flag,
+        # and Gatekeeper refuses it the first time you run it. Clearing it here is what the
+        # `brew install` was for.
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/taskui"]
+          end
+    caveats: |
+      taskui needs go-task on your PATH, which came with this cask.
+
+      Themes:  taskui --list-themes
+      Keys:    ? inside taskui lists every binding.
+
 checksum:
   name_template: "checksums.txt"
 

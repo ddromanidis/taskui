@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/ddromanidis/taskui/internal/graph"
+	"github.com/ddromanidis/taskui/internal/keys"
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/ddromanidis/taskui/internal/store"
 	"github.com/ddromanidis/taskui/internal/task"
 )
 
@@ -50,19 +52,43 @@ func find(lines []string, want string) (string, bool) {
 	return "", false
 }
 
-func TestHeaderNamesTheActivePivot(t *testing.T) {
+// The header names both halves of the pivot and accents the one you are in, which is what
+// let the footer stop saying `p group by verb`.
+func TestHeaderNamesBothPivotsAndAccentsTheActiveOne(t *testing.T) {
 	a := viewSample(t)
 	lines := a.RenderHeadless(70, 12)
-	for _, want := range []string{"taskui", "atlas", "group: domain"} {
+	for _, want := range []string{"taskui", "atlas", "domain·verb"} {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("header %q is missing %q", lines[0], want)
 		}
 	}
 
+	active, other := a.pivotStyle(pivot.Domain), a.pivotStyle(pivot.Verb)
+	if active.GetForeground() == other.GetForeground() {
+		t.Error("the two halves should not look alike")
+	}
+
 	a.ToggleMode()
-	lines = a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[0], "group: verb") {
-		t.Errorf("header = %q", lines[0])
+	if a.pivotStyle(pivot.Verb).GetForeground() != active.GetForeground() {
+		t.Error("pivoting should move the accent to the other half")
+	}
+	if !strings.Contains(a.RenderHeadless(70, 12)[0], "domain·verb") {
+		t.Error("and both halves stay named")
+	}
+}
+
+// `taskui · taskui` — the wordmark, then a directory that happens to share its name — is a
+// row spent saying the same thing twice.
+func TestTheWordmarkIsNotRepeatedAsTheProject(t *testing.T) {
+	a := appWith(t, []string{"all"})
+	a.Root = "/src/taskui"
+	if got := a.RenderHeadless(70, 12)[0]; strings.Count(got, "taskui") != 1 {
+		t.Errorf("header = %q", got)
+	}
+
+	a.Root = "/src/atlas"
+	if got := a.RenderHeadless(70, 12)[0]; !strings.Contains(got, "taskui ▸ atlas") {
+		t.Errorf("header = %q", got)
 	}
 }
 
@@ -70,20 +96,20 @@ func TestHeaderNamesTheActivePivot(t *testing.T) {
 func TestGroupsRenderFoldGlyphAndCount(t *testing.T) {
 	a := viewSample(t)
 	lines := a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[1], "▸ (root)") {
-		t.Errorf("row = %q", lines[1])
+	if !strings.Contains(lines[2], "▸ (root)") {
+		t.Errorf("row = %q", lines[2])
 	}
-	if !strings.Contains(lines[1], "2") {
-		t.Errorf("root holds all + lint: %q", lines[1])
+	if !strings.Contains(lines[2], "2") {
+		t.Errorf("root holds all + lint: %q", lines[2])
 	}
 
 	a.SetFoldAll(true)
 	lines = a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[1], "▾ (root)") {
-		t.Errorf("row = %q", lines[1])
-	}
-	if !strings.Contains(lines[2], "all") {
+	if !strings.Contains(lines[2], "▾ (root)") {
 		t.Errorf("row = %q", lines[2])
+	}
+	if !strings.Contains(lines[3], "all") {
+		t.Errorf("row = %q", lines[3])
 	}
 }
 
@@ -112,7 +138,7 @@ func TestTheSlotBarAppearsOnlyOnceASecondRunIsOpen(t *testing.T) {
 func TestTasksShowDescriptionsAndDangerMarker(t *testing.T) {
 	a := viewSample(t)
 	a.SetFoldAll(true)
-	lines := a.RenderHeadless(70, 12)
+	lines := a.RenderHeadless(70, 20)
 
 	lint, ok := find(lines, "Lint all")
 	if !ok || !strings.Contains(lint, "Lint all source code") {
@@ -179,46 +205,57 @@ func TestRendersAtOneTwoAndThreeColumns(t *testing.T) {
 	}
 }
 
-// With columns the list pages rather than scrolling a line at a time, and the cursor must
-// stay on screen when it moves past the end of the page.
-func TestTheWindowPagesToFollowTheCursor(t *testing.T) {
+// The window follows the cursor down a long list and comes back again.
+func TestTheWindowFollowsTheCursor(t *testing.T) {
 	a := manyTasks(t, 60)
 	w, h := 150, 12
-	// Body is height minus the header and footer rows.
-	capacity := (h - 2) * 3
 
 	first := a.RenderHeadless(w, h)
-	if !strings.Contains(first[1], "(root)") {
-		t.Errorf("should start at the top: %q", first[1])
+	if !strings.Contains(first[2], "(root)") {
+		t.Errorf("should start at the top: %q", first[2])
 	}
 
-	a.Cursor = capacity + 5
+	a.Cursor = 40
 	paged := a.RenderHeadless(w, h)
-	if strings.Contains(paged[1], "(root)") {
-		t.Errorf("the window should have moved to follow the cursor: %q", paged[1])
+	if strings.Contains(paged[2], "(root)") {
+		t.Errorf("the window should have moved to follow the cursor: %q", paged[2])
 	}
-	if _, ok := find(paged, fmt.Sprintf("task%03d", capacity+4)); !ok {
-		t.Error("the cursor's row should be on screen")
+	label := a.Tree.Nodes[a.Rows[a.Cursor].Node].Label
+	if _, ok := find(paged, label); !ok {
+		t.Errorf("the cursor's row %q should be on screen", label)
 	}
 
 	// …and back.
 	a.Cursor = 0
-	home := a.RenderHeadless(w, h)
-	if !strings.Contains(home[1], "(root)") {
-		t.Errorf("row = %q", home[1])
+	if home := a.RenderHeadless(w, h); !strings.Contains(home[2], "(root)") {
+		t.Errorf("row = %q", home[2])
 	}
 }
 
-// Narrowing the list changes the column count underneath the layout.
-func TestFilteringAcrossAColumnCountChangeDoesNotPanic(t *testing.T) {
+// A tree cannot be columnised: its columns fill sequentially, so a group header ends in one
+// column while its own children continue in the next.
+func TestTheTreeIsNeverSplitIntoColumns(t *testing.T) {
+	a := manyTasks(t, 200)
+	for _, w := range []int{100, 150, 300} {
+		lines := a.RenderHeadless(w, 30)
+		for _, l := range lines[2 : len(lines)-2] {
+			if n := strings.Count(l, "task"); n > 1 {
+				t.Errorf("%d wide: two tasks on one row: %q", w, l)
+			}
+		}
+	}
+}
+
+// Typing a filter reshapes the list under the layout on every keystroke.
+func TestFilteringRendersOnEveryKeystroke(t *testing.T) {
 	a := manyTasks(t, 80)
 	w, h := 150, 12
 
 	for _, c := range "task01" {
 		a.PushQuery(c)
 		lines := a.RenderHeadless(w, h)
-		if !strings.Contains(lines[0], "filter") {
-			t.Errorf("header = %q", lines[0])
+		if !strings.Contains(lines[0], "/"+a.Query) {
+			t.Errorf("header %q does not show the query %q", lines[0], a.Query)
 		}
 	}
 	if len(a.Rows) >= 20 {
@@ -478,7 +515,7 @@ func TestAWrappedDescriptionMakesItsRowTaller(t *testing.T) {
 	height := func(a *App) int {
 		for _, r := range a.Rows {
 			if a.Tree.Nodes[r.Node].Task != pivot.NoTask {
-				return len(a.treeItem(r, 56))
+				return len(a.treeItem(r, false, 56))
 			}
 		}
 		t.Fatal("no task row")
@@ -495,15 +532,75 @@ func TestAWrappedDescriptionMakesItsRowTaller(t *testing.T) {
 	}
 }
 
-func TestFooterOffersTheOtherPivot(t *testing.T) {
-	a := viewSample(t)
-	lines := a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[11], "p group by verb") {
-		t.Errorf("footer = %q", lines[11])
+// The footer stops at a binding boundary and always keeps room for the pointer to the rest.
+// It used to be built at full length and clipped by the renderer, which ended it mid-word.
+func TestTheFooterNeverEndsMidBinding(t *testing.T) {
+	a := manyTasks(t, 20)
+	for _, w := range []int{30, 40, 56, 70, 92, 150, 300} {
+		lines := a.RenderHeadless(w, 14)
+		footer := strings.TrimSpace(lines[len(lines)-1])
+		if !strings.HasSuffix(footer, "? keys") {
+			t.Errorf("%d wide: footer %q loses the pointer to the full keymap", w, footer)
+		}
+		whole := map[string]bool{"? keys": true}
+		for _, hint := range keys.FooterHints(&keys.Picker) {
+			whole[hint.Keys+" "+hint.Footer] = true
+		}
+		// Every piece the footer offers is a complete hint, never a prefix of one.
+		for piece := range strings.SplitSeq(footer, "   ") {
+			if piece = strings.TrimSpace(piece); piece != "" && !whole[piece] {
+				t.Errorf("%d wide: %q is not a whole binding, in %q", w, piece, footer)
+			}
+		}
 	}
-	a.ToggleMode()
-	lines = a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[11], "p group by domain") {
-		t.Errorf("footer = %q", lines[11])
+}
+
+// Every description starts in the same column, whatever badges the row is carrying. It used
+// to start wherever the row before it happened to end.
+func TestDescriptionsAllStartInTheSameColumn(t *testing.T) {
+	tasks := pivot.Fixture([]string{"alpha", "beta", "gamma"})
+	for i := range tasks {
+		tasks[i].Desc = "A description"
+	}
+	tasks[1].Aliases = []string{"b"}
+	tasks[2].Dangerous = true
+
+	a := New(tasks, "/tmp/repo")
+	a.SetStateDir(t.TempDir())
+	a.SetFoldAll(true)
+	a.Outcomes = map[string]store.Outcome{"gamma": {Ok: false, WhenUnix: 1}}
+
+	at := -1
+	for _, l := range a.RenderHeadless(80, 12) {
+		i := strings.Index(l, "A description")
+		if i < 0 {
+			continue
+		}
+		if at >= 0 && i != at {
+			t.Errorf("description column moved from %d to %d: %q", at, i, l)
+		}
+		at = i
+	}
+	if at < 0 {
+		t.Fatal("no descriptions rendered")
+	}
+}
+
+// The cursor rail marks the selected row, and only that row.
+func TestTheRailMarksTheCursorRow(t *testing.T) {
+	a := manyTasks(t, 20)
+	a.Cursor = 3
+	lines := a.RenderHeadless(80, 16)
+	railed := 0
+	for _, l := range lines {
+		if strings.HasPrefix(l, a.Theme.Glyphs.Rail) {
+			railed++
+		}
+	}
+	if railed != 1 {
+		t.Errorf("%d rows carry the rail, want exactly 1", railed)
+	}
+	if !strings.HasPrefix(lines[2+3], a.Theme.Glyphs.Rail) {
+		t.Errorf("the rail is not on the cursor's row: %q", lines[2+3])
 	}
 }

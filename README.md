@@ -1,14 +1,73 @@
 # taskui
 
-A folding, searchable front end for [go-task](https://taskfile.dev).
+A folding, searchable front end for [go-task](https://taskfile.dev): browse a Taskfile, run
+tasks, and keep their output around to fold and search afterwards — live and across
+previous runs.
 
-`taskui` is meant to be the thing you sit in — browse the tasks, run them, and keep their
-output around to fold and search afterwards.
+```
+ taskui ▸ atlas                                        domain·verb   122 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+▌▾ backend                                                                  26
+ ├ build          Compile the workspace
+ ├ check          Type-check only — fastest feedback                 c    ✓ 4m
+ ├ lint           Clippy, warnings are errors, plus a format check        ✗ 9m
+ └ migrate        Apply pending migrations                                   ⚠
+ ▸ deploy                                                               ⚠    9
+ ─────────────────────────────────────────────────────────────────────────────
+ space o fold   ⏎ run   a args   / filter   t jump   s detail           ? keys
+```
 
-Worked examples of every feature: [EXAMPLES.md](EXAMPLES.md).
+## What it is
 
-[![CI](https://github.com/ddromanidis/taskui/actions/workflows/ci.yml/badge.svg)](https://github.com/ddromanidis/taskui/actions/workflows/ci.yml)
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+Four screens, one keymap.
+
+**The picker** is the Taskfile as a fold tree, which it already is — `backend:migrate:down`
+is a path, not a name. It pivots: by domain (`backend` › `migrate` › `down`) or by verb
+(`lint` › `app:lint`, `backend:lint`, `infra:lint`), and the second one is the transpose of
+the first. Each row says how the task went last time, or how long it has been running right
+now, in a slot you may not be looking at.
+
+**The run view** is the execution tree with the output folded into it. Every task rests on
+a *peek* — a window on its last few lines — so a glance tells you what each step is saying
+without opening any of them. It follows what is running, and the moment something fails it
+stops there and opens it.
+
+**Slots** let runs outlive your attention. Start `docker compose up`, leave it, run
+something else; the first one keeps going in a slot you can switch back to, with its scroll
+position, its folds and its output intact. Quitting takes every one of them down rather
+than orphaning it.
+
+**The archive** keeps finished runs on disk as plain text — a directory per run, a
+`manifest.json`, and a `.txt` and `.ansi` file per task. `taskui --search 'FAIL'` greps all
+of it from anywhere, which is the "when did this start failing" question you could not ask
+before.
+
+## Why
+
+`task --list` prints a flat wall of names. Running one prints a flat wall of output. When
+the output scrolls past, it is gone.
+
+That is fine at ten tasks and stops being fine somewhere around forty. A real Taskfile with
+`includes:` has a hundred and twenty of them across nine namespaces, most named after a
+domain and a verb, and the flat list throws away both — you scroll looking for the one
+whose name you half remember. Meanwhile a `task all` that fails somewhere in the middle
+gives you eight thousand lines and a cursor, and the useful part is forty of them.
+
+taskui does four things about that, and they are the only four ideas in it:
+
+- **The names are a tree, so show a tree.** And show it two ways, because "everything in
+  the backend" and "every lint everywhere" are both real questions.
+- **Output belongs to the task that printed it.** go-task's `--output prefixed` tags every
+  line; pairing that with the execution graph reconstructs the tree the run actually was,
+  so the output folds into the shape of the thing that produced it.
+- **A peek beats a fold.** A task folded down to nothing is a task you have to open to find
+  out whether it was worth opening. On a twenty-six node run that is twenty-six guesses.
+  The last few lines answer it, because the end of a command's output is the part that says
+  how it went.
+- **A run that ended is not a run that is gone.** Keep it, in a format anything can read,
+  and make it searchable.
+
+Everything else follows from those, and the reasoning is in [DESIGN.md](DESIGN.md).
 
 ## Status
 
@@ -70,14 +129,28 @@ leave its children running.
 ### Homebrew
 
 ```
-brew install ddromanidis/tap/taskui
+brew install --cask ddromanidis/tap/taskui
 ```
 
-The tap builds from source, so it needs a Go toolchain and takes a moment the first time;
-it pulls in `go-task` as a dependency, so that arrives with it.
+macOS only, and it pours a prebuilt binary rather than building from source, so it needs no
+Go toolchain and takes a second. `go-task` comes with it as a dependency. On Linux, take an
+archive from the releases page or use `go install`.
 
-To update, `brew upgrade taskui`. To remove, `brew uninstall taskui` — and
+To update, `brew upgrade --cask taskui`. To remove, `brew uninstall --cask taskui` — and
 `brew untap ddromanidis/tap` if you want the tap gone too.
+
+The cask is written by the release itself, so what `brew` gives you is the same build the
+release page does. Setting the tap up is a one-off:
+
+1. Create a public GitHub repository called **`homebrew-tap`**. The `homebrew-` prefix is
+   what makes it a tap; `ddromanidis/tap` is how Homebrew spells the rest.
+2. Make a fine-grained personal access token with **contents: read and write** on that
+   repository, and add it to *this* repository as an Actions secret named
+   `HOMEBREW_TAP_GITHUB_TOKEN`. The `GITHUB_TOKEN` Actions hands the workflow is scoped to
+   the repository the workflow runs in, and the tap is a different repository — which is
+   the whole reason this needs a second one.
+3. Tag and push. The release workflow builds, publishes, and commits `Casks/taskui.rb` into
+   the tap.
 
 ## Usage
 
@@ -95,10 +168,11 @@ taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
 binding, grouped by context. The footer shows a subset of
 the same table — one source of truth, so the two cannot disagree.
 
-The picker lays itself out in up to three columns when the list does not fit the terminal,
-which on a 122-task Taskfile is most of the time. Narrow columns drop descriptions rather
-than truncating them: three columns of clean names beat three columns of "Regenerate
-the". Below about 90 columns of width it stays single-column and keeps the descriptions.
+The picker is one column at any width. A list can be columnised; a tree cannot — the
+columns fill in sequence, so a group header ends in one while its own children continue in
+the next, and the indentation that says which task belongs to what stops meaning anything.
+The width goes to the description instead. The run view still splits, because its rows do
+not depend on each other.
 
 In the picker:
 
@@ -143,55 +217,6 @@ In a run:
 | `h` | past runs |
 | `esc` | back to the picker (every run keeps going) |
 
-## Colours
-
-Every colour the UI draws is configurable from `~/.config/taskui/config.yaml`
-(`$XDG_CONFIG_HOME/taskui/config.yaml` if set, or `--config PATH`):
-
-```yaml
-colors:
-  accent: magenta
-  status-ok: "#7ee787"
-  status-failed: "#ff7b72"
-  selection: "#1e2030"
-  search: bright-cyan
-```
-
-If the defaults wash out — embedded terminals like Neovim's `:terminal` often render the
-dimmer half of the ANSI palette very close to the background — there is a louder set ready
-to go:
-
-```
-mkdir -p ~/.config/taskui && cp config.high-contrast.yaml ~/.config/taskui/config.yaml
-```
-
-Values are an ANSI name (`red`, `bright-blue`, `purple`), a `#rrggbb`, or a 0–255 palette
-index. Names follow whatever your terminal's own scheme says — usually what you want from
-a terminal program — while `#rrggbb` pins the colour exactly.
-
-`taskui --dump-config` prints all 24 keys at their current defaults, each with a comment
-saying what it paints, so `taskui --dump-config > ~/.config/taskui/config.yaml` gives you
-a file to edit rather than a form to fill in. It round-trips: a dumped config loads back
-identical, which is tested rather than assumed.
-
-`selection` is special: `default` means reverse video, which cannot be invisible whatever
-your colourscheme is. Any real colour is used as a background instead. The original
-default was a fixed `#282c34`, which looked deliberate on the theme it was picked against
-and disappeared on every other one.
-
-Every key is optional, so a two-line file is valid and a missing file is the normal case.
-Both `colors:` and `colours:` are accepted. A bad value or a misspelled key is reported in
-the status bar rather than ignored — a colour that silently does nothing is worse than one
-that says why:
-
-```
-config: bad.yaml: colors: unknown field `moode`, expected one of `accent`, `dim`, …
-```
-
-The colours live in one table in `internal/theme/theme.go`, so adding one is a
-single line and no call site holds a literal. That is the reason "configurable" was a
-contained change rather than a hunt through the rendering code.
-
 ## Two pivots
 
 Grouping is a pivot, not a set of bespoke views: one flat list of tasks plus a key
@@ -235,257 +260,6 @@ most of the implementation cost:
 - **Fold state is per-mode.** Bouncing between pivots does not collapse what you opened on
   the other side.
 
-## Notes on the design
-
-A node can be **both a group and a task**. `backend:migrate` applies migrations *and*
-parents `backend:migrate:down`, `:prod`, `:status`, `:schema`. Collapsing those into one
-concept loses one of them, so `Node` carries `task` and `children` independently.
-
-This is why `space` and `⏎` are kept strictly separate rather than one key that folds
-groups and runs leaves. `⏎` on `▸ migrate  5` runs it from its own header, so the subtree
-never has to relist the task just to make it reachable.
-
-**Domain and file are not the same thing.** In atlas, `sec:*` and `wt:*` are namespaced
-inline in the root `Taskfile.yml` rather than included from their own files, so "which
-namespace is this in" and "where do I go to edit it" have different answers. A file pivot
-is a few lines away — `location.taskfile` is already parsed — but it is not wired up yet.
-
-**`*:default` tasks are dropped.** In a UI where a namespace is itself a selectable row, a
-task whose only job is "show available tasks" is noise.
-
-**Production tasks are flagged `⚠` and need a confirmation.** `⏎` runs things for real and
-a fuzzy filter puts every task one keypress away, so the dangerous ones stop and ask:
-
-```
-  ⚠   run task infra:deploy  —  this one touches production.  y to run, anything else cancels
-```
-
-Which tasks those are comes from a `.taskui-danger` file in the project root: one pattern
-per line, `*` matches any characters, `#` comments. Its presence switches off the
-description heuristic **entirely** — a guess and a declaration disagreeing about which
-tasks are dangerous is worse than either alone, so once the list is written down, the list
-is the answer.
-
-With no such file, the old heuristic over names and descriptions applies, which both over-
-and under-matches. atlas's list flags 18 of 122 tasks; the heuristic caught
-`infra:deploy:plan` too, which is explicitly read-only.
-
-**Filtering is fuzzy over the full colon path**, so `blint` finds `backend:lint`. It will
-also occasionally surprise you — `lint` matches `api:gen:client` — the price of fuzzy
-matching. Matches keep tree order rather than score order, because the tree *is* the
-organisation and resorting it by score would destroy the grouping you are looking at.
-
-## Runs
-
-`⏎` starts `task <name>` and switches to the run view: the execution tree, each task's
-status and duration, and **a window on the last few lines it printed**.
-
-```
-taskui · ✗ task all   12.4s   exit 201
-  ✗ all              12.40s
-    ✓ lint            3.40s
-  ▿ ✓ api:check       1.10s   29 more
-      30 │ checked 41 files
-      31 │ no issues found
-    ▸ ✓ app:lint      0.80s   12 lines
-  ▾ ✗ backend:test    7.10s
-       1 $ task: [backend:test] cargo test --workspace
-       2 │ --- FAIL: TestOrderTotal (0.00s)
-       3 │     order_test.go:88: want 1200, got 1180
-```
-
-Every task carries its own clock, ticking while it runs rather than appearing only once it
-finishes — during a slow build the useful question is *which step* is slow, and the total
-in the header cannot answer it. Durations are formatted to be read at a glance: `4ms`,
-`1.5s`, `2m14s`, rather than `0.00s` and `134.20s`.
-
-Output lines are rows of the same list as the tasks that produced them, which is what lets
-one fold tree hold both.
-
-### The peek window
-
-Folded used to mean empty, and empty is not an answer. A run of 26 nodes collapsed to 26
-rows tells you what ran and how long it took, and to find out whether any of it is worth
-reading you open them one at a time and guess. So `space`/`o` walks **three** states rather
-than two, and the resting one shows something:
-
-| glyph | state | what you get |
-| --- | --- | --- |
-| `▸` | hidden | the task, its status, its duration, `34 lines` |
-| `▿` | **peek** | the last 5 lines, one row each, and `29 more` |
-| `▾` | full | all of it, wrapped |
-
-The peek is a **window on the end** of the buffer, not the start. A command's output puts
-its verdict last — the assertion, the stack frame, the "3 migrations pending" — and a task
-still going has its news at the bottom by definition. It tails: what is in the window is
-whatever arrived most recently, so a peeking `docker compose logs -f` is a live five-line
-view of the stack while you work on something else.
-
-Peeked lines are **cut at the edge rather than wrapped**, which is the trade the window
-makes: five lines has to mean five lines, and one 300-character stack frame wrapped into
-nine rows would mean showing one of them. Open it fully and wrapping comes back — that is
-the mode you read in, and the one where a search hit past column 100 has to be visible.
-
-Five is a default, not a law: `peek-lines:` in `config.yaml` sets it, because how much is
-enough is a property of the tools you run.
-
-`⇧O` moves every task at once, along the same cycle. Mixed states go to full first, since
-mixed almost always means *I opened two of these and now want the rest*.
-
-Output lines are numbered per task, and in full they wrap rather than truncate. Go's own tools and
-anything you run through them emit lines well past 100 columns, and a line cut at the terminal edge can still
-*match a search* — a hit you cannot see is worse than no hit at all. Wrapping prefers word
-boundaries and hard-splits tokens too long to fit, so a long type signature stays
-readable. Continuation rows keep a blank gutter so the numbers stay scannable.
-
-The view follows whatever is running, and the moment something fails it unfolds that task
-and parks there. Any deliberate cursor move turns following off — once you have gone
-looking for something, the view should stop moving under you. `w` turns it back on.
-
-Following moves the cursor **and nothing else**. It does not open what is running: every
-task already rests on a window of its own last few lines, so the live one is showing its
-latest output wherever it sits, and expanding it would push the twenty-five windows around
-it off the screen — which is the whole reason to watch a run instead of tailing a log. A
-fold you set yourself is yours, and following will not overrule it when the next task
-starts.
-
-Reading is likewise not disturbed by output arriving elsewhere. The cursor tracks the line
-it is *on*, not the row number it happens to sit at, so a task higher up the tree printing
-another hundred lines no longer slides the stack trace you are halfway through out from
-under you.
-
-`r` re-runs the task under the cursor, including when the cursor is on one of its output
-lines. Note that this is a fresh `task <name>` and not a resume of the parent pipeline
-from that point: go-task exposes no resume, and pretending otherwise would be a lie.
-
-`⇧R` is the same re-run with `--force`. Plain `r` inherits the flags the run was started
-with, so a task go-task considers up to date declines to run and hands back a tick that
-proves nothing — and the picker's `F` is behind an `esc`, away from the output you are
-working against. `⇧R` is what you wanted the second time you pressed `r`. The override only
-adds: `r` on a run that was already forced stays forced.
-
-`esc` leaves the run view without stopping the run — it carries on, and the picker header
-says so. `x` stops it.
-
-Stopping means signalling the **process group**, not the `task` process. Killing `task`
-alone leaves the shell commands beneath it running: verified by killing taskui mid-run and
-watching `sleep` carry on afterwards. The pty puts the child in its own session, so the
-group can be signalled at once, which is what actually reaps the tree. The same happens
-when a `Run` is dropped, and `q` walks every open run on the way out — the focused one and
-every parked one — so quitting cannot silently orphan a container. Because that reaches
-runs you are not looking at, `q` asks first whenever anything is still going.
-
-The first signal is a **SIGTERM**, deliberately, because it can be caught: `docker compose
-up` reads it as "take the containers down", and skipping it would leave the stack up while
-taskui reported it stopped.
-
-Which is also the problem. Things that catch SIGTERM can decline to act on it — a `trap`
-in a shell script, a runtime blocked on a call that is never going to return — and one of
-them outliving the run it belonged to is exactly the orphan this is all here to prevent.
-So there are two answers:
-
-- **A second `x`** sends **SIGKILL**, which cannot be caught. The run view says so while
-  it is stopping rather than making you guess whether the first press landed.
-- **Anything left in the group** a moment after go-task itself has gone is taken with
-  SIGKILL regardless. This has to happen where it does — in the capture thread, between
-  the output ending and the child being waited on — because waiting on the child releases
-  its pid, and that pid is the group's only name. A moment later it names somebody else.
-
-That second one applies only to a run you *stopped*. A run that ended on its own may have
-left something behind entirely on purpose — `docker compose up -d` is a task whose whole
-job is to outlive itself — and killing that would be tearing down a stack as a reward for
-succeeding.
-
-The one case nothing can cover is taskui being killed from outside — `kill -9` runs no
-destructors, in any program — so an externally-killed taskui does still leave its build
-running.
-
-Two pieces of machinery make this work, and neither is obvious.
-
-**Which task produced this line** comes from `--output prefixed`, which tags every output
-line at the source. See below for why the alternatives do not work.
-
-**Who called whom** comes from `task --summary`, recursed from the invoked root. The
-`--list-all --json` output carries no dependencies, so the alternative was parsing seven
-Taskfiles and reimplementing `includes:` resolution. `--summary` reports a task's direct
-edges using go-task's own resolver, which costs one process per node — about 1.3s for
-atlas's 26-node `all` — and cannot drift from what go-task actually does. It runs on a
-worker thread, so the tree appears greyed-out immediately rather than freezing the UI.
-
-A task reached by two paths is one node in the graph and gets one row: atlas's `app:css`
-is invoked by both `check` and `build`, and showing it twice would imply it ran twice.
-
-### Long-running tasks
-
-Tasks that do not end are fine here — `docker compose up`, `docker compose logs -f`, a dev
-server, a `tail -f`. Leave one up and keep working: **runs live in slots, one per task
-name, and starting a different task no longer disturbs the one already going.**
-
-```
-taskui · ▶ task test   2.1s
-  1 ▶ logs 41m12s   2 ▶ test 2.1s   3 ✓ lint 3.4s
-```
-
-The bar appears once there is a second run to switch to. `⇥` and `⇧⇥` cycle, `1`…`9` jump
-straight to a slot, and each slot keeps its own scroll position, folds and follow state —
-coming back to a stack you left up an hour ago should not mean coming back to the top of
-its log. Six slots; a finished one is recycled automatically when you need a seventh, a
-live one never is.
-
-Everything keeps draining while it is parked, so nothing is lost while you are looking
-somewhere else, and a background run archives itself the moment it ends — the status line
-says so rather than making you go and check. From the picker, the header counts what is
-still going, and names it when there is only one.
-
-**And the rows themselves say what is running.** A task with a live slot shows `▶` and a
-ticking elapsed time in place of its outcome column — the same reading as the slot bar's, so
-the two agree at a glance. Previously that column only ever answered *how did it go last
-time*, which meant a task running this second looked exactly like one that ran yesterday:
-the footer could say `3 running` while every row in front of you showed nothing but history.
-Running now displaces the historical mark rather than sitting beside it, because it is the
-more urgent of the two questions; once the run ends the row goes back to reporting how it
-went.
-
-**`v` goes to what is running**, not to whichever slot you left last. If the slot on screen
-is already live it stays put; otherwise it takes the earliest-started live one, so pressing
-`v` twice lands in the same place rather than hopping between two running tasks. With
-nothing live it falls back to the last run — *what just happened* being the useful answer
-when there is nothing to watch.
-
-**Stopping one you are not looking at** does not mean going to look at it first. `x` in the
-picker stops whichever slot holds the task under the cursor — from there nothing is on
-screen, so every run is a background run, and loading a 20,000-line buffer to press one key
-is not a reasonable toll. `⇧K` stops every slot at once without leaving taskui. Both ask
-before taking down more than the run in front of you.
-
-Output is capped at 20,000 lines per task, dropped in blocks from the oldest end and
-counted, so the row says `12000 earlier dropped` rather than quietly presenting a
-truncated log as the whole thing. Without the cap a tailed container log is a few hundred
-bytes a line for as long as you leave it up, which is gigabytes by the afternoon.
-
-Two things are worth knowing. A run that never ends is never archived — stopping it with
-`x` writes it out, but until then it exists only in memory. And there is still no detach:
-`q` stops every slot, because a container left behind by a tool that has exited is exactly
-the orphan the process-group handling above exists to prevent. Quitting therefore waits for
-those groups to actually be gone rather than signalling them and walking away, which is a
-second or so with a stack up.
-
-For **running tasks against a stack you have up**, split the finite part from the infinite
-one so go-task can still order them:
-
-```yaml
-tasks:
-  up:    { cmds: ["docker compose up -d --wait"] }   # exits when healthy — deps-able
-  logs:  { cmds: ["docker compose logs -f"] }        # the one that owns a slot
-  test:  { deps: [up], cmds: ["docker compose exec -T app pytest"] }
-```
-
-`deps: [up]` can never work against a foreground `docker compose up`, because it never
-returns; `--wait` makes readiness go-task's problem, which it is good at. The `-T` matters
-for the reason described under [Why `--output prefixed`](#why---output-prefixed): every
-command runs behind go-task's prefixing pipe, so `exec` without `-T` refuses with "the
-input device is not a TTY".
-
 ## Arguments
 
 Plenty of tasks need them — `wt:new NAME=backend`, `backend:test -- -p ingest`,
@@ -521,117 +295,295 @@ The line is a real input: `←`/`→`, `home`/`end`, `delete`. Input is split sh
 `-- "My Post Title"` reaches go-task as one argument rather than three. `r` re-runs with whatever the run was started with; `a` from the run view
 re-runs with something different.
 
-## Searching output
+## Customising
 
-`/` searches what the tasks printed. Note this is a *different* search from `/` in the
-picker, which fuzzy-matches 122 short task names; this one runs a regex over potentially
-megabytes of output, so the two get separate affordances despite the shared key.
+Three things are yours: what it looks like, what the keys do, and how much output a peek
+shows. All of it lives in one optional file at `~/.config/taskui/config.yaml`
+(`$XDG_CONFIG_HOME/taskui/config.yaml` if that is set, or `--config PATH`), and a missing
+file is the normal case rather than an error.
 
-There are two jobs and two keys, because "take me to the next one" and "hide everything
-that is not one" are different things.
+```yaml
+theme: synthwave
 
-`/` is jump-to-match. `n` and `N` step through hits in execution order — the order the run
-happened, not alphabetical — opening whatever fold is hiding each one.
+keys:
+  filter-matches: z
 
-`f` is the filter. Pressed with nothing running it opens its own prompt and narrows the
-run live as you type; pressed while a query is active it toggles the filtered view on and
-off, so you can search first and convert afterwards if that is how you got there. Either
-way the run collapses to just the matching lines, kept under the tasks that produced them,
-with tasks that have no hits dropped entirely:
+peek-lines: 8
 
-```
-taskui · ✗ task ci   0.2s   exit 201   /pending  1/2  filtered
-▾ ✗ test   0.03s
-  │ 3 migrations pending, refusing to start
-
-filter: pending█   2 matches in 1 task   ⏎ keep   esc clear
+colors:
+  selection: "#101030"
 ```
 
-Backspacing to an empty pattern shows the whole run again without leaving filter mode, so
-you can widen and re-narrow without starting over.
-
-Matching is smart-case, as in ripgrep: `fail` finds `FAIL`, `FAIL` does not drag in
-`fail`. Patterns are full regexes, and a half-typed one reports quietly rather than
-clearing your results — incremental search spends most of its time on invalid input.
-
-Search runs over the ANSI-stripped text, never the raw bytes. Searching the raw bytes
-would miss a match wherever a colour change lands mid-word — `\x1b[31merr\x1b[0mor` does
-not contain `error` — which is a bug you would never think to look for.
-
-## Stored runs
-
-Every finished run is written to `$XDG_STATE_HOME/taskui/runs/` (or
-`~/.local/state/taskui/runs/`), last 50 kept. The format is deliberately boring: a
-`manifest.json` for the structure, plus `<task>.txt` (stripped, searchable) and
-`<task>.ansi` (colour intact) per task. Plain `grep` works on it, which is the point — a
-format that needs taskui to read it would be a worse format.
-
-`taskui --search PATTERN` greps the lot, newest first, grouped by run and task:
+Every key is optional, so a two-line file is valid. Anything wrong with it is reported in
+the status bar rather than swallowed — a setting that silently does nothing is worse than
+one that says why:
 
 ```
-✗ 1787688604-ci  task ci  (2 hits)
-  test
-        8  3 migrations pending, refusing to start
-
-✗ 1787688594-ci  task ci  (2 hits)
-  test
-        8  3 migrations pending, refusing to start
+config: colors: `acccent` is not a colour setting; keys: pivot must be a single character
 ```
 
-That answers "when did this start failing", which is the question you cannot ask today.
+Scalars can also come from the environment, prefixed and upper-cased:
+`TASKUI_THEME=90s taskui`, `TASKUI_PEEK_LINES=12 taskui`. The flag beats the environment
+beats the file.
 
-### Redaction
+### Themes
 
-`task --summary` prints the resolved environment, so for a Taskfile with `dotenv:` it
-prints real credentials — against atlas's `lint` it emits live Cloudflare and Google
-values. taskui runs that command to build the graph, and it stores run output on disk, so
-without care it would write your secrets into `~/.local/state/`.
-
-Redaction happens in the capture thread, before a line reaches the UI, the buffers or the
-disk — nothing unmasked is ever put on the channel, so no later code path can leak what it
-never received. The secret list is harvested from that same `--summary` env dump: the leak
-is also the best available list of what to plug. Run directories are `0700` and files
-`0600` regardless.
-
-The masking rule is deliberately conservative. A value is masked when its variable name
-looks like a credential (`*_TOKEN`, `*_SECRET`, `*_KEY`, `*_PASSWORD`, …) or the value
-carries a known credential prefix (`cfut_`, `ghp_`, `sk-`, `AKIA`, `-----BEGIN`) — and
-only when it is at least 8 characters and not a boolean. Masking `LOG_REDACT_PII=false`
-would replace the word `false` everywhere it legitimately appears, which is worse than the
-problem. The run view reports how many secrets it masked, so zero reads as *zero found*
-rather than as *checked and clean*.
-
-### History
-
-`h` lists what has already run, newest first, **scoped to the current project** — the
-manifest records which directory a run came from, and one list mixing every repo you have
-ever used taskui in stops being useful immediately. `a` widens to all projects.
-
-`/` greps every stored run and keeps only the ones that matched, with hit counts:
+A theme is a file. Pick one with `theme:` in your config or `--theme` on the command line:
 
 ```
-taskui · history · all projects   /migrations   4 runs   4 failed
-✗ 9m ago    task ci      0.16s   14 lines   2 hits
-✗ 42m ago   task ci      0.18s   14 lines   2 hits
+taskui --list-themes
+
+  90s          ░▒▓ TASKUI ▓▒░
+  charm        taskui
+  default      taskui
+  synthwave    ▄▀▄ TASKUI ▄▀▄
 ```
 
-That is the "when did this start failing" question. `⏎` opens a matched run with the same
-query already applied, so you land on the thing you were looking for.
+Four ship inside the binary. `default` uses ANSI names throughout, so it follows your
+terminal's own colourscheme rather than arguing with it. `90s` does the opposite on
+purpose — pinned magenta and cyan, double-ruled boxes, blocky arrows — because a vaporwave
+palette that politely deferred to your Solarized scheme would not be one. `charm` is after
+[charm.land](https://charm.land), whose libraries this front end is built on: indigo,
+pink, mint, and restraint everywhere else. `synthwave` is the loud one: the genre's five
+colours, half blocks instead of hairlines, and a selected row that is raised rather than
+highlighted.
+
+#### Raised rows
+
+The cursor's row is framed by two columns — a lit edge down its left and a darker one down
+its right. Set the `selection-shade` glyph to a block and those two faces give the bar
+thickness:
+
+```yaml
+colors:
+  selection: "#3b1a6b"        # the face
+  selection-light: "#ff9ee8"  # the lit edge
+  selection-shade: "#1a0838"  # the shaded one
+glyphs:
+  rail: "▐"
+  selection-shade: "▌"
+```
+
+It is not a cast shadow — nothing is falling on anything. It is the same trick a bevelled
+button used, which is why it reads as something raised off the screen rather than painted
+onto it. Leave the glyph as a space and the column goes back to being the right margin the
+layout already left there; both columns are reserved either way, so a row is the same width
+in every theme. Geometry that changed with the colours would be a theme that could break a
+layout.
+
+#### Making it move
+
+A terminal cannot move a row without moving everything under it, so nothing animates
+position — a list that shifted while you were reading it would be a bad trade for any
+amount of charm. What can move is the cursor's own two columns: give them a sequence of
+half blocks and the marker climbs to the top of its cell, fills it, drops to the bottom and
+comes back.
+
+```yaml
+animation:
+  selection-frames: "▀█▄█"
+  interval-ms: 280
+```
+
+Frames are one string rather than a list, because that is what a sequence looks like. Each
+is one column, same rule as the glyphs. Anything from 40ms to 2s is accepted — below that
+it is a strobe, above it it stops reading as motion — and `interval-ms: 0` turns it off,
+which is how a theme extending `synthwave` stops it moving without losing the rest.
+
+Off unless a theme asks for it, and only `synthwave` does. A theme that animates costs a
+redraw every interval for as long as taskui is open — cheap, but not nothing, and not a
+decision to make on somebody else's behalf. `taskui --theme synthwave --screenshot 92x20
+--phase 2 --colour .` renders one frame of it if you want to look at the sequence a step at
+a time.
+
+None of them has any special standing. A file in `~/.config/taskui/themes/` shadows a
+built-in of the same name, so nothing that ships is a decision you are stuck with.
+
+#### Writing one
 
 ```
-taskui · history   3 runs   2 failed
-✓ 3m ago    task leak      0.10s       4 lines
-✗ 5m ago    task ci        0.18s      14 lines
-✗ 5m ago    task ci        0.19s      14 lines
+task theme:new NAME=mine FROM=charm     # or: taskui --dump-theme charm > ~/.config/taskui/themes/mine.yaml
+task theme THEME=mine                   # look at it, in colour, without launching anything
 ```
 
-`⏎` reopens one into the ordinary run view — same folding, same search — because it *is*
-the same structure, read back off disk rather than off a pty. It opens on the failure,
-since that is nearly always why you went looking. Colour survives the round trip: the
-`.txt` half is what search matches on, the `.ansi` half is what renders.
+`--dump-theme` prints a theme *fully resolved* — every value it landed on, annotated with
+what it paints — so the starting point is a file you edit rather than a form you fill in.
+It round-trips: a dumped theme loads back identical, for all three, which is tested rather
+than assumed.
 
-`is_command` is not stored, because a marker in the `.txt` file would make the archive
-worse to grep. It is recomputed on load from the shape of go-task's own echo line.
+Most themes should be short. `extends:` inherits everything you do not mention, so the
+whole of `90s` is nine colours and a dozen glyphs on top of `default`:
+
+```yaml
+extends: default
+colors:
+  accent: "#ff2fd0"
+  rule: "#ff2fd0"
+  selection: "#3a1a78"
+glyphs:
+  wordmark: "░▒▓ TASKUI ▓▒░"
+  fold-open: "▼"
+  guide-branch: "╠"
+  rule: "═"
+```
+
+A theme sets two blocks, and they fail differently.
+
+**Colours** are the twenty-six roles below. A bad one costs you that colour and says so.
+
+**Glyphs** are the twenty-one characters the UI draws its structure out of — fold markers,
+tree guides, the cursor rail, status ticks, the hairlines. Each is **one terminal column**,
+and that is checked when the theme loads. The layout arithmetic is built on knowing how
+wide a glyph is before it is drawn, so a theme that could smuggle in a three-column marker
+could push a column off the edge of somebody else's terminal, where nobody would ever see
+it happen. `wordmark` is the exception: it is a label, it is measured, and it can be as
+wide as it likes.
+
+Anything the config's own `colors:` and `glyphs:` blocks set lands *on top* of the chosen
+theme, so liking a theme except for one thing is two lines rather than a fork:
+
+```yaml
+theme: 90s
+colors:
+  selection: "#101030"
+```
+
+### Colours
+
+Every colour the UI draws is a named role, settable from a theme or straight from the
+config:
+
+```yaml
+colors:
+  accent: magenta
+  status-ok: "#7ee787"
+  status-failed: "#ff7b72"
+  selection: "#1e2030"
+  search: bright-cyan
+```
+
+If the defaults wash out — embedded terminals like Neovim's `:terminal` often render the
+dimmer half of the ANSI palette very close to the background — there is a louder set ready
+to go:
+
+```
+mkdir -p ~/.config/taskui && cp config.high-contrast.yaml ~/.config/taskui/config.yaml
+```
+
+Values are an ANSI name (`red`, `bright-blue`, `purple`), a `#rrggbb`, or a 0–255 palette
+index. Names follow whatever your terminal's own scheme says — usually what you want from
+a terminal program — while `#rrggbb` pins the colour exactly.
+
+`taskui --dump-config` prints every key at its current default, each with a comment
+saying what it paints, so `taskui --dump-config > ~/.config/taskui/config.yaml` gives you
+a file to edit rather than a form to fill in. It round-trips: a dumped config loads back
+identical, which is tested rather than assumed.
+
+`selection` is special: `default` means reverse video, which cannot be invisible whatever
+your colourscheme is. Any real colour is used as a background instead. The original
+default was a fixed `#282c34`, which looked deliberate on the theme it was picked against
+and disappeared on every other one.
+
+Every key is optional, so a two-line file is valid and a missing file is the normal case.
+Both `colors:` and `colours:` are accepted. A bad value or a misspelled key is reported in
+the status bar rather than ignored — a colour that silently does nothing is worse than one
+that says why:
+
+```
+config: bad.yaml: colors: unknown field `moode`, expected one of `accent`, `dim`, …
+```
+
+The colours live in one table in `internal/theme/theme.go` and the glyphs in one table in
+`internal/theme/glyph.go`, so adding either is a single line and no call site holds a
+literal. That is the reason "themeable" was a contained change rather than a hunt through
+the rendering code — and it is what makes `--dump-theme`, the validation and the
+round-trip test read from the same source as the renderer.
+
+### Keys
+
+Every action can be pointed at a different character. The action keeps its meaning on every
+screen that offers it, so rebinding `filter-matches` moves it in the run view and nowhere
+else has to care:
+
+```yaml
+keys:
+  pivot: P
+  filter-matches: z
+  stop-all: Q
+```
+
+`taskui --dump-config` lists every action name. A key bound to two actions on one screen is
+reported rather than silently resolved — a shadowed key looks like a broken one.
+
+### Everything else
+
+```yaml
+# How many lines a task shows when its output is folded to a peek. Five is enough for a Go
+# test failure's assertion and its file:line, or a compiler error and its note — but
+# "enough" is a property of the tools you run, not of taskui.
+peek-lines: 8
+```
+
+A `.taskui-danger` file in the project marks tasks that need a confirmation before they
+run — one pattern per line, `#` comments, `*` supported:
+
+```
+deploy:*
+backend:migrate:prod
+*:wipe
+```
+
+Its presence switches off the description heuristic entirely. A guess and a declaration
+disagreeing about which tasks are dangerous is worse than either alone; once you have
+written the list down, that list is the answer.
+
+## Development
+
+The project's own Taskfile is the smallest honest test of taskui — it is deliberately
+shaped to exercise what it claims to handle, with tasks that are both runnable and parents
+of others, cross-cutting verbs for the verb pivot, and `requires:` blocks so the args
+prompt has something real to pre-fill.
+
+```
+task            # every task, which is the point
+task check      # build and vet, fastest feedback
+task test       # the suite
+task test:race  # the suite under the race detector
+task lint       # golangci-lint, plus a format check
+task all        # format, lint, test, build
+```
+
+Driving it against itself:
+
+```
+task run                        # open taskui on this repo
+task probe:run                  # capture a deliberately failing pipeline
+task shot -- --keys Ojj         # render one frame to stdout, no terminal needed
+task theme THEME=synthwave      # preview a theme in colour
+```
+
+`--screenshot` is why the rendering is testable at all: `View()` returns a string, so a
+frame rendered off-screen is the same code path the live UI runs. The suite renders every
+screen at nine awkward terminal sizes — one row of body, narrower than a task name, either
+side of every layout threshold — and asserts the frame is exactly its terminal size. Tests
+that need a real `task` process spawn one; they skip rather than fail if go-task is
+missing.
+
+Layout:
+
+```
+cmd/                  the command line: flags, headless output, the screenshot path
+internal/task         discovery — `task --list-all`, parsed
+internal/graph        the execution graph — `task --summary`, recursed
+internal/pivot        the fold tree, one builder per pivot
+internal/run          the pty, the capture, the process group
+internal/redact       masking credentials out of captured output
+internal/store        the archive
+internal/search       one matcher over the live run and the archive both
+internal/keys         the keymap, as data
+internal/theme        colours, glyphs, animation, and the theme files
+internal/app          state, key handling, rendering
+```
 
 ## Releasing
 
@@ -662,100 +614,13 @@ So cutting a release is:
 git tag -a v0.2.0 -m "taskui v0.2.0" && git push origin v0.2.0
 ```
 
-## Not built yet
+## Design notes
 
-- **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
-  compiles from source. Pointing the formula at those archives per platform would make
-  `brew install` instant instead of a minute.
-- **A Homebrew tap of prebuilt bottles.** The release builds Linux and macOS binaries for
-  both architectures already; a tap that pours them would beat building from source.
-- A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
-  this", which the domain tree gets wrong for `sec:*` and `wt:*`.
-- Cross-run search inside the TUI. `--search` covers it from the shell, but `/` in the
-  history list does not yet search across runs.
-- An explicit production marker in the Taskfile to replace the `⚠` heuristic.
-- Detaching a slot, so a stack survives quitting taskui. Today `q` stops every run, which
-  is the safe default but not always the one you want.
-- Incremental archiving, so a run that never ends still leaves something on disk before
-  you stop it.
+The long-form reasoning — why a peek rather than a fold, why `--output prefixed`, how a
+stopped run reaps its process group, what the archive is for and what it deliberately is
+not — lives in [DESIGN.md](DESIGN.md). [EXAMPLES.md](EXAMPLES.md) walks through it against
+a real hundred-and-twenty-task Taskfile.
 
-### Interactive tasks
+## Licence
 
-`wrangler`, `terraform` and friends ask questions. Under `--output prefixed` such a task
-**hangs with a blank screen**: go-task's prefixer is itself line-based, so a
-`Proceed? (y/n) ` with no trailing newline is held inside it and never reaches taskui at
-all. Measured — the prompt does not appear under `prefixed`, does appear under
-`interleaved`.
-
-So `i` in the picker arms interactive mode for the next run, which goes out with
-`--output interleaved`. The prompt then surfaces, and `i` in the run view forwards
-keystrokes to the task's terminal — `y`, `⏎`, arrows, `^C`, `^D` — with `esc` to stop
-typing.
-
-`i` works on an *ordinary* run too. go-task wraps stdout and stderr for prefixing but
-leaves stdin alone, so keystrokes reach the child either way — verified against a real
-`task` process. You may not see the question, but `y⏎` still answers it, which beats
-restarting a half-finished deploy. `⇧I` is the deliberate restart for when seeing the
-prompt matters more.
-
-Because a buffered run can stay silent for a long time after you answer, the input bar
-echoes what it sent:
-
-```
-  input   keys go to the task   sent: y⏎   buffered: ⏎ sends a newline, output may lag
-```
-
-Without that receipt, "I typed y and nothing happened" is indistinguishable from "y never
-left the building". A write that fails says so instead of looking identical to one that
-landed.
-
-The cost is attribution. Interleaved output still carries go-task's `task: [name] <cmd>`
-announcements, so lines are attributed to whichever task last spoke: correct for a
-sequential run, wrong under parallel `deps:`. Interactive tasks are inherently sequential,
-so the trade is worth making — but only when asked for, which is why it is a toggle rather
-than the default.
-
-Two things make this discoverable rather than something you have to know. A task sitting
-on an unterminated line gets a `?` bar quoting the question. And a *non-interactive* run
-that has produced nothing for fifteen seconds gets a warning — under `prefixed` a blocked
-task emits literally nothing, so silence is the only signal that exists:
-
-```
-  …   no output for a while    if it is waiting for input: x to stop, i to re-run interactively
-```
-
-`i` on such a run re-runs it interactively rather than pretending to send keystrokes into
-a void.
-
-### Why `--output prefixed`
-
-Measured against go-task 3.53.1. Every output line self-identifies:
-
-```
-task: [a] echo "a start"
-[a] a start
-[b] b start
-```
-
-That is per-line attribution with no buffering, and it survives parallel `deps:`, where
-`interleaved` and `group` both emit unattributed output lines whose order tells you
-nothing about which task produced them.
-
-`group` was the obvious candidate — its `begin`/`end` templates look like fold markers —
-but plain `output: group` emits no markers at all, and adding them only marks task
-*completion*, which is too late to build a live tree from. It also does not buffer on this
-version, contrary to
-[go-task#937](https://github.com/go-task/task/issues/937); that issue still reads as open
-but does not reproduce here, so the argument against `group` is attribution, not latency.
-
-Colour is the cost, and the fix is not the one you would guess. Prefixed mode makes
-go-task pipe every command through its own prefixing writer, so a command's stdout is a
-pipe no matter what taskui does — measured, `isatty` reports false inside prefixed mode
-even with go-task itself on a pty. Tools that auto-detect turn colour off and no pty gets
-it back. Forcing by environment does, so the capture sets `CARGO_TERM_COLOR=always`,
-`CLICOLOR_FORCE=1` and `FORCE_COLOR=1`, which restores cargo and clippy's colour through
-the pipe intact.
-
-The pty is still worth keeping — go-task's own output stays coloured, and it avoids the
-usual switch to block buffering when stdout is not a terminal — it just is not what makes
-the tools colour.
+MIT. See [LICENSE](LICENSE).

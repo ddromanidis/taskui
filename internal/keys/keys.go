@@ -411,16 +411,47 @@ var Prompts = Section{
 
 var Sections = []*Section{&Picker, &Run, &HistorySection, &DetailSection, &Prompts}
 
+// FooterHints is the bindings a section puts in the footer, in table order, each already
+// split into the keys and the label so the renderer can style them separately.
+func FooterHints(section *Section) []Binding {
+	var out []Binding
+	for _, b := range section.Bindings {
+		if b.Footer != "" {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 // Footer builds the footer line for a section: the bindings worth the space, in table
 // order.
 func Footer(section *Section) string {
 	var parts []string
-	for _, b := range section.Bindings {
-		if b.Footer != "" {
-			parts = append(parts, b.Keys+" "+b.Footer)
-		}
+	for _, b := range FooterHints(section) {
+		parts = append(parts, b.Keys+" "+b.Footer)
 	}
 	return strings.Join(parts, "   ")
+}
+
+// FooterFits is how many of a section's hints fit in width, given that `reserve` columns
+// are already spoken for.
+//
+// It stops at a binding boundary rather than at a character. The footer used to be built
+// at full length and clipped by the renderer, which ended it mid-word — `t jump   s deta` —
+// and a hint you cannot finish reading is worse than one that was never offered.
+func FooterFits(hints []Binding, width, reserve int) int {
+	used := 0
+	for i, b := range hints {
+		cost := utf8.RuneCountInString(b.Keys) + 1 + utf8.RuneCountInString(b.Footer)
+		if i > 0 {
+			cost += 3 // the gap between hints
+		}
+		if used+cost > width-reserve {
+			return i
+		}
+		used += cost
+	}
+	return len(hints)
 }
 
 // WidestKeys is the widest key column across every section, so the `?` screen's

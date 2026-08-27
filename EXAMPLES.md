@@ -10,17 +10,18 @@ output, not a mock-up.
 A repo with 122 tasks across nine namespaces. Opening it gives you the shape, not the list:
 
 ```
-taskui · atlas  group: domain   122 tasks
-▸ (root)  12
-▸ api     13
-▸ app     17
-▸ backend 26
-▸ deploy   9  ⚠
-▸ dev     11
-▸ infra   11  ⚠
-▸ sec      4
-▸ site    14
-▸ wt       4
+ taskui ▸ atlas                                        domain·verb   122 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+▌▸ (root)                                                                   12
+ ▸ api                                                                      13
+ ▸ app                                                                      17
+ ▸ backend                                                                  26
+ ▸ deploy                                                               ⚠    9
+ ▸ dev                                                                      11
+ ▸ infra                                                                ⚠   11
+ ▸ sec                                                                       4
+ ▸ site                                                                     14
+ ▸ wt                                                                        4
 ```
 
 Three ways in, and they answer different questions.
@@ -29,20 +30,21 @@ Three ways in, and they answer different questions.
 want to see *all* the linting tasks:
 
 ```
-taskui · atlas  group: domain   filter: lint   6/122 tasks
-▾ (root)  1
-    lint            Lint all source code
-▾ api  2
-    lint            Validate the spec
-▾ backend  1
-    lint            Rust lints (clippy warnings are errors) + format check
+ taskui ▸ atlas                              domain·verb   /lint   6/122 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+ ▾ (root)                                                                    1
+▌└ lint           Lint all source code
+ ▾ api                                                                       2
+ └ lint           Validate the spec
+ ▾ backend                                                                   1
+ └ lint           Rust lints (clippy warnings are errors) + format check
 ```
 
 **`t` jumps** — moves the cursor to the match and leaves the tree intact. Use it when you
 know what you want and the surroundings still matter:
 
 ```
-jump: blint█   1/1   ⇥ next   ⏎ stay   esc go back
+ jump: blint█   1/1   ⇥ next   ⏎ stay   esc go back
 ```
 
 Both match fuzzily over the whole colon path, so `blint` finds `backend:lint`.
@@ -68,9 +70,9 @@ The aggregate sits directly above its own fan-out, so this doubles as a preview 
 `s` on a task:
 
 ```
-taskui · wt:new
-
-  New worktree + branch for an agent: task wt:new NAME=backend
+ taskui ▸ wt:new                                                              
+ ─────────────────────────────────────────────────────────────────────────────
+   New worktree + branch for an agent: task wt:new NAME=backend
 
 requires
   NAME=   must be supplied with `a`
@@ -119,16 +121,17 @@ Your Taskfile uses both go-task conventions:
 and stops there:
 
 ```
-taskui · ✗ task ci   0.2s   exit 201
-  ✗ ci                    2.0s
-    ▿ ✓ build             1.2s
-         3 │ compiling api
-         4 │ built in 1.2s
-    ▾ ✗ test              780ms
-         1 $ task: [test] go test ./...
-         2 │ running 42 tests
-         3 │ --- FAIL: TestOrderTotal
-         4 │     order_test.go:88: want 1200, got 1180
+ taskui ▸ task ci                                    FAILED    0.2s   exit 201
+ ─────────────────────────────────────────────────────────────────────────────
+   ✗ ci                                                                 2.0s
+   ▿ ✓ build                                                 29 more     1.2s
+      3   compiling api
+      4   built in 1.2s
+▌  ▾ ✗ test                                                            780ms
+      1 ❯ go test ./...
+      2   running 42 tests
+      3   --- FAIL: TestOrderTotal
+      4       order_test.go:88: want 1200, got 1180
 ```
 
 The failure is open in full; `build`, which finished, dropped back to a **peek** — `▿`, the
@@ -160,9 +163,10 @@ that catch SIGTERM and ignore it. `⇧K` stops every open run at once.
 them, with the tasks that have no hits dropped entirely:
 
 ```
-taskui · ✗ task ci   0.2s   exit 201   /pending  1/2  filtered ±2
-▾ ✗ test   780ms
-  │ 3 migrations pending, refusing to start
+ taskui ▸ task ci      /pending  1/2  filtered ±2    FAILED    0.2s   exit 201
+ ─────────────────────────────────────────────────────────────────────────────
+   ▾ ✗ test                                                            780ms
+      8   3 migrations pending, refusing to start
 ```
 
 `[` and `]` widen and narrow the context around each hit — `--- FAIL:` on its own hides
@@ -177,7 +181,7 @@ the assertion underneath it, which is the half that says what broke.
 Every finished run is stored. `h` lists them, scoped to this project:
 
 ```
-taskui · history · atlas   14 runs   6 failed
+ taskui ▸ history                                   atlas   14 runs   6 failed
 ✗ 9m ago    task ci                    180ms    14 lines
 ✓ 42m ago   task backend:check --force  3.3s    17 lines
 ```
@@ -185,7 +189,7 @@ taskui · history · atlas   14 runs   6 failed
 `/` greps every stored run and keeps only the ones that matched:
 
 ```
-taskui · history · atlas   /migrations   4 runs   4 failed
+ taskui ▸ history                      atlas   /migrations   4 runs   4 failed
 ✗ 9m ago    task ci    180ms   14 lines   2 hits
 ✗ 42m ago   task ci    190ms   14 lines   2 hits
 ✓ 3h ago    task ci    170ms   12 lines   0 hits   ← last clean run
@@ -233,7 +237,7 @@ arms that for the next run.
 
 ```
 ✓ backend:check   110ms
-  │ task: Task "backend:check" is up to date
+      1   task: Task "backend:check" is up to date
 ```
 
 That is go-task's `sources:` fingerprinting, not an error. `⇧F` arms `--force`; the header
@@ -246,7 +250,7 @@ shows `force`, and `⏎` and `r` both ignore the cache until you turn it off.
 Run `check`, then `⇧W`:
 
 ```
-taskui · ▶ task check   1.2s   watching check
+ taskui ▸ task check                         watching check    RUNNING    1.2s
 ```
 
 Save a file and it re-runs. Build output, `.git`, `.task`, `node_modules` and editor

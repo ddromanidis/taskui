@@ -210,12 +210,16 @@ func ColorName(c Color) string {
 	}
 }
 
-// Theme is every colour the UI uses.
-type Theme struct {
-	Accent    Color
-	Dim       Color
-	Text      Color
-	Selection Color
+// Colors is every colour the UI uses.
+type Colors struct {
+	Accent         Color
+	Dim            Color
+	Faint          Color
+	Rule           Color
+	Text           Color
+	Selection      Color
+	SelectionLight Color
+	SelectionShade Color
 
 	Mode   Color
 	Alias  Color
@@ -228,7 +232,6 @@ type Theme struct {
 	StatusPending Color
 
 	Command Color
-	Gutter  Color
 
 	Search  Color
 	MatchFg Color
@@ -245,56 +248,77 @@ type Theme struct {
 
 // field ties a config key to its field and its documentation, so `--dump-config`, the
 // loader and the "every key is configurable" guarantee all read from one table.
-type field struct {
+type colorField struct {
 	key string
 	doc string
-	at  func(*Theme) *Color
+	at  func(*Colors) *Color
 }
 
-var fields = []field{
-	{"accent", "The `taskui` word mark.", func(t *Theme) *Color { return &t.Accent }},
-	{"dim", "Secondary text: counts, descriptions, key hints.", func(t *Theme) *Color { return &t.Dim }},
-	{"text", "Ordinary output and task names.", func(t *Theme) *Color { return &t.Text }},
+var colorFields = []colorField{
+	{"accent", "The `taskui` word mark.", func(t *Colors) *Color { return &t.Accent }},
+	{"dim", "Secondary text: counts, descriptions, key hints.", func(t *Colors) *Color { return &t.Dim }},
+	{
+		"faint",
+		"Chrome: tree guides, fold glyphs, line numbers. Everything that positions content without being content. Defaults to ANSI bright black, which some dark colourschemes put a hair off the background — losing a tree guide costs you an alignment cue, not a word.",
+		func(t *Colors) *Color { return &t.Faint },
+	},
+	{"rule", "The hairlines under the header and above the footer.", func(t *Colors) *Color { return &t.Rule }},
+	{"text", "Ordinary output and task names.", func(t *Colors) *Color { return &t.Text }},
 	{
 		"selection",
 		"Highlighted row. `default` means reverse video, which is legible in every terminal theme; any other colour is used as a background instead.",
-		func(t *Theme) *Color { return &t.Selection },
+		func(t *Colors) *Color { return &t.Selection },
+	},
+	{
+		"selection-light",
+		"The lit edge down the left of the selected row.",
+		func(t *Colors) *Color { return &t.SelectionLight },
+	},
+	{
+		"selection-shade",
+		"The shaded edge down its right. With a `selection-shade` glyph set, the two together read as an extruded bar rather than a highlighted line.",
+		func(t *Colors) *Color { return &t.SelectionShade },
 	},
 
-	{"mode", "The active pivot in the picker header.", func(t *Theme) *Color { return &t.Mode }},
-	{"alias", "Task aliases.", func(t *Theme) *Color { return &t.Alias }},
-	{"danger", "The ⚠ marker on tasks that need a confirmation.", func(t *Theme) *Color { return &t.Danger }},
+	{"mode", "The active pivot in the picker header.", func(t *Colors) *Color { return &t.Mode }},
+	{"alias", "Task aliases.", func(t *Colors) *Color { return &t.Alias }},
+	{"danger", "The ⚠ marker on tasks that need a confirmation.", func(t *Colors) *Color { return &t.Danger }},
 
-	{"status-ok", "A task that succeeded.", func(t *Theme) *Color { return &t.StatusOk }},
-	{"status-running", "A task still going.", func(t *Theme) *Color { return &t.StatusRunning }},
-	{"status-failed", "A task that failed.", func(t *Theme) *Color { return &t.StatusFailed }},
-	{"status-skipped", "A task never reached.", func(t *Theme) *Color { return &t.StatusSkipped }},
-	{"status-pending", "A task not started yet.", func(t *Theme) *Color { return &t.StatusPending }},
+	{"status-ok", "A task that succeeded.", func(t *Colors) *Color { return &t.StatusOk }},
+	{"status-running", "A task still going.", func(t *Colors) *Color { return &t.StatusRunning }},
+	{"status-failed", "A task that failed.", func(t *Colors) *Color { return &t.StatusFailed }},
+	{"status-skipped", "A task never reached.", func(t *Colors) *Color { return &t.StatusSkipped }},
+	{"status-pending", "A task not started yet.", func(t *Colors) *Color { return &t.StatusPending }},
 
-	{"command", "go-task's own `task: [name] <cmd>` echo.", func(t *Theme) *Color { return &t.Command }},
-	{"gutter", "Line numbers and fold glyphs.", func(t *Theme) *Color { return &t.Gutter }},
+	{"command", "go-task's own `task: [name] <cmd>` echo.", func(t *Colors) *Color { return &t.Command }},
 
-	{"search", "The search and filter prompts.", func(t *Theme) *Color { return &t.Search }},
-	{"match-fg", "Foreground of a highlighted match.", func(t *Theme) *Color { return &t.MatchFg }},
-	{"match-bg", "Background of a highlighted match.", func(t *Theme) *Color { return &t.MatchBg }},
+	{"search", "The search and filter prompts.", func(t *Colors) *Color { return &t.Search }},
+	{"match-fg", "Foreground of a highlighted match.", func(t *Colors) *Color { return &t.MatchFg }},
+	{"match-bg", "Background of a highlighted match.", func(t *Colors) *Color { return &t.MatchBg }},
 
-	{"notice", "Status messages along the bottom.", func(t *Theme) *Color { return &t.Notice }},
-	{"stored", "Marks a run loaded from history.", func(t *Theme) *Color { return &t.Stored }},
-	{"interactive", "The interactive-mode marker and input bar.", func(t *Theme) *Color { return &t.Interactive }},
-	{"warning-fg", "Foreground of the waiting-for-input bar.", func(t *Theme) *Color { return &t.WarningFg }},
-	{"warning-bg", "Background of the waiting-for-input bar.", func(t *Theme) *Color { return &t.WarningBg }},
-	{"confirm-fg", "Foreground of the production confirmation bar.", func(t *Theme) *Color { return &t.ConfirmFg }},
-	{"confirm-bg", "Background of the production confirmation bar.", func(t *Theme) *Color { return &t.ConfirmBg }},
+	{"notice", "Status messages along the bottom.", func(t *Colors) *Color { return &t.Notice }},
+	{"stored", "Marks a run loaded from history.", func(t *Colors) *Color { return &t.Stored }},
+	{"interactive", "The interactive-mode marker and input bar.", func(t *Colors) *Color { return &t.Interactive }},
+	{"warning-fg", "Foreground of the waiting-for-input bar.", func(t *Colors) *Color { return &t.WarningFg }},
+	{"warning-bg", "Background of the waiting-for-input bar.", func(t *Colors) *Color { return &t.WarningBg }},
+	{"confirm-fg", "Foreground of the production confirmation bar.", func(t *Colors) *Color { return &t.ConfirmFg }},
+	{"confirm-bg", "Background of the production confirmation bar.", func(t *Colors) *Color { return &t.ConfirmBg }},
 }
 
-func DefaultTheme() Theme {
-	return Theme{
+func DefaultColors() Colors {
+	return Colors{
 		Accent: Cyan,
 		Dim:    Gray,
+		Faint:  DarkGray,
+		Rule:   DarkGray,
 		Text:   Default,
 		// A fixed background colour looks deliberate on the theme it was chosen against
 		// and vanishes on every other one, so the default is reverse video.
 		Selection: Default,
+		// The lit edge matches the accent by default, which is what the rail was drawn in
+		// before it had a role of its own.
+		SelectionLight: Cyan,
+		SelectionShade: DarkGray,
 
 		Mode:   Yellow,
 		Alias:  Blue,
@@ -307,7 +331,6 @@ func DefaultTheme() Theme {
 		StatusPending: Gray,
 
 		Command: Blue,
-		Gutter:  Gray,
 
 		Search:  Magenta,
 		MatchFg: Black,
@@ -324,13 +347,13 @@ func DefaultTheme() Theme {
 }
 
 // applyColors overlays a `colors:` block, reporting anything it could not use.
-func applyColors(t *Theme, block map[string]string) []string {
+func applyColors(t *Colors, block map[string]string) []string {
 	if len(block) == 0 {
 		return nil
 	}
 	var bad []string
 	used := map[string]bool{}
-	for _, f := range fields {
+	for _, f := range colorFields {
 		text, ok := block[f.key]
 		if !ok {
 			continue
@@ -361,13 +384,29 @@ func applyColors(t *Theme, block map[string]string) []string {
 //
 // Emitted with real values rather than blanks so `--dump-config > config.yaml` gives you a
 // file you can edit, not a form to fill in.
-func (t Theme) ToYAML() string {
+func (t Colors) ToYAML() string {
 	var b strings.Builder
 	b.WriteString("colors:\n")
-	for _, f := range fields {
+	for _, f := range colorFields {
 		fmt.Fprintf(&b, "  # %s\n  %s: %s\n", f.doc, f.key, ColorName(*f.at(&t)))
 	}
 	return b.String()
+}
+
+// Theme is a whole look: what colour everything is, and what it is drawn with.
+//
+// Two blocks rather than one flat table because they answer different questions and fail
+// differently — a bad colour costs you a colour, a bad glyph could cost you a column.
+type Theme struct {
+	// Name is the theme this was resolved from, for the header and for error messages.
+	Name      string
+	Colors    Colors
+	Glyphs    Glyphs
+	Animation Animation
+}
+
+func DefaultTheme() Theme {
+	return Theme{Name: DefaultThemeName, Colors: DefaultColors(), Glyphs: DefaultGlyphs()}
 }
 
 type Config struct {
@@ -450,6 +489,7 @@ func Setup(v *viper.Viper, explicit string) error {
 	// Bound explicitly: AutomaticEnv only sees a key once something has asked for it, and
 	// a scalar with no entry in the file would otherwise never be looked up.
 	_ = v.BindEnv("peek-lines")
+	_ = v.BindEnv("theme")
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := errors.AsType[viper.ConfigFileNotFoundError](err); ok {
@@ -465,11 +505,25 @@ func Setup(v *viper.Viper, explicit string) error {
 }
 
 // FromViper builds a config out of whatever a Viper has already read.
+//
+// The named theme lands first and the config's own `colors:` and `glyphs:` blocks land on
+// top of it, so picking a theme and then changing one thing about it is two lines rather
+// than a fork.
 func FromViper(v *viper.Viper) Config {
 	config := DefaultConfig()
 
-	config.Problems = append(config.Problems, applyColors(&config.Theme, v.GetStringMapString("colors"))...)
-	config.Problems = append(config.Problems, applyColors(&config.Theme, v.GetStringMapString("colours"))...)
+	if name := v.GetString("theme"); name != "" {
+		theme, problems := LoadTheme(name)
+		config.Theme = theme
+		config.Problems = append(config.Problems, problems...)
+	}
+
+	config.Problems = append(config.Problems, applyColors(&config.Theme.Colors, v.GetStringMapString("colors"))...)
+	config.Problems = append(config.Problems, applyColors(&config.Theme.Colors, v.GetStringMapString("colours"))...)
+	config.Problems = append(config.Problems, applyGlyphs(&config.Theme.Glyphs, v.GetStringMapString("glyphs"))...)
+	config.Problems = append(
+		config.Problems,
+		applyAnimation(&config.Theme.Animation, v.GetStringMapString("animation"))...)
 	config.Problems = append(config.Problems, applyKeys(config.Keymap, v.GetStringMapString("keys"))...)
 	config.Problems = append(config.Problems, config.Keymap.Conflicts()...)
 
@@ -492,12 +546,16 @@ func FromViper(v *viper.Viper) Config {
 // DumpConfig is the whole annotated file `--dump-config` prints.
 func DumpConfig() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# taskui colours. Drop this at %s\n", ConfigPath())
+	fmt.Fprintf(&b, "# taskui config. Drop this at %s\n", ConfigPath())
+	fmt.Fprintf(&b, "# Pick a look with `theme:`. Available: %s\n", strings.Join(ListThemes(), ", "))
+	fmt.Fprintf(&b, "theme: %s\n\n", DefaultThemeName)
 	b.WriteString("# Every key is optional; anything absent keeps its default.\n")
 	b.WriteString("# Values: an ANSI name (red, bright-blue), a #rrggbb, or a 0-255 palette index.\n")
 	b.WriteString("#\n")
 	b.WriteString("# Names follow your terminal's own scheme; #rrggbb pins the colour exactly.\n")
-	b.WriteString(DefaultTheme().ToYAML())
+	b.WriteString(DefaultColors().ToYAML())
+	b.WriteString("\n")
+	b.WriteString(DefaultGlyphs().ToYAML())
 	b.WriteString("\n")
 	b.WriteString("# Rebind any action to a different single character.\n")
 	b.WriteString("# The same action keeps its meaning on every screen that offers it.\n")

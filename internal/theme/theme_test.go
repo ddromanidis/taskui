@@ -43,7 +43,7 @@ func TestColourNamesHexAndIndicesAllParse(t *testing.T) {
 // A missing file is the normal case, not an error.
 func TestNoConfigMeansDefaults(t *testing.T) {
 	c := Load("/definitely/not/here/config.yaml")
-	if c.Theme != DefaultTheme() {
+	if c.Theme.Colors != DefaultColors() {
 		t.Error("theme drifted from the defaults")
 	}
 	if len(c.Problems) != 0 {
@@ -56,14 +56,14 @@ func TestOnlyTheNamedColoursChange(t *testing.T) {
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme.Accent != Magenta {
-		t.Errorf("accent = %+v", c.Theme.Accent)
+	if c.Theme.Colors.Accent != Magenta {
+		t.Errorf("accent = %+v", c.Theme.Colors.Accent)
 	}
-	if want := (Color{Kind: KindRGB, R: 0xff, G: 0x55, B: 0x55}); c.Theme.StatusFailed != want {
-		t.Errorf("status-failed = %+v", c.Theme.StatusFailed)
+	if want := (Color{Kind: KindRGB, R: 0xff, G: 0x55, B: 0x55}); c.Theme.Colors.StatusFailed != want {
+		t.Errorf("status-failed = %+v", c.Theme.Colors.StatusFailed)
 	}
 	// Untouched keys keep their defaults.
-	if c.Theme.StatusOk != DefaultTheme().StatusOk || c.Theme.Dim != DefaultTheme().Dim {
+	if c.Theme.Colors.StatusOk != DefaultColors().StatusOk || c.Theme.Colors.Dim != DefaultColors().Dim {
 		t.Error("untouched keys moved")
 	}
 }
@@ -74,18 +74,18 @@ func TestColoursIsAcceptedToo(t *testing.T) {
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme.Accent != Green {
-		t.Errorf("accent = %+v", c.Theme.Accent)
+	if c.Theme.Colors.Accent != Green {
+		t.Errorf("accent = %+v", c.Theme.Colors.Accent)
 	}
 }
 
 // A colour that silently does nothing is worse than one that says why.
 func TestABadColourIsReportedAndTheRestStillApplies(t *testing.T) {
 	c := loadStr(t, "colors:\n  accent: chartreuse\n  mode: red\n")
-	if c.Theme.Mode != Red {
+	if c.Theme.Colors.Mode != Red {
 		t.Error("the good one should still have taken")
 	}
-	if c.Theme.Accent != DefaultTheme().Accent {
+	if c.Theme.Colors.Accent != DefaultColors().Accent {
 		t.Error("the bad one should have been ignored")
 	}
 	if len(c.Problems) != 1 || !strings.Contains(c.Problems[0], "chartreuse") {
@@ -102,13 +102,13 @@ func TestAnUnknownKeyIsReported(t *testing.T) {
 }
 
 // The defaults have to be legible on a terminal whose theme we know nothing about.
-// DarkGray is ANSI bright black — a hair off the background in most dark colourschemes —
-// and it paints nearly all the secondary text.
+// DarkGray is ANSI bright black — a hair off the background in most dark colourschemes.
+// `faint` and `rule` are deliberately allowed to use it, because they paint alignment cues
+// rather than words; everything that carries meaning has to stay above it.
 func TestNoDefaultIsBrightBlack(t *testing.T) {
-	d := DefaultTheme()
+	d := DefaultColors()
 	for name, colour := range map[string]Color{
 		"dim":            d.Dim,
-		"gutter":         d.Gutter,
 		"status-skipped": d.StatusSkipped,
 		"status-pending": d.StatusPending,
 		"text":           d.Text,
@@ -120,12 +120,12 @@ func TestNoDefaultIsBrightBlack(t *testing.T) {
 }
 
 func TestTheSelectionDefaultsToReverseVideo(t *testing.T) {
-	if !DefaultTheme().Selection.IsDefault() {
+	if !DefaultColors().Selection.IsDefault() {
 		t.Error("selection should default to reverse video")
 	}
 	c := loadStr(t, "colors:\n  selection: '#1e2030'\n")
-	if want := (Color{Kind: KindRGB, R: 0x1e, G: 0x20, B: 0x30}); c.Theme.Selection != want {
-		t.Errorf("still overridable: %+v", c.Theme.Selection)
+	if want := (Color{Kind: KindRGB, R: 0x1e, G: 0x20, B: 0x30}); c.Theme.Colors.Selection != want {
+		t.Errorf("still overridable: %+v", c.Theme.Colors.Selection)
 	}
 }
 
@@ -174,11 +174,11 @@ func TestCollidingKeysAreReported(t *testing.T) {
 // `--dump-config` must produce a file taskui can read back unchanged, or it is a template
 // that lies about the defaults.
 func TestTheDumpedConfigRoundTrips(t *testing.T) {
-	c := loadStr(t, DefaultTheme().ToYAML())
+	c := loadStr(t, DefaultColors().ToYAML())
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme != DefaultTheme() {
+	if c.Theme.Colors != DefaultColors() {
 		t.Error("the dump does not round-trip")
 	}
 }
@@ -189,7 +189,7 @@ func TestTheWholeDumpedFileRoundTrips(t *testing.T) {
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme != DefaultTheme() {
+	if c.Theme.Colors != DefaultColors() {
 		t.Error("colours drifted")
 	}
 	if c.PeekLines != DefaultPeekLines {
@@ -226,16 +226,16 @@ func TestPeekLinesIsConfigurableWithinReason(t *testing.T) {
 
 // Including the non-name colours.
 func TestRgbAndIndexedValuesRoundTrip(t *testing.T) {
-	theme := DefaultTheme()
-	theme.Accent = Color{Kind: KindRGB, R: 0x1e, G: 0x20, B: 0x30}
-	theme.Dim = Color{Kind: KindIndexed, Index: 240}
+	colours := DefaultColors()
+	colours.Accent = Color{Kind: KindRGB, R: 0x1e, G: 0x20, B: 0x30}
+	colours.Dim = Color{Kind: KindIndexed, Index: 240}
 
-	c := loadStr(t, theme.ToYAML())
+	c := loadStr(t, colours.ToYAML())
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme.Accent != theme.Accent || c.Theme.Dim != theme.Dim {
-		t.Errorf("accent = %+v dim = %+v", c.Theme.Accent, c.Theme.Dim)
+	if c.Theme.Colors.Accent != colours.Accent || c.Theme.Colors.Dim != colours.Dim {
+		t.Errorf("accent = %+v dim = %+v", c.Theme.Colors.Accent, c.Theme.Colors.Dim)
 	}
 }
 
@@ -244,25 +244,25 @@ func TestAnEmptyConfigIsValid(t *testing.T) {
 	if len(c.Problems) != 0 {
 		t.Errorf("problems = %v", c.Problems)
 	}
-	if c.Theme != DefaultTheme() {
+	if c.Theme.Colors != DefaultColors() {
 		t.Error("theme drifted")
 	}
 }
 
 // Every field is settable — the table is the whole point, so nothing gets forgotten.
 func TestEveryKeyIsConfigurable(t *testing.T) {
-	if len(fields) <= 20 {
-		t.Fatalf("found %d keys", len(fields))
+	if len(colorFields) <= 20 {
+		t.Fatalf("found %d keys", len(colorFields))
 	}
 	lines := []string{"colors:"}
-	for _, f := range fields {
+	for _, f := range colorFields {
 		lines = append(lines, "  "+f.key+": red")
 	}
 	c := loadStr(t, strings.Join(lines, "\n"))
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Theme.Accent != Red || c.Theme.ConfirmBg != Red || c.Theme.Selection != Red {
+	if c.Theme.Colors.Accent != Red || c.Theme.Colors.ConfirmBg != Red || c.Theme.Colors.Selection != Red {
 		t.Error("not every key took")
 	}
 }

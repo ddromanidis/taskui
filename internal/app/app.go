@@ -346,6 +346,11 @@ type App struct {
 	Width  int
 	Height int
 
+	// Phase is which animation frame the cursor's edges are drawn at. It only moves for a
+	// theme that asked to animate; everything else leaves it at zero, which is also what
+	// keeps `--screenshot` deterministic.
+	Phase int
+
 	// stateDir is where runs are archived. A field rather than a call so tests can point
 	// it somewhere disposable.
 	stateDir string

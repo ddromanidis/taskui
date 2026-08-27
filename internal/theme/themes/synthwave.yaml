@@ -1,0 +1,94 @@
+# synthwave — the fun one.
+#
+# Vaporwave's five colours (pink, cyan, mint, purple, that pale yellow), drawn with half
+# blocks and heavy box rules so everything reads as pixels rather than hairlines. Where the
+# 90s theme is a DOS box, this one is the poster on the wall behind it.
+#
+# The thing it does that nothing else does: the selected row is raised. `rail` puts a lit
+# half block down its left, `selection-shade` puts a dark one down its right, and the two
+# faces together give the bar thickness. It is not a cast shadow — nothing is falling on
+# anything — it is the same trick a bevelled button used, which is why it reads as
+# something you could press.
+extends: default
+
+colors:
+  accent: "#ff71ce"
+  mode: "#05ffa1"
+
+  # Chrome is electric. Cyan for anything secondary, muted purple for the structure it
+  # hangs off — the grid lines, not the neon.
+  dim: "#01cdfe"
+  faint: "#7b4bbd"
+  rule: "#b967ff"
+  text: default
+
+  # The three tones that make the bar solid: the face, the lit edge, the shaded one.
+  selection: "#3b1a6b"
+  selection-light: "#ff9ee8"
+  selection-shade: "#1a0838"
+
+  alias: "#fffb96"
+  danger: "#ff4d6d"
+
+  status-ok: "#05ffa1"
+  status-running: "#fffb96"
+  status-failed: "#ff4d6d"
+  status-skipped: "#7b4bbd"
+  status-pending: "#7b4bbd"
+
+  command: "#01cdfe"
+
+  search: "#ff71ce"
+  match-fg: "#1a0838"
+  match-bg: "#fffb96"
+
+  notice: "#fffb96"
+  stored: "#01cdfe"
+  interactive: "#05ffa1"
+  warning-fg: "#1a0838"
+  warning-bg: "#fffb96"
+  confirm-fg: "#1a0838"
+  confirm-bg: "#ff4d6d"
+
+# The one moving part. The cursor's two columns climb to the top of their cell, fill it,
+# drop to the bottom and come back — a mark bouncing beside whatever you have selected.
+# The row does not move; a terminal cannot move one row without moving everything under it,
+# and a list that shifted while you were reading it would be a bad trade for any amount of
+# charm.
+animation:
+  selection-frames: "▀█▄█"
+  interval-ms: 2000
+
+glyphs:
+  # A square wave either side of the name, which is the joke and also the genre.
+  wordmark: "▄▀▄ TASKUI ▄▀▄"
+  separator: "▸"
+  dot: "•"
+
+  fold-open: "▼"
+  fold-closed: "▶"
+  fold-peek: "▽"
+
+  # Heavy guides: thin ones disappear next to this much colour.
+  guide-branch: "┣"
+  guide-last: "┗"
+  guide-vertical: "┃"
+
+  # The two faces of the selected row. Half blocks, so they sit flush against the fill
+  # rather than floating beside it.
+  rail: "▐"
+  selection-shade: "▌"
+
+  # A rule made of half blocks reads as a row of pixels rather than a line.
+  rule: "▀"
+
+  command: "▸"
+  warning: "▲"
+  danger: "▲"
+  cursor: "█"
+
+  status-ok: "■"
+  status-failed: "✖"
+  status-running: "▶"
+  status-pending: "░"
+  status-skipped: "▫"

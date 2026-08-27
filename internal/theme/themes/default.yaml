@@ -1,0 +1,67 @@
+# The default look: ANSI names, so it follows your terminal's own colourscheme rather than
+# arguing with it. Nothing here is pinned to an exact shade except by your terminal.
+#
+# This file is the base every other theme extends. It exists as a file rather than as code
+# so that `--dump-theme default` and the theme you write next are the same kind of object.
+colors:
+  accent: cyan
+  dim: gray
+  faint: dark-gray
+  rule: dark-gray
+  text: default
+  selection: default
+  selection-light: cyan
+  selection-shade: dark-gray
+
+  mode: yellow
+  alias: blue
+  danger: red
+
+  status-ok: green
+  status-running: yellow
+  status-failed: red
+  status-skipped: gray
+  status-pending: gray
+
+  command: blue
+
+  search: magenta
+  match-fg: black
+  match-bg: magenta
+
+  notice: yellow
+  stored: blue
+  interactive: green
+  warning-fg: black
+  warning-bg: yellow
+  confirm-fg: black
+  confirm-bg: red
+
+glyphs:
+  wordmark: "taskui"
+  separator: "▸"
+  dot: "·"
+
+  fold-open: "▾"
+  fold-closed: "▸"
+  fold-peek: "▿"
+
+  guide-branch: "├"
+  guide-last: "└"
+  guide-vertical: "│"
+
+  rail: "▌"
+  # A space leaves the raised look off. A block turns it on.
+  selection-shade: " "
+  rule: "─"
+
+  command: "❯"
+  warning: "⚠"
+  danger: "⚠"
+  cursor: "█"
+
+  status-ok: "✓"
+  status-failed: "✗"
+  status-running: "▶"
+  status-pending: "·"
+  status-skipped: "⏸"

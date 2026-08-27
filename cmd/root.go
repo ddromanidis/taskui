@@ -8,6 +8,7 @@ Licensed under the MIT licence. See LICENSE.
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -49,6 +52,11 @@ type options struct {
 	dumpConfig bool
 	searchFor  string
 	keys       string
+	themeName  string
+	listThemes bool
+	dumpTheme  string
+	colour     bool
+	phase      int
 }
 
 var opts options
@@ -113,6 +121,22 @@ func init() {
 		"",
 		"keys to feed before a --screenshot: g pivots, \\t folds all, / starts a filter, j/k move",
 	)
+	f.StringVar(&opts.themeName, "theme", "", "look to use — see --list-themes")
+	f.BoolVar(
+		&opts.colour,
+		"colour",
+		false,
+		"keep the colour in a --screenshot, for looking at a theme rather than diffing it",
+	)
+	f.BoolVar(&opts.colour, "color", false, "alias for --colour")
+	f.IntVar(&opts.phase, "phase", 0, "which animation frame a --screenshot is taken at, for themes that move")
+	f.BoolVar(&opts.listThemes, "list-themes", false, "list every theme, built-in and yours, and exit")
+	f.StringVar(
+		&opts.dumpTheme,
+		"dump-theme",
+		"",
+		"print a theme fully resolved, ready to edit into your own, and exit",
+	)
 
 	rootCmd.SetVersionTemplate("taskui {{.Version}}\n")
 }
@@ -130,6 +154,22 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if opts.listThemes {
+		return listThemes(cmd)
+	}
+
+	if opts.dumpTheme != "" {
+		text, problems := theme.DumpTheme(opts.dumpTheme)
+		for _, p := range problems {
+			fmt.Fprintln(os.Stderr, "taskui:", p)
+		}
+		if len(problems) > 0 {
+			return errors.New("that theme did not load cleanly")
+		}
+		fmt.Print(text)
+		return nil
+	}
+
 	dir := "."
 	if len(args) == 1 {
 		dir = args[0]
@@ -140,6 +180,12 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	config := theme.FromViper(v)
+	// The flag beats the config file, so a look can be tried without committing to it.
+	if opts.themeName != "" {
+		picked, problems := theme.LoadTheme(opts.themeName)
+		config.Theme = picked
+		config.Problems = append(config.Problems, problems...)
+	}
 
 	// Searching the archive reads stored runs, not the project — it must work from
 	// anywhere, including a directory with no Taskfile in it.
@@ -200,6 +246,23 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	program := tea.NewProgram(a, tea.WithAltScreen())
 	_, err = program.Run()
 	return err
+}
+
+// listThemes names what is available, because "yours shadows the built-in of the same
+// name" is only a useful rule if you can watch it happen.
+func listThemes(cmd *cobra.Command) error {
+	out := cmd.OutOrStdout()
+	for _, name := range theme.ListThemes() {
+		resolved, problems := theme.LoadTheme(name)
+		note := ""
+		if len(problems) > 0 {
+			note = "  (" + problems[0] + ")"
+		}
+		fmt.Fprintf(out, "%-12s %s%s\n", name, resolved.Glyphs.Wordmark, note)
+	}
+	fmt.Fprintf(out, "\nyours go in %s\n", theme.ThemesDir())
+	fmt.Fprintf(out, "start one with `taskui --dump-theme default > %s/mine.yaml`\n", theme.ThemesDir())
+	return nil
 }
 
 // searchStored greps every stored run, newest first, grouped by run and task.
@@ -416,6 +479,14 @@ func screenshot(a *app.App, size, feed string) error {
 	}
 	for _, c := range feed {
 		a.HandleKey(app.KeyFor(c))
+	}
+	a.Phase = opts.phase
+	if opts.colour {
+		// Nothing here is a terminal, so lipgloss would otherwise decide there is no point
+		// colouring anything. Saying otherwise is the whole request.
+		lipgloss.SetColorProfile(termenv.TrueColor)
+		fmt.Println(a.RenderFrame(w, h))
+		return nil
 	}
 	for _, l := range a.RenderHeadless(w, h) {
 		if _, err := fmt.Println(l); err != nil {

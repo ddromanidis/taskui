@@ -60,6 +60,44 @@ func selectionOf(st lipgloss.Style, sel theme.Color) lipgloss.Style {
 	return st.Background(sel.Lip()).Bold(true)
 }
 
+// The rail is the glyph in the cursor's own column: an accent edge down the left of the
+// selected row.
+//
+// It exists because reverse video alone is a poor cursor. On a light terminal it turns the
+// row into a black bar that reads heavier than anything else on screen, and on a dark one
+// it competes with every status glyph. A one-column edge says "here" without shouting, and
+// it survives a terminal whose reverse video is unhelpful — which is the same argument the
+// selection colour already makes for itself, one column further left.
+//
+// The column on the other side is its shade.
+//
+// A lit edge on one side and a darker one on the other is how a flat surface is made to
+// read as a raised one — it is not a cast shadow, it is the two faces of something with
+// thickness. Themes that do not want it set the shade glyph to a space and the column goes
+// back to being the right margin the layout already left there.
+//
+// renderRow draws a row framed by those two columns. Neither is selection-styled: they are
+// the frame, not the thing framed.
+func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) string {
+	if width <= 0 {
+		return ""
+	}
+	left, leftStyle := " ", lipgloss.NewStyle()
+	right, rightStyle := " ", lipgloss.NewStyle()
+	if selected {
+		// Both edges take the same frame, so the marker travels up and down as one rather
+		// than tilting. The row itself never moves — a terminal cannot move one row without
+		// moving everything under it, and a list that shifted while you read it would be a
+		// worse trade than any amount of charm.
+		left = t.Animation.Frame(phase, t.Glyphs.Rail)
+		right = t.Animation.Frame(phase, t.Glyphs.SelectionShade)
+		leftStyle, rightStyle = fgBold(t.Colors.SelectionLight), fg(t.Colors.SelectionShade)
+	}
+	return leftStyle.Render(left) +
+		l.render(width-frameWidth, selected, t.Colors.Selection) +
+		rightStyle.Render(right)
+}
+
 // render turns one line into a string of exactly width cells.
 func (l line) render(width int, selected bool, sel theme.Color) string {
 	if width <= 0 {

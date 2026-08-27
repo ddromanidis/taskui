@@ -1,0 +1,70 @@
+# charm — after charm.land, whose libraries this front end is built on.
+#
+# The house palette: an indigo that carries the structure, a pink that carries the accent,
+# mint for anything that went well, and a lot of restraint everywhere else. Where the 90s
+# theme is loud on purpose, this one spends its colour on three things and leaves the rest
+# quiet — which is the actual lesson of the site.
+extends: default
+
+colors:
+  accent: "#ff5fa2"
+  mode: "#7d56f4"
+  dim: "#8a8fa3"
+  faint: "#4a4458"
+  rule: "#4a4458"
+  text: default
+  # Indigo, not reverse video: on a dark terminal it reads as a lit row rather than a hole.
+  selection: "#2b2145"
+  selection-light: "#ff5fa2"
+  selection-shade: "#4a4458"
+
+  alias: "#7d56f4"
+  danger: "#ff5f87"
+
+  status-ok: "#43d9ad"
+  status-running: "#ffcc66"
+  status-failed: "#ff5f87"
+  status-skipped: "#4a4458"
+  status-pending: "#4a4458"
+
+  command: "#7d56f4"
+
+  search: "#ff5fa2"
+  match-fg: "#1a1626"
+  match-bg: "#ff5fa2"
+
+  notice: "#ffcc66"
+  stored: "#7d56f4"
+  interactive: "#43d9ad"
+  warning-fg: "#1a1626"
+  warning-bg: "#ffcc66"
+  confirm-fg: "#1a1626"
+  confirm-bg: "#ff5f87"
+
+glyphs:
+  wordmark: "taskui"
+  separator: "→"
+  dot: "/"
+
+  # Rounded and light — the same weight the libraries draw their own borders at.
+  fold-open: "▾"
+  fold-closed: "▸"
+  fold-peek: "▹"
+
+  guide-branch: "├"
+  guide-last: "╰"
+  guide-vertical: "│"
+
+  rail: "┃"
+  rule: "╌"
+
+  command: "›"
+  warning: "▲"
+  danger: "▲"
+  cursor: "▌"
+
+  status-ok: "✓"
+  status-failed: "✕"
+  status-running: "◔"
+  status-pending: "◌"
+  status-skipped: "◦"
