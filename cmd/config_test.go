@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -225,5 +226,72 @@ func TestParseSinceRejectsNonsense(t *testing.T) {
 		if _, err := parseSince(text); err == nil {
 			t.Errorf("%q was accepted", text)
 		}
+	}
+}
+
+// --- the exit-code contract ---------------------------------------------------------------
+
+// The codes are an interface. Before this, `--run` on a failing pipeline came back 0 — the
+// manual promised the task's status and the program returned success — and `--flaky` shared
+// its code with "there is no Taskfile here", so a script could not tell them apart.
+
+func TestAQuietExitCarriesItsCode(t *testing.T) {
+	err := exitWith(201)
+	var status exitError
+	if !errors.As(err, &status) {
+		t.Fatal("not an exitError")
+	}
+	if status.code != 201 {
+		t.Errorf("code = %d", status.code)
+	}
+	if status.message != nil {
+		t.Error("a quiet exit should say nothing — the command already did")
+	}
+}
+
+func TestALoudExitCarriesBoth(t *testing.T) {
+	err := exitBecause(ExitFound, "%d tasks went both ways", 3)
+	var status exitError
+	if !errors.As(err, &status) {
+		t.Fatal("not an exitError")
+	}
+	if status.code != ExitFound {
+		t.Errorf("code = %d, want %d", status.code, ExitFound)
+	}
+	if !strings.Contains(err.Error(), "3 tasks") {
+		t.Errorf("message = %q", err)
+	}
+}
+
+// The three codes have to stay distinct, because telling them apart is their whole job.
+func TestTheExitCodesAreDistinct(t *testing.T) {
+	seen := map[int]string{}
+	for name, code := range map[string]int{
+		"ExitOK":     ExitOK,
+		"ExitFailed": ExitFailed,
+		"ExitFound":  ExitFound,
+	} {
+		if other, clash := seen[code]; clash {
+			t.Errorf("%s and %s are both %d", name, other, code)
+		}
+		seen[code] = name
+	}
+	if ExitOK != 0 {
+		t.Error("success has to be 0")
+	}
+}
+
+// A run that failed is reported by `--flaky` as a finding, not as taskui breaking.
+func TestFlakyReportsAFindingNotAFailure(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", base)
+
+	var out strings.Builder
+	err := printFlaky(&out, "/nowhere")
+	if err != nil {
+		t.Fatalf("an empty archive is not a finding: %v", err)
+	}
+	if !strings.Contains(out.String(), "no task") {
+		t.Errorf("got %q", out.String())
 	}
 }

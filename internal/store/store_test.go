@@ -600,3 +600,69 @@ func TestASteadyTaskIsNotAFlake(t *testing.T) {
 		t.Errorf("got %+v", got)
 	}
 }
+
+// --- the archive format's own version -----------------------------------------------------
+
+func TestASavedRunRecordsTheFormatItWasWrittenIn(t *testing.T) {
+	base := t.TempDir()
+	if _, err := Save(base, "/proj", finishedRun("all")); err != nil {
+		t.Fatal(err)
+	}
+	if got := List(base)[0].Version; got != ManifestVersion {
+		t.Errorf("version = %d, want %d", got, ManifestVersion)
+	}
+}
+
+// Every manifest written before the field existed has no version, and all of them are still
+// readable — nothing has changed shape, only been added to.
+func TestAManifestWithNoVersionStillLoads(t *testing.T) {
+	base := t.TempDir()
+	dir, err := Save(base, "/proj", finishedRun("all"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "manifest.json")
+	blob, _ := os.ReadFile(path)
+	var raw map[string]any
+	if err := json.Unmarshal(blob, &raw); err != nil {
+		t.Fatal(err)
+	}
+	delete(raw, "version")
+	out, _ := json.Marshal(raw)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := List(base)
+	if len(listed) != 1 {
+		t.Fatalf("an unversioned manifest was dropped: %d runs listed", len(listed))
+	}
+	if listed[0].Root != "all" {
+		t.Errorf("read it wrong: %+v", listed[0])
+	}
+}
+
+// An old binary meeting a newer archive skips it rather than guessing. Garbling somebody's
+// runs is worse than admitting they cannot be read.
+func TestAManifestFromTheFutureIsSkipped(t *testing.T) {
+	base := t.TempDir()
+	dir, err := Save(base, "/proj", finishedRun("all"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "manifest.json")
+	blob, _ := os.ReadFile(path)
+	var m Manifest
+	if err := json.Unmarshal(blob, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Version = ManifestVersion + 1
+	out, _ := json.MarshalIndent(m, "", "  ")
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := len(List(base)); got != 0 {
+		t.Errorf("listed %d runs from a format this build does not know", got)
+	}
+}

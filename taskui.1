@@ -58,7 +58,7 @@ Print tasks that both passed and failed at one commit.
 Print the execution graph reachable from a task and exit.
 .TP
 .BI \-\-keys " STRING"
-Keys to feed before a \-\-screenshot: g pivots, \et folds all, / starts a filter, j/k move.
+Keys to play before a \-\-screenshot, as if typed: \et is ⇥, \en is ⏎, everything else is itself.
 .TP
 .BR \-\-last
 Open the most recent run for this project instead of the picker.
@@ -619,8 +619,26 @@ answers it blind;
 re\-runs the task with interleaved output so prompts are visible, at the cost of
 attributing lines by the last task to announce itself rather than per line.
 .SH EXIT STATUS
-The exit status of the task that was run, or 0 when taskui exits without
-running anything.
+.TP
+.B 0
+Nothing went wrong.
+.TP
+.B 1
+taskui could not do what was asked: a bad flag, no Taskfile, no
+.BR task (1)
+on
+.BR PATH ,
+a config it could not read.
+.TP
+.B 2
+A check found what it was looking for.
+.B \-\-flaky
+and nothing else \(em so that a script can tell "this task is flaky" from
+"there is no Taskfile here", which is the distinction the status exists to draw.
+.PP
+.B \-\-run
+is the exception: it means run this and be it, so it exits with the status of
+the task, which for go\-task's own errors is in the 200s.
 .SH EXAMPLES
 .PP
 Browse another project:

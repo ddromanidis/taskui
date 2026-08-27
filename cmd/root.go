@@ -121,14 +121,6 @@ func versionString() string {
 	return fmt.Sprintf("%s (commit %s, built %s)", v, c, d)
 }
 
-// Execute adds all child commands to the root command and sets flags appropriately.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "taskui:", err)
-		os.Exit(1)
-	}
-}
-
 func init() {
 	cobra.OnInitialize(initConfig)
 
@@ -157,7 +149,7 @@ func init() {
 		&opts.keys,
 		"keys",
 		"",
-		"keys to feed before a --screenshot: g pivots, \\t folds all, / starts a filter, j/k move",
+		"keys to play before a --screenshot, as if typed: \\t is ⇥, \\n is ⏎, everything else is itself",
 	)
 	f.StringVar(&opts.themeName, "theme", "", "look to use — see --list-themes")
 	f.BoolVar(
@@ -536,7 +528,8 @@ func printFlaky(out io.Writer, root string) error {
 			f.Task, f.Short(), f.Passed, f.Failed, ago(f.LastUnix))
 	}
 	fmt.Fprintf(out, "-- %d flaky\n", len(flakes))
-	return fmt.Errorf("%d %s went both ways at one commit", len(flakes), plural(len(flakes), "task", "tasks"))
+	return exitBecause(ExitFound, "%d %s went both ways at one commit",
+		len(flakes), plural(len(flakes), "task", "tasks"))
 }
 
 func plural(n int, one, many string) string {
@@ -656,9 +649,17 @@ func runHeadless(dir, target string, argv []string) error {
 	path, err := store.Save(store.StateDir(), dir, r)
 	if err != nil {
 		fmt.Printf("not saved: %v\n", err)
+		if exit != 0 {
+			return exitWith(exit)
+		}
 		return nil
 	}
 	fmt.Printf("saved to %s  (%d secrets masked)\n", path, r.RedactedSecrets)
+	// `--run` means run this and be it. The tree above already ends in the exit line, so
+	// there is nothing left to say — only a status to carry.
+	if exit != 0 {
+		return exitWith(exit)
+	}
 	return nil
 }
 

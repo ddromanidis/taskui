@@ -40,8 +40,21 @@ type TaskEntry struct {
 	File string `json:"file"`
 }
 
+// ManifestVersion is the archive format this build writes, and the highest it will read.
+//
+// The archive is the one thing here that users accumulate and cannot regenerate, so the
+// moment its shape stops being ours is the moment it needs a number on it. Every field added
+// so far has been `omitempty`, which is why old runs still load — but that is care, not a
+// policy, and it only works while changes are additive. A reader that meets a version it
+// does not know skips the run rather than guessing at it: an old binary garbling a newer
+// archive is worse than one admitting it cannot read it.
+const ManifestVersion = 1
+
 type Manifest struct {
-	ID string `json:"id"`
+	// Version is the format. Absent means 0, which is every manifest written before this
+	// existed — all of them readable, since nothing has changed shape yet.
+	Version int    `json:"version"`
+	ID      string `json:"id"`
 	// Root is the task that was invoked.
 	Root string `json:"root"`
 	// Args are the extra argv it was invoked with. Omitted-friendly so manifests written
@@ -179,6 +192,7 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 	}
 
 	manifest := Manifest{
+		Version:         ManifestVersion,
 		ID:              id,
 		Root:            r.Root,
 		Args:            r.Args,
@@ -282,9 +296,14 @@ func List(base string) []Manifest {
 			continue
 		}
 		var m Manifest
-		if json.Unmarshal(blob, &m) == nil {
-			out = append(out, m)
+		if json.Unmarshal(blob, &m) != nil {
+			continue
 		}
+		// Written by something newer than this build. Reading it would be guessing.
+		if m.Version > ManifestVersion {
+			continue
+		}
+		out = append(out, m)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].StartedUnix != out[j].StartedUnix {

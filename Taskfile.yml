@@ -124,7 +124,7 @@ tasks:
       - go run . --search '{{.PATTERN}}'
 
   shot:
-    desc: 'Render one frame to stdout without a terminal (task shot -- --keys g)'
+    desc: 'Render one frame to stdout without a terminal (task shot -- --keys p)'
     cmds:
       - go run . --screenshot 100x30 {{.CLI_ARGS}} .
 

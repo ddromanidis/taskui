@@ -188,7 +188,7 @@ taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
 taskui --flaky                # tasks that went both ways at one commit
 taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
-taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
+taskui --screenshot 90x30     # render one frame to stdout (add --keys 'p' or '/lint')
 taskui examples               # worked examples, rendered at your terminal's width
 taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 ```
@@ -960,6 +960,21 @@ task probe:run                  # capture a deliberately failing pipeline
 task shot -- --keys Ojj         # render one frame to stdout, no terminal needed
 task theme THEME=synthwave      # preview a theme in colour
 ```
+
+### Exit codes
+
+```
+0   nothing went wrong
+1   taskui could not do what was asked — bad flag, no Taskfile, no go-task, unreadable config
+2   a check found what it was looking for: `--flaky`, and nothing else
+```
+
+`--run` is the exception: it means run this and be it, so it exits with the task's own status
+— which for go-task's own errors is in the 200s. That makes `taskui --run ci` usable as a CI
+step, which it was not before: it printed `exit 1` and returned 0.
+
+`--flaky` gets a code of its own so a script can tell "this task is flaky" from "there is no
+Taskfile here", which is the distinction an exit code exists to draw.
 
 `--screenshot` is why the rendering is testable at all: `View()` returns a string, so a
 frame rendered off-screen is the same code path the live UI runs. The suite renders every

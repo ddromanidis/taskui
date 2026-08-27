@@ -706,6 +706,39 @@ Regenerating also caught a stale entry in the keymap table itself, which meant `
 too: `p` was still described as toggling "by domain / by verb" after it had become a cycle
 through three built-ins plus whatever the config adds.
 
+## What a 1.0 has to settle
+
+A major version is a promise not to break things, so the question is what would be regretted.
+Four answers, and one of them was a bug.
+
+**`--run` did not exit with the task's status.** It printed `exit 1` and returned 0, while
+the manual had always promised the opposite. A CI step calling `taskui --run ci` on a broken
+pipeline went green. There is no worse shape for a bug: not a crash, not a wrong number on
+screen, but a silent yes where the answer was no. It carries the status through now, which
+for go-task's own errors is in the 200s.
+
+**The archive had no version.** It is the one thing here that users accumulate and cannot
+regenerate, and its shape stops being ours the moment there are archives in the wild. Old
+runs still load — but only because every field added so far happened to be `omitempty`, which
+is care rather than policy, and it holds only while changes are additive. A reader that meets
+a version it does not know skips that run: an old binary garbling a newer archive is worse
+than one saying it cannot read it.
+
+**Three exit codes, distinct and written down.** `--flaky` used to share its code with "there
+is no Taskfile here", so a script could not tell a finding from a failure — which is the
+distinction an exit code exists to draw. `diff` and `grep` both separate the two; so does this
+now.
+
+**What is public.** `--keys` and `--phase` look like test affordances, and the temptation was
+to hide them. But they are in the README, in EXAMPLES.md and in this project's own Taskfile,
+which makes them interface already — so they are committed to rather than withdrawn, and
+`--keys` help that still described `g` as the pivot key, two rewrites after it stopped being
+one, is fixed.
+
+What is deliberately *not* settled: the pivot command protocol and the `pivots:` config block
+are days old with no users but their author. Freezing an interface nobody has bent is how a
+v2 gets written. They should stay in a 0.x until somebody else has tried them.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
