@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/keys"
@@ -602,5 +603,80 @@ func TestTheRailMarksTheCursorRow(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[2+3], a.Theme.Glyphs.Rail) {
 		t.Errorf("the rail is not on the cursor's row: %q", lines[2+3])
+	}
+}
+
+// A wrapped description used to leave the guide column blank, which put a gap in the run of
+// branches that read as the end of the group.
+func TestAWrappedDescriptionCarriesTheGuideDown(t *testing.T) {
+	long := "A description long enough that it has to wrap onto a second line"
+	tasks := pivot.Fixture([]string{"group:first", "group:second"})
+	for i := range tasks {
+		tasks[i].Desc = long
+	}
+	a := New(tasks, "/tmp/repo")
+	a.SetStateDir(t.TempDir())
+	a.SetFoldAll(true)
+
+	lines := a.RenderHeadless(56, 12)
+	guide := a.Theme.Glyphs.GuideVertical
+
+	var continuations []string
+	for _, l := range lines {
+		if strings.Contains(l, "wrap onto") || strings.Contains(l, "second line") {
+			continuations = append(continuations, l)
+		}
+	}
+	if len(continuations) != 2 {
+		t.Fatalf("expected one continuation per task, got %d: %#v", len(continuations), lines)
+	}
+
+	// `first` has a sibling below it, so its guide continues.
+	if !strings.HasPrefix(strings.TrimPrefix(continuations[0], " "), guide) {
+		t.Errorf("the guide should carry down: %q", continuations[0])
+	}
+	// `second` is the last child — a vertical there would promise a sibling that does not
+	// exist.
+	if strings.Contains(continuations[1], guide) {
+		t.Errorf("the last child should not carry a guide: %q", continuations[1])
+	}
+}
+
+// The continuation hangs under the description, not under the guide.
+func TestAWrappedDescriptionStaysInItsColumn(t *testing.T) {
+	tasks := pivot.Fixture([]string{"group:one"})
+	tasks[0].Desc = "A description long enough that it has to wrap onto a second line"
+	a := New(tasks, "/tmp/repo")
+	a.SetStateDir(t.TempDir())
+	a.SetFoldAll(true)
+
+	// Columns, not byte offsets: a guide glyph is three bytes and one column, and the row
+	// with the description on it has one in front while its continuation does not.
+	column := func(l string, at int) int { return utf8.RuneCountInString(l[:at]) }
+	textStarts := func(l string) int {
+		at := strings.IndexFunc(l, func(r rune) bool {
+			return r != ' ' && r != []rune(a.Theme.Glyphs.GuideVertical)[0]
+		})
+		if at < 0 {
+			return -1
+		}
+		return column(l, at)
+	}
+
+	first, second := -1, -1
+	for _, l := range a.RenderHeadless(56, 10) {
+		if i := strings.Index(l, "A description"); i >= 0 {
+			first = column(l, i)
+			continue
+		}
+		if first >= 0 && second < 0 && strings.Contains(l, "line") {
+			second = textStarts(l)
+		}
+	}
+	if first < 0 || second < 0 {
+		t.Fatal("the description did not wrap")
+	}
+	if first != second {
+		t.Errorf("continuation starts at column %d, the first line at %d", second, first)
 	}
 }

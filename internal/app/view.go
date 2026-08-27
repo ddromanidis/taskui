@@ -1000,7 +1000,7 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 
 		// Descriptions wrap into their own column rather than being cut off mid-word — a
 		// truncated description is the half that does not tell you anything. Continuation
-		// rows hang under the first.
+		// rows hang under the first, and carry the guide down with them.
 		signalWidth := 0
 		for _, sp := range signals {
 			signalWidth += utf8.RuneCountInString(sp.text)
@@ -1013,9 +1013,21 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 				styled(chunks[0], fg(t.Colors.Dim)),
 			)
 			used = nameColumn + utf8.RuneCountInString(chunks[0])
+			// A wrapped description used to leave the guide column blank, which broke the
+			// run of branches in half: the eye follows the vertical down the list, and a
+			// task with a two-line description put a gap in it that read as the end of the
+			// group. The guide continues instead — except on the last child, where there
+			// is nothing below to connect to and a vertical would promise a sibling that
+			// does not exist.
+			cont := g.GuideVertical
+			if last {
+				cont = " "
+			}
+			prefix := indent + cont + " "
 			for _, chunk := range chunks[1:] {
 				extra = append(extra, line{
-					plain(strings.Repeat(" ", nameColumn)),
+					styled(prefix, fg(t.Colors.Faint)),
+					plain(strings.Repeat(" ", max(0, nameColumn-utf8.RuneCountInString(prefix)))),
 					styled(chunk, fg(t.Colors.Dim)),
 				})
 			}
