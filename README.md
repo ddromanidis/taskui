@@ -568,7 +568,7 @@ is the answer to "where do I edit this":
 ▸ api/Taskfile.yml       20
 ▸ backend/Taskfile.yml   30
 ▸ site/Taskfile.yml      14
-▸ acme/Taskfile.yml  21
+▸ acme/Taskfile.yml      21
 ```
 
 ### Adding your own

@@ -74,10 +74,10 @@ jobs:
       - name: Capture a real run
         run: |
           task probe:make
-          go run . --run ci ./probe | tail -5
-          go run . --run ci ./probe > /dev/null && failed=0 || failed=$?
-          test "$failed" -ne 0 || { echo "--run returned 0 for a pipeline that failed" >&2; exit 1; }
-          echo "the failing probe exited $failed"
+          go run . --run ci ./probe > "$RUNNER_TEMP/captured.txt" && status=0 || status=$?
+          tail -5 "$RUNNER_TEMP/captured.txt"
+          test "$status" -ne 0 || { echo "--run returned 0 for a pipeline that failed" >&2; exit 1; }
+          echo "the failing probe exited $status"
 
       # Twice, so the archive holds a series — which is what the timeline and the diff read.
       # Without a second run they would both be correct and untested.
