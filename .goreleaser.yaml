@@ -41,6 +41,7 @@ archives:
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
       - README.md
+      - DESIGN.md
       - EXAMPLES.md
       - LICENSE
       - taskui.1
@@ -66,6 +67,10 @@ homebrew_casks:
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
+    # Without the tap token the cask is skipped rather than failing the release. A tap that
+    # is not set up yet should cost you the cask, not the binaries — and the token cannot
+    # be checked any earlier, because it only exists inside the workflow.
+    skip_upload: '{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}'
     homepage: "https://github.com/ddromanidis/taskui"
     description: "A folding, searchable front end for go-task"
     license: "MIT"
@@ -102,7 +107,10 @@ snapshot:
 
 changelog:
   sort: asc
-  use: github
+  # `git`, not `github`: this repository carries two unrelated histories — the Rust project
+  # this replaced, and the Go one — and asking GitHub to compare across that gap is asking
+  # a question it has no answer to.
+  use: git
   groups:
     - title: Features
       regexp: '^.*?feat(\(.+\))??!?:.+$'

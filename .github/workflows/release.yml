@@ -41,5 +41,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Writing the cask into ddromanidis/homebrew-tap needs a token for *that*
-          # repository; the one above is scoped to this one.
+          # repository; the one above is scoped to this one. Empty until the secret is
+          # added, and the cask skips itself rather than failing the release.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
