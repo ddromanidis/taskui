@@ -73,6 +73,20 @@ jobs:
           task probe:make
           go run . --run ci ./probe | tail -5
 
+      # Twice, so the archive holds a series — which is what the timeline and the diff read.
+      # Without a second run they would both be correct and untested.
+      #
+      # The greps are the point: both commands exit 0 having printed nothing useful if the
+      # archive did not come back, and a step that only checks the exit code would pass.
+      - name: The archive answers questions about itself
+        run: |
+          go run . --run ci ./probe > /dev/null
+          go run . --timeline test ./probe | tee /dev/stderr | grep -q -- '-- 2 runs'
+          go run . --diff test ./probe | tee /dev/stderr | grep -q '^--- test'
+          # The probe is deterministic, so two of its runs differ in nothing. That is the
+          # answer, and saying so is what the diff has to get right here.
+          go run . --diff test ./probe | grep -q -- '-- +0 -0'
+
   goreleaser:
     name: goreleaser check
     runs-on: ubuntu-latest
