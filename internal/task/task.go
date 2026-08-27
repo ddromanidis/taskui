@@ -37,6 +37,10 @@ type Task struct {
 	// Dangerous is a heuristic: does the description suggest this touches production or
 	// destroys data?
 	Dangerous bool
+	// Where the task is written, once the JSON listing has arrived. Zero until then, which
+	// is why the file pivot pools everything into `(other)` for the first moment of a
+	// session and then fills in.
+	Where Where
 }
 
 // Segments splits the name: `backend:migrate:down` -> ["backend", "migrate", "down"].

@@ -213,8 +213,12 @@ type SlotInfo struct {
 }
 
 type App struct {
-	Tasks  []task.Task
-	Mode   pivot.Mode
+	Tasks []task.Task
+	// Pivots is every grouping available, in the order `p` cycles them. The two built-ins
+	// plus `file`, plus whatever the config added.
+	Pivots []pivot.Pivot
+	// Pivot indexes Pivots.
+	Pivot  int
 	Tree   *pivot.Tree
 	Rows   []pivot.Row
 	Cursor int
@@ -426,7 +430,7 @@ type App struct {
 func New(tasks []task.Task, root string) *App {
 	a := &App{
 		Tasks:         tasks,
-		Mode:          pivot.Domain,
+		Pivots:        pivot.Builtins(),
 		Tree:          &pivot.Tree{},
 		expanded:      map[string]map[string]bool{},
 		Root:          root,
@@ -488,7 +492,7 @@ func (a *App) collectDetails() bool {
 		if !ok || details == nil {
 			return false
 		}
-		a.Details = details
+		a.applyDetails(details)
 		return true
 	default:
 		return false
@@ -508,12 +512,32 @@ func (a *App) AwaitDetails(grace time.Duration) {
 	case details, ok := <-a.detailCh:
 		a.detailCh = nil
 		if ok {
-			a.Details = details
+			a.applyDetails(details)
 		}
 	case <-time.After(grace):
 		// Leave the channel in place — the poll loop will pick it up if this is not a
 		// one-frame process after all.
 	}
+}
+
+// applyDetails takes the listing, wherever it was collected from.
+//
+// Both collection paths land here, because both have to do the same two things afterwards
+// and one of them originally did neither: the locations go onto the tasks themselves — a
+// pivot is a function of a task, and the file pivot cannot be one if the file lives in a map
+// beside it — and the tree is rebuilt, since it may have been built before any of this was
+// known and the file pivot would have pooled everything into `(other)` and stayed there.
+func (a *App) applyDetails(details map[string]task.Detail) {
+	if details == nil {
+		return
+	}
+	a.Details = details
+	for i := range a.Tasks {
+		if d, ok := details[a.Tasks[i].Name]; ok {
+			a.Tasks[i].Where = d.Where
+		}
+	}
+	a.Rebuild(a.SelectedTask())
 }
 
 // WhereIs is where a task is written, once the listing has arrived.
@@ -553,6 +577,16 @@ func (a *App) WithConfig(config theme.Config) *App {
 	a.Theme = config.Theme
 	a.Keymap = config.Keymap
 	a.PeekLines = config.PeekLines
+	// Custom groupings go after the built-ins, in the order they were written — `p` cycles
+	// through them, so the order in the file is the order at the keyboard.
+	for _, spec := range config.Pivots {
+		p, err := spec.Compile(a.Root)
+		if err != nil {
+			config.Problems = append(config.Problems, err.Error())
+			continue
+		}
+		a.Pivots = append(a.Pivots, p)
+	}
 	if len(config.Problems) > 0 {
 		a.Status = "config: " + strings.Join(config.Problems, "; ")
 	}
@@ -2359,8 +2393,32 @@ func (a *App) RunSelectedTask() (string, bool) {
 	return row.Task, true
 }
 
+// Mode is the active pivot.
+func (a *App) Mode() pivot.Pivot {
+	if len(a.Pivots) == 0 {
+		return pivot.Builtins()[0]
+	}
+	return a.Pivots[clamp(a.Pivot, 0, len(a.Pivots)-1)]
+}
+
+// ModeLabel is its name, which is also the key its fold state is kept under.
+func (a *App) ModeLabel() string { return a.Mode().Name }
+
+// SetPivot switches to a named pivot. Reports false for a name nothing answers to.
+func (a *App) SetPivot(name string) bool {
+	for i, p := range a.Pivots {
+		if p.Name == name {
+			keep := a.SelectedTask()
+			a.Pivot = i
+			a.Rebuild(keep)
+			return true
+		}
+	}
+	return false
+}
+
 func (a *App) foldSet() map[string]bool {
-	label := a.Mode.Label()
+	label := a.ModeLabel()
 	set, ok := a.expanded[label]
 	if !ok {
 		set = map[string]bool{}
@@ -2454,7 +2512,7 @@ func subsequence(pattern, target string) bool {
 // opened so it is actually on screen afterwards. Pass -1 for none.
 func (a *App) Rebuild(keep int) {
 	visible := a.visible()
-	a.Tree = pivot.Build(a.Mode, a.Tasks, visible)
+	a.Tree = pivot.Build(a.Mode(), a.Tasks, visible)
 
 	if keep >= 0 {
 		if ancestors, ok := a.Tree.AncestorsOfTask(keep); ok {
@@ -2498,10 +2556,19 @@ func (a *App) SelectedNode() *pivot.Node {
 	return &a.Tree.Nodes[a.Rows[a.Cursor].Node]
 }
 
+// ToggleMode advances to the next pivot, wrapping.
+//
+// A cycle rather than a toggle, now that there can be more than two. The selection is kept
+// across the change: bouncing between groupings to look at the same task from two angles is
+// the entire reason to have more than one.
 func (a *App) ToggleMode() {
+	if len(a.Pivots) == 0 {
+		return
+	}
 	keep := a.SelectedTask()
-	a.Mode = a.Mode.Toggled()
+	a.Pivot = (a.Pivot + 1) % len(a.Pivots)
 	a.Rebuild(keep)
+	a.Status = "grouped by " + a.ModeLabel()
 }
 
 func (a *App) ToggleFold() {
@@ -2543,7 +2610,7 @@ func (a *App) ToggleFoldAll() {
 			groups = append(groups, n.Key)
 		}
 	}
-	open := a.expanded[a.Mode.Label()]
+	open := a.expanded[a.ModeLabel()]
 	allOpen := len(groups) > 0
 	for _, g := range groups {
 		if !open[g] {

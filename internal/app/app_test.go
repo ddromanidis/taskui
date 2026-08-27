@@ -74,13 +74,13 @@ func visibleTaskNames(a *App) []string {
 func TestSelectionSurvivesThePivot(t *testing.T) {
 	a := sample(t)
 	ti := parkOn(t, a, "backend:lint")
-	if a.Mode != pivot.Domain {
-		t.Fatalf("mode = %v", a.Mode)
+	if a.ModeLabel() != pivot.DomainName {
+		t.Fatalf("mode = %v", a.ModeLabel())
 	}
 
 	a.ToggleMode()
-	if a.Mode != pivot.Verb {
-		t.Errorf("mode = %v", a.Mode)
+	if a.ModeLabel() != pivot.VerbName {
+		t.Errorf("mode = %v", a.ModeLabel())
 	}
 	if a.SelectedTask() != ti {
 		t.Error("the same task should stay under the cursor after pivoting to verb")
@@ -99,15 +99,39 @@ func TestFoldStateIsRememberedPerMode(t *testing.T) {
 	parkOn(t, a, "backend:lint")
 	domainRows := len(a.Rows)
 
-	a.ToggleMode()
-	a.SetFoldAll(false)
-	a.ToggleMode()
-
-	if a.Mode != pivot.Domain {
-		t.Fatalf("mode = %v", a.Mode)
+	// By name rather than by toggling twice: `p` cycles through every grouping there is, so
+	// two presses stopped meaning "there and back" the moment a third pivot existed.
+	if !a.SetPivot(pivot.VerbName) {
+		t.Fatal("no verb pivot")
 	}
+	a.SetFoldAll(false)
+	if !a.SetPivot(pivot.DomainName) {
+		t.Fatal("no domain pivot")
+	}
+
 	if len(a.Rows) != domainRows {
 		t.Errorf("domain folds were disturbed: %d, want %d", len(a.Rows), domainRows)
+	}
+}
+
+// `p` visits every grouping and comes back, however many there are.
+func TestThePivotKeyCyclesThroughEveryGrouping(t *testing.T) {
+	a := sample(t)
+	start := a.ModeLabel()
+	seen := map[string]bool{start: true}
+	for range len(a.Pivots) - 1 {
+		a.ToggleMode()
+		if seen[a.ModeLabel()] {
+			t.Fatalf("%q came round twice before the cycle was done", a.ModeLabel())
+		}
+		seen[a.ModeLabel()] = true
+	}
+	a.ToggleMode()
+	if a.ModeLabel() != start {
+		t.Errorf("the cycle ended on %q, not back at %q", a.ModeLabel(), start)
+	}
+	if len(seen) != len(a.Pivots) {
+		t.Errorf("visited %d of %d groupings", len(seen), len(a.Pivots))
 	}
 }
 

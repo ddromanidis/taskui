@@ -466,11 +466,12 @@ What it cannot do is keep showing you the output: once taskui is gone the pty is
 everything printed after that is lost. Which is why detaching archives what it has at that
 moment — otherwise a two-hour run leaves nothing behind.
 
-## Two pivots
+## Pivots
 
 Grouping is a pivot, not a set of bespoke views: one flat list of tasks plus a key
-function, rendered as a fold tree. Two keys are wired up, and they are transposes of each
-other.
+function, rendered as a fold tree. `p` cycles through them.
+
+Three ship. Two are transposes of each other; the third answers a different question.
 
 **Domain** splits the name on `:`, n levels deep. This is how you browse.
 
@@ -499,6 +500,74 @@ grouping a singleton reads worse than not grouping it.
 
 The root aggregate sits directly above its own fan-out, so the verb pivot doubles as a
 static preview of what `task lint` will actually do — without having run anything.
+
+**File** groups by the Taskfile each task is written in, which on a project with `includes:`
+is the answer to "where do I edit this":
+
+```
+▸ api/Taskfile.yml       20
+▸ backend/Taskfile.yml   30
+▸ site/Taskfile.yml      14
+▸ acme/Taskfile.yml  21
+```
+
+### Adding your own
+
+A pivot is a key function, so a project can supply one. Two forms, in `config.yaml`:
+
+```yaml
+pivots:
+  # Group by what a pattern captures from the task name.
+  - name: layer
+    regex: '^([^:]+):([^:]+)'
+    path: ["{1}", "{2}"]
+
+  # …or hand the question to a program.
+  - name: risk
+    command: ["./scripts/taskui-pivot-risk"]
+```
+
+They join the cycle after the built-ins, in the order you wrote them, and `--dump layer`
+prints one the same way it prints `domain`.
+
+**`regex`** is matched against the task name; `path` builds the grouping from its captures,
+`{1}` being the first. `path` defaults to one level of `{1}`, or of the whole match when the
+pattern has no groups. A segment that comes out empty is dropped, so one pattern can serve
+tasks at different depths. A name the pattern does not match is not an error — that task
+lands in `(other)`.
+
+**`command`** is the escape hatch. taskui writes the task names to its stdin, one per line,
+and reads back `name<TAB>outer/inner`:
+
+```sh
+#!/bin/sh
+while IFS= read -r name; do
+  case "$name" in
+    *deploy*|*migrate*) printf '%s\tdangerous\n' "$name" ;;
+    *)                  printf '%s\tsafe/ordinary\n' "$name" ;;
+  esac
+done
+```
+
+A name it says nothing about pools into `(other)` — as does every name if the program is
+missing, fails, or takes longer than five seconds. A pivot that cannot answer should leave
+you with a usable list rather than an empty one. It runs once per task list and the answer is
+cached: filtering changes what is shown, not where a task belongs, so a keystroke does not
+spawn a process.
+
+Leaves in a custom pivot show the full task name. The grouping is orthogonal to the name —
+grouping by owner does not make the owner part of what a task is called — so flattening it
+into the label would throw away the one thing identifying it.
+
+### Why not Go plugins
+
+`plugin.Open` needs the host and the plugin built by the same toolchain version, against
+identical versions of every shared dependency, with matching build flags, and it needs cgo.
+taskui's releases are built `CGO_ENABLED=0` — where every `plugin.Open` returns `plugin: not
+implemented` — and with `-trimpath`, which a locally built plugin would not match even with
+cgo on. A Go plugin would work only for someone who built taskui themselves, on the same
+machine, that afternoon. An external command has none of those constraints and can be
+written in anything.
 
 Three properties make `g` read as a pivot rather than a navigation reset, and they are
 most of the implementation cost:

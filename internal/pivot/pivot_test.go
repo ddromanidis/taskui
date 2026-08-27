@@ -49,7 +49,7 @@ func render(tree *Tree) []string {
 
 func TestDomainPinsRootGroupFirst(t *testing.T) {
 	tasks := sample()
-	tree := Build(Domain, tasks, all(tasks))
+	tree := Build(Domain(), tasks, all(tasks))
 	if got := tree.Nodes[tree.Roots[0]].Label; got != RootGroup {
 		t.Errorf("first root = %q", got)
 	}
@@ -70,7 +70,7 @@ func TestDomainPinsRootGroupFirst(t *testing.T) {
 // `build:release` were being shown as two unrelated roots.
 func TestARootTaskThatNamesANamespaceOwnsIt(t *testing.T) {
 	tasks := Fixture([]string{"all", "build", "build:release", "test", "test:one"})
-	tree := Build(Domain, tasks, all(tasks))
+	tree := Build(Domain(), tasks, all(tasks))
 
 	var roots []string
 	for _, r := range tree.Roots {
@@ -110,7 +110,7 @@ func TestARootTaskThatNamesANamespaceOwnsIt(t *testing.T) {
 // be both, or one of the two disappears from the UI.
 func TestDomainNodeCanBeBothGroupAndTask(t *testing.T) {
 	tasks := sample()
-	tree := Build(Domain, tasks, all(tasks))
+	tree := Build(Domain(), tasks, all(tasks))
 	var migrate *Node
 	for i := range tree.Nodes {
 		if tree.Nodes[i].Key == "backend:migrate" {
@@ -133,7 +133,7 @@ func TestDomainNodeCanBeBothGroupAndTask(t *testing.T) {
 
 func TestDomainPutsPlainTasksBeforeSubgroups(t *testing.T) {
 	tasks := sample()
-	lines := render(Build(Domain, tasks, all(tasks)))
+	lines := render(Build(Domain(), tasks, all(tasks)))
 	at := -1
 	for i, l := range lines {
 		if l == "backend" {
@@ -151,7 +151,7 @@ func TestDomainPutsPlainTasksBeforeSubgroups(t *testing.T) {
 
 func TestVerbGroupsByLastSegmentSizeDescending(t *testing.T) {
 	tasks := sample()
-	tree := Build(Verb, tasks, all(tasks))
+	tree := Build(Verb(), tasks, all(tasks))
 	type gc struct {
 		label string
 		count int
@@ -170,7 +170,7 @@ func TestVerbGroupsByLastSegmentSizeDescending(t *testing.T) {
 // singletons pool into one flat bucket, pinned last.
 func TestVerbPoolsSingletonsIntoOtherLast(t *testing.T) {
 	tasks := sample()
-	tree := Build(Verb, tasks, all(tasks))
+	tree := Build(Verb(), tasks, all(tasks))
 	last := tree.Roots[len(tree.Roots)-1]
 	if tree.Nodes[last].Label != OtherGroup {
 		t.Fatalf("last root = %q", tree.Nodes[last].Label)
@@ -189,7 +189,7 @@ func TestVerbPoolsSingletonsIntoOtherLast(t *testing.T) {
 // point of the view.
 func TestVerbLeavesCarryTheFullColonPath(t *testing.T) {
 	tasks := sample()
-	tree := Build(Verb, tasks, all(tasks))
+	tree := Build(Verb(), tasks, all(tasks))
 	var lint *Node
 	for _, r := range tree.Roots {
 		if tree.Nodes[r].Label == "lint" {

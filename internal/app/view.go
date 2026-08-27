@@ -899,14 +899,7 @@ func (a *App) pickerHeader() line {
 		}
 	}
 
-	// The pivot names both sides, with the one you are in accented. It replaces the
-	// header's `group: domain` and the footer's `p group by verb` at once: a toggle that
-	// shows its other position is more use than either half on its own.
-	state := []span{styled("domain", a.pivotStyle(pivot.Domain))}
-	state = append(state,
-		styled(t.Glyphs.Dot, fg(t.Colors.Faint)),
-		styled("verb", a.pivotStyle(pivot.Verb)),
-	)
+	state := a.pivotNames()
 
 	if a.Query == "" {
 		if a.InteractiveNext {
@@ -944,12 +937,51 @@ func (a *App) pickerHeader() line {
 	return a.header(dir, state)
 }
 
-func (a *App) pivotStyle(mode pivot.Mode) lipgloss.Style {
-	if a.Mode == mode {
-		return fgBold(a.Theme.Colors.Mode)
+// pivotNames lists the groupings with the active one accented.
+//
+// It replaces the header's `group: domain` and the footer's `p group by verb` at once: a
+// control that shows its other positions is more use than either half on its own. With two
+// pivots that was the whole list; with a config that can add more it stops fitting, so past
+// a few it shows the one you are in and how many others there are — the header's right-hand
+// block is right-anchored and a longer list would push the task count off the edge.
+func (a *App) pivotNames() []span {
+	t := a.Theme
+	names := make([]string, 0, len(a.Pivots))
+	for _, p := range a.Pivots {
+		names = append(names, p.Name)
 	}
-	return fg(a.Theme.Colors.Faint)
+	if len(names) == 0 {
+		return nil
+	}
+
+	width := len(names) - 1
+	for _, n := range names {
+		width += utf8.RuneCountInString(n)
+	}
+	if width > pivotNamesBudget {
+		return []span{
+			styled(a.ModeLabel(), fgBold(t.Colors.Mode)),
+			styled(fmt.Sprintf(" +%d", len(names)-1), fg(t.Colors.Faint)),
+		}
+	}
+
+	var out []span
+	for i, n := range names {
+		if i > 0 {
+			out = append(out, styled(t.Glyphs.Dot, fg(t.Colors.Faint)))
+		}
+		style := fg(t.Colors.Faint)
+		if i == a.Pivot {
+			style = fgBold(t.Colors.Mode)
+		}
+		out = append(out, styled(n, style))
+	}
+	return out
 }
+
+// pivotNamesBudget is how much of the header the grouping list may take before it is
+// summarised. The block it sits in is right-anchored against the task count.
+const pivotNamesBudget = 28
 
 // nameColumn is where a task's description starts, on every row, always.
 //

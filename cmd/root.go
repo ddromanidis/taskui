@@ -257,7 +257,7 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.dump != "" {
-		return dumpPivot(opts.dump, tasks)
+		return dumpPivot(opts.dump, app.New(tasks, root).WithConfig(config).Pivots, tasks)
 	}
 
 	if opts.graph != "" {
@@ -358,19 +358,24 @@ func searchStored(pattern string) error {
 	return nil
 }
 
-func dumpPivot(mode string, tasks []task.Task) error {
-	m := pivot.Domain
-	if mode == "verb" {
-		m = pivot.Verb
-	} else if mode != "domain" {
-		return fmt.Errorf("--dump expects domain or verb, not %q", mode)
+func dumpPivot(mode string, pivots []pivot.Pivot, tasks []task.Task) error {
+	var chosen pivot.Pivot
+	var names []string
+	for _, p := range pivots {
+		names = append(names, p.Name)
+		if p.Name == mode {
+			chosen = p
+		}
+	}
+	if chosen.Name == "" {
+		return fmt.Errorf("--dump expects one of %s, not %q", strings.Join(names, ", "), mode)
 	}
 
 	all := make([]int, len(tasks))
 	for i := range tasks {
 		all[i] = i
 	}
-	tree := pivot.Build(m, tasks, all)
+	tree := pivot.Build(chosen, tasks, all)
 	for _, row := range tree.Flatten(func(string) bool { return true }) {
 		n := tree.Nodes[row.Node]
 		glyph := " "

@@ -593,6 +593,51 @@ broken zigzagged — which is most of what that column is for. Rows without a co
 width now, but only when they have something to line up; a row showing no outcome would
 rather spend the space on its description.
 
+## Pivots as values
+
+The package comment claimed from the start that grouping was "a pivot, not a set of bespoke
+views: one flat list of tasks plus a key function". It was a claim with exactly two
+implementations behind a two-valued enum and a `Toggled()` method, which is not an extension
+point — it is a boolean wearing a name.
+
+A pivot is a value now: a name and a builder. `p` cycles rather than toggles, fold state is
+kept per pivot name rather than per enum label, and `--dump` takes any of them.
+
+Two of the three built-ins keep bespoke builders, because they have shapes a plain path
+cannot express — the domain tree folds a root-level task into its own namespace, and the
+verb tree pools singletons and sorts by size. The third, `file`, is a path pivot, and it
+exists because the JSON listing added for jump-to-definition already carries where every
+task is written. It had been in this file's *Not built yet* section for that whole time.
+
+### Two extension mechanisms, and the one that was asked for
+
+The obvious answer to "make it extensible" in Go is `plugin.Open`, and it does not work
+here. A plugin needs the host built by the same toolchain version, against identical
+versions of every shared dependency, with matching build flags, and it needs cgo. taskui's
+releases are built `CGO_ENABLED=0`, and in such a binary every `plugin.Open` returns
+`plugin: not implemented` — that is not a limitation to work around, it is the whole feature
+being absent. `-trimpath` would break it again even with cgo on. A Go plugin would work only
+for someone who compiled taskui themselves, on that machine, that afternoon: precisely the
+person who could have edited the source instead.
+
+So: a regular expression for the common case, and an external command for everything else.
+
+The regex form exists because what teams actually want to group by is their own naming
+convention, and a pattern with captures is the shortest honest way to say one. The command
+form exists because anything else — ownership from a CODEOWNERS file, cost from a billing
+API, whatever — is a question this program cannot anticipate and should not try to.
+
+The command protocol is the smallest thing that could work: names in on stdin, `name<TAB>
+path/segments` back on stdout. Nothing to link against, no ABI, and it can be written in
+whatever the team already uses.
+
+Two things make it affordable. It is asked about the *whole* task list rather than the
+visible one — a filter changes what is shown and cannot change where a task belongs — which
+means the answer can be cached against the list, which means `Rebuild` on every keystroke of
+a filter does not spawn a process. And it is bounded by a timeout, because a hung pivot
+would hang the UI with it. A program that is missing, fails, or times out pools everything
+into `(other)`: a grouping that cannot answer should leave a usable list, not an empty one.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
@@ -611,8 +656,9 @@ rather spend the space on its description.
   reaches the archive when you ask it to.
 - Following a detached run's output after taskui restarts. It keeps running; its output does
   not keep arriving anywhere, and that needs a supervisor holding the pty.
-- A file pivot. The JSON listing now carries every task's location, so the data is there —
-  it is the third pivot that is missing, not the information.
+- A pivot that groups by something the archive knows — slowest first, failing first. The
+  data is there; the difficulty is that it changes under you as runs finish, and a list that
+  reorders while you read it is worse than one that is merely static.
 
 ### Interactive tasks
 

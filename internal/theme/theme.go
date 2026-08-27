@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/ddromanidis/taskui/internal/pivot"
 )
 
 // DefaultPeekLines is how many lines a peeking task shows.
@@ -439,6 +440,8 @@ type Config struct {
 	Keymap *keys.Keymap
 	// PeekLines is how many lines a peeking task shows.
 	PeekLines int
+	// Pivots are extra groupings from the config file, appended after the built-ins.
+	Pivots []pivot.Spec
 	// Problems lists anything wrong with the file, surfaced in the UI rather than
 	// swallowed — a colour that silently does nothing is worse than one that says why.
 	Problems []string
@@ -449,6 +452,89 @@ func DefaultConfig() Config {
 		Theme:     DefaultTheme(),
 		Keymap:    keys.NewKeymap(),
 		PeekLines: DefaultPeekLines,
+	}
+}
+
+// readPivots reads the `pivots:` block.
+//
+// Parsed here because this is where config lives, and compiled in the pivot package because
+// that is where the meaning is. Anything wrong with an entry costs that entry and says why —
+// a grouping that silently did not appear would look like the feature was missing.
+func readPivots(v *viper.Viper) ([]pivot.Spec, []string) {
+	raw, ok := v.Get("pivots").([]any)
+	if !ok {
+		if v.IsSet("pivots") {
+			return nil, []string{"pivots: expected a list"}
+		}
+		return nil, nil
+	}
+
+	var out []pivot.Spec
+	var problems []string
+	seen := map[string]bool{}
+	for i, entry := range raw {
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("pivots[%d]: expected a mapping", i))
+			continue
+		}
+		spec := pivot.Spec{
+			Name:    stringField(fields, "name"),
+			Regex:   stringField(fields, "regex"),
+			Path:    stringsField(fields, "path"),
+			Command: stringsField(fields, "command"),
+		}
+		switch {
+		case spec.Name == "":
+			problems = append(problems, fmt.Sprintf("pivots[%d]: needs a name", i))
+			continue
+		// The built-ins are not replaceable: `p` cycles by name, and two entries answering
+		// to `domain` would make which one you got depend on the order of a map.
+		case spec.Name == DomainPivot || spec.Name == VerbPivot || spec.Name == FilePivot:
+			problems = append(problems, fmt.Sprintf("pivots: `%s` is built in", spec.Name))
+			continue
+		case seen[spec.Name]:
+			problems = append(problems, fmt.Sprintf("pivots: `%s` is defined twice", spec.Name))
+			continue
+		}
+		seen[spec.Name] = true
+		out = append(out, spec)
+	}
+	return out, problems
+}
+
+// The built-in pivot names, repeated here so the config validator does not have to
+// construct every pivot to find out what they are called.
+const (
+	DomainPivot = pivot.DomainName
+	VerbPivot   = pivot.VerbName
+	FilePivot   = pivot.FileName
+)
+
+func stringField(fields map[string]any, key string) string {
+	if s, ok := fields[key].(string); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func stringsField(fields map[string]any, key string) []string {
+	switch v := fields[key].(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []string{v}
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
 
@@ -551,6 +637,10 @@ func FromViper(v *viper.Viper) Config {
 		applyAnimation(&config.Theme.Animation, v.GetStringMapString("animation"))...)
 	config.Problems = append(config.Problems, applyKeys(config.Keymap, v.GetStringMapString("keys"))...)
 	config.Problems = append(config.Problems, config.Keymap.Conflicts()...)
+
+	pivots, problems := readPivots(v)
+	config.Pivots = pivots
+	config.Problems = append(config.Problems, problems...)
 
 	// Zero would make the peek state indistinguishable from hidden, leaving the cycle with
 	// two visible stops and one that lies about which it is.

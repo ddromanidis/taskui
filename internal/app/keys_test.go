@@ -639,9 +639,9 @@ func TestALoneGIsDisarmedByAnythingElse(t *testing.T) {
 // `p` took over the pivot so `gg` could have `g`.
 func TestPTogglesThePivot(t *testing.T) {
 	a := appAt(t, "backend:lint")
-	before := a.Mode
+	before := a.ModeLabel()
 	press(a, Char('p'))
-	if a.Mode == before {
+	if a.ModeLabel() == before {
 		t.Error("the pivot did not toggle")
 	}
 }
@@ -659,15 +659,15 @@ func TestVGoesBackToTheLiveRun(t *testing.T) {
 func TestAReboundKeyDispatchesToTheNewKey(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	a.Keymap.Rebind(keys.Pivot, 'z')
-	before := a.Mode
+	before := a.ModeLabel()
 
 	press(a, Char('p'))
-	if a.Mode != before {
+	if a.ModeLabel() != before {
 		t.Error("the old key should no longer pivot")
 	}
 
 	press(a, Char('z'))
-	if a.Mode == before {
+	if a.ModeLabel() == before {
 		t.Error("the new one should")
 	}
 }

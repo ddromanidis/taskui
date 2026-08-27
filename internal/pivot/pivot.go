@@ -12,30 +12,19 @@ import (
 	"github.com/ddromanidis/taskui/internal/task"
 )
 
-type Mode int
-
+// The two groupings that were the whole of this package's vocabulary before pivots became
+// values. Kept as names because the rest of the codebase — and the `--dump` flag, and every
+// test — says `domain` and `verb` out loud.
 const (
-	// Domain is an n-level split on `:` — `backend` > `migrate` > `down`.
-	Domain Mode = iota
-	// Verb is a two-level split on the last segment — `lint` > {api:lint, app:lint, …}.
-	// The transpose of Domain: it collects the cross-cutting concerns that the domain tree
+	// DomainName is an n-level split on `:` — `backend` > `migrate` > `down`.
+	DomainName = "domain"
+	// VerbName is a two-level split on the last segment — `lint` > {api:lint, app:lint, …}.
+	// The transpose of the domain tree: it collects the cross-cutting concerns that one
 	// scatters.
-	Verb
+	VerbName = "verb"
+	// FileName groups by the Taskfile each task is written in.
+	FileName = "file"
 )
-
-func (m Mode) Label() string {
-	if m == Verb {
-		return "verb"
-	}
-	return "domain"
-}
-
-func (m Mode) Toggled() Mode {
-	if m == Verb {
-		return Domain
-	}
-	return Verb
-}
 
 // NoTask marks a node that groups tasks without being one.
 const NoTask = -1
@@ -133,11 +122,11 @@ const RootGroup = "(root)"
 // singleton reads worse than not grouping it at all, so they land here, flat.
 const OtherGroup = "other"
 
-func Build(mode Mode, tasks []task.Task, visible []int) *Tree {
-	if mode == Verb {
-		return buildVerb(tasks, visible)
+func Build(p Pivot, tasks []task.Task, visible []int) *Tree {
+	if p.Build == nil {
+		return buildDomain(tasks, visible)
 	}
-	return buildDomain(tasks, visible)
+	return p.Build(tasks, visible)
 }
 
 func buildDomain(tasks []task.Task, visible []int) *Tree {

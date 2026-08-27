@@ -7,6 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/keys"
 	"github.com/ddromanidis/taskui/internal/pivot"
@@ -58,23 +60,35 @@ func find(lines []string, want string) (string, bool) {
 func TestHeaderNamesBothPivotsAndAccentsTheActiveOne(t *testing.T) {
 	a := viewSample(t)
 	lines := a.RenderHeadless(70, 12)
-	for _, want := range []string{"taskui", "atlas", "domain·verb"} {
+	for _, want := range []string{"taskui", "atlas", "domain·verb·file"} {
 		if !strings.Contains(lines[0], want) {
 			t.Errorf("header %q is missing %q", lines[0], want)
 		}
 	}
 
-	active, other := a.pivotStyle(pivot.Domain), a.pivotStyle(pivot.Verb)
+	// The active one is accented and the others are not; the styles are built from the
+	// list, so comparing them is comparing what the header actually renders.
+	styleOf := func(name string) lipgloss.Style {
+		t.Helper()
+		for i, sp := range a.pivotNames() {
+			if sp.text == name {
+				return a.pivotNames()[i].style
+			}
+		}
+		t.Fatalf("no span for %q", name)
+		return lipgloss.NewStyle()
+	}
+	active, other := styleOf("domain"), styleOf("verb")
 	if active.GetForeground() == other.GetForeground() {
-		t.Error("the two halves should not look alike")
+		t.Error("the active grouping should not look like the rest")
 	}
 
 	a.ToggleMode()
-	if a.pivotStyle(pivot.Verb).GetForeground() != active.GetForeground() {
-		t.Error("pivoting should move the accent to the other half")
+	if styleOf("verb").GetForeground() != active.GetForeground() {
+		t.Error("pivoting should move the accent")
 	}
-	if !strings.Contains(a.RenderHeadless(70, 12)[0], "domain·verb") {
-		t.Error("and both halves stay named")
+	if !strings.Contains(a.RenderHeadless(70, 12)[0], "domain·verb·file") {
+		t.Error("and every grouping stays named")
 	}
 }
 
@@ -430,9 +444,9 @@ func TestEveryScreenRendersAtEveryAwkwardSize(t *testing.T) {
 
 // Whatever the cursor is on has to be visible. Scrolling far enough was hiding it.
 func TestTheCursorRowIsAlwaysOnScreen(t *testing.T) {
-	for _, mode := range []pivot.Mode{pivot.Domain, pivot.Verb} {
+	for _, mode := range []string{pivot.DomainName, pivot.VerbName} {
 		a := manyTasks(t, 80)
-		a.Mode = mode
+		a.SetPivot(mode)
 		a.SetFoldAll(true)
 
 		for _, size := range [][2]int{{80, 10}, {100, 12}, {150, 12}, {150, 24}} {
@@ -731,7 +745,10 @@ func TestANestedGroupDoesNotLookLikeATopLevelOne(t *testing.T) {
 	// `migrate` is inside `backend`; `deploy` is beside it.
 	nested := find("migrate")
 	top := find("deploy")
-	prefix := func(l, label string) string { return l[:strings.Index(l, label)] }
+	prefix := func(l, label string) string {
+		before, _, _ := strings.Cut(l, label)
+		return before
+	}
 
 	if prefix(nested, "migrate") == prefix(top, "deploy") {
 		t.Errorf("a nested group and a top-level one share a prefix %q", prefix(top, "deploy"))
@@ -755,8 +772,8 @@ func TestSiblingsShareALabelColumnWhateverTheyAre(t *testing.T) {
 	at := func(label string) int {
 		t.Helper()
 		for _, l := range lines {
-			if i := strings.Index(l, label); i >= 0 {
-				return utf8.RuneCountInString(l[:i])
+			if before, _, ok := strings.Cut(l, label); ok {
+				return utf8.RuneCountInString(before)
 			}
 		}
 		t.Fatalf("no row for %q", label)
@@ -787,8 +804,8 @@ func TestTheOutcomeColumnDoesNotMoveForAGroupsCount(t *testing.T) {
 	tick := a.Theme.Glyphs.StatusOk
 	var columns []int
 	for _, l := range lines {
-		if i := strings.Index(l, tick); i >= 0 {
-			columns = append(columns, utf8.RuneCountInString(l[:i]))
+		if before, _, ok := strings.Cut(l, tick); ok {
+			columns = append(columns, utf8.RuneCountInString(before))
 		}
 	}
 	if len(columns) < 2 {
