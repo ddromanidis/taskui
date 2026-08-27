@@ -367,7 +367,7 @@ var Picker = Section{
 		b("PgUp PgDn Home End", "move faster"),
 		// No footer label: the picker's footer names the pivot you would switch to, which
 		// is more use than the word "pivot" and would otherwise be printed twice.
-		b("p", "toggle the pivot: by domain / by verb"),
+		b("p", "cycle the grouping: by domain, by verb, by file, and any your config added"),
 		f("space o", "fold or unfold a group", "fold"),
 		f("⇧O ⇥", "fold or unfold everything", "all"),
 		f("⏎", "run the task, or every marked one", "run"),

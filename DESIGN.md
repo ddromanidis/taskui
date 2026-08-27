@@ -678,6 +678,34 @@ one in the column it belongs to — reusing the continuation rows that a wrapped
 already had. Every description starts in the same place again, which is the entire reason
 there is a column.
 
+## A manual that had gone two rewrites stale
+
+`taskui.1` ships in every release archive and in the Homebrew cask, and the README told
+people twice that it covered the options. Its header said `taskui 0.1.1` — the Rust version —
+and it was missing eight flags, all three subcommands, and the whole pivots, bell and
+`--since` surface. Nobody had touched it since the initial commit.
+
+The interesting part is that this is the same failure the rest of the project spends effort
+avoiding, and had simply not been noticed in one place. `?` and the footer read from one
+keymap table so they cannot disagree. `taskui examples` renders its frames rather than
+storing them so they cannot go stale. The man page did neither.
+
+So the reference sections are generated between markers — OPTIONS from the flag set,
+COMMANDS from cobra's tree, KEYS from the same table the other two surfaces read — and a test
+regenerates the file and compares. `task man` is the fix when it fails. The prose stays
+hand-written, because the notes on peek windows, credentials and stopping are not derivable
+from anything and are most of the page's value.
+
+Two things fell out. The generator was nondeterministic: cobra adds its `completion` command
+during `Execute` rather than at construction, so the output gained or lost a subcommand
+depending on whether anything had run first — which showed up as a test that passed or failed
+by ordering. And `--config`'s help names its default, so the generated page carried whichever
+home directory ran the generator; it is written back as `~`.
+
+Regenerating also caught a stale entry in the keymap table itself, which meant `?` was wrong
+too: `p` was still described as toggling "by domain / by verb" after it had become a cycle
+through three built-ins plus whatever the config adds.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still

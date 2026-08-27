@@ -18,16 +18,27 @@ import (
 // `--help`. What you cannot see is the hundred task names in somebody else's Taskfile, and
 // that is precisely what this program already knows how to discover.
 
+// The flag names that more than one file has to agree on: what completes a task name, and
+// what the man page calls its placeholder. Named because the two would otherwise be two
+// spellings of the same decision, and only one of them would get updated.
+const (
+	flagRun      = "run"
+	flagGraph    = "graph"
+	flagTimeline = "timeline"
+	flagDiff     = "diff"
+	flagDump     = "dump"
+)
+
 // registerCompletions is called from root.go's init rather than being one of its own.
 //
 // Go runs a package's init functions in file-name order, so this file's would run before
 // root.go had registered any flags — and RegisterFlagCompletionFunc against a flag that does
 // not exist yet is an error, which is how this was found.
 func registerCompletions() {
-	for _, name := range []string{"run", "graph", "timeline", "diff"} {
+	for _, name := range []string{flagRun, flagGraph, flagTimeline, flagDiff} {
 		mustComplete(name, completeTasks)
 	}
-	mustComplete("dump", completePivots)
+	mustComplete(flagDump, completePivots)
 	mustComplete("theme", completeThemes)
 	mustComplete("dump-theme", completeThemes)
 

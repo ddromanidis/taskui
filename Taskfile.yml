@@ -249,6 +249,11 @@ tasks:
       - 'git push origin :refs/tags/{{.VERSION}}'
       - 'gh release delete {{.VERSION}} --repo ddromanidis/taskui --yes || true'
 
+  man:
+    desc: "Regenerate the man page's reference sections from the flags and the keymap"
+    cmds:
+      - go run . man --write {{.ROOT_DIR}}/taskui.1
+
   release:check:
     desc: "Validate .goreleaser.yaml without building anything"
     cmds:

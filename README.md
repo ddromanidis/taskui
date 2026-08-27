@@ -197,7 +197,9 @@ taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 by the real renderer at your terminal's width and in your theme, so nothing in it can go
 stale. `taskui examples <topic>` prints just one.
 
-`man taskui` covers the options, the keys and the files. `?` from any screen lists every
+`man taskui` covers the options, the commands, the keys and the files — its reference
+sections are generated from the same flag set and keymap table the program uses, and a test
+fails if they drift. `?` from any screen lists every
 binding, grouped by context. The footer shows a subset of
 the same table — one source of truth, so the two cannot disagree.
 
