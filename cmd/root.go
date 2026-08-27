@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -84,8 +85,29 @@ and search afterwards — live and across previous runs.`,
 	RunE:          rootRun,
 }
 
+// versionString prefers what the linker stamped, and falls back to what the build itself
+// knows. A `go install github.com/ddromanidis/taskui@latest` gets no ldflags, so without
+// this every such binary calls itself "dev" — including the ones built from a tag, which
+// is the one case where the version is not in doubt.
 func versionString() string {
-	return fmt.Sprintf("%s (commit %s, built %s)", version, commit, date)
+	v, c, d := version, commit, date
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v == "dev" && info.Main.Version != "" && info.Main.Version != "(devel)" {
+			v = strings.TrimPrefix(info.Main.Version, "v")
+		}
+		for _, s := range info.Settings {
+			switch {
+			case s.Key == "vcs.revision" && c == "none" && s.Value != "":
+				c = s.Value
+				if len(c) > 7 {
+					c = c[:7]
+				}
+			case s.Key == "vcs.time" && d == "unknown" && s.Value != "":
+				d = s.Value
+			}
+		}
+	}
+	return fmt.Sprintf("%s (commit %s, built %s)", v, c, d)
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
