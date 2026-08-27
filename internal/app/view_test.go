@@ -373,7 +373,7 @@ func TestEveryScreenRendersAtEveryAwkwardSize(t *testing.T) {
 		"task001",
 		[]string{"shared", "gone", "also shared"},
 		[]string{"shared", "arrived at internal/app/view.go:212:5", "also shared"},
-		"when it last passed", a.Timeline[0], "task task001",
+		"when it last passed", a.Timeline[0],
 	)
 	// showDiff leaves the app on the diff screen; the loop below sets it per iteration.
 	a.Screen = ScreenPicker

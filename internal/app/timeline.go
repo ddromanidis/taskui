@@ -29,12 +29,11 @@ func (a *App) OpenTimeline(task string) {
 		a.Status = "nothing to chart here — space folds it"
 		return
 	}
-	project := a.Root
-	if a.HistoryAllProjects {
-		project = ""
-	}
+	// Always this project, whatever the history list is scoped to. That toggle is made on
+	// another screen and is not shown here, and a series that mixes two codebases is not a
+	// series — the same task name in a different repo is a different task.
 	a.TimelineOf = task
-	a.Timeline = store.Timeline(a.stateDir, project, task)
+	a.Timeline = store.Timeline(a.stateDir, a.Root, task)
 	a.TimelineCursor = 0
 	a.TimelineOffset = 0
 	a.timelineReturn = a.Screen
@@ -137,7 +136,7 @@ func (a *App) DiffAgainstLastGreen() {
 			against = "the run before — which failed too"
 		}
 	}
-	a.showDiff(name, store.Output(a.stateDir, point), newer, against, point, a.Run.Command())
+	a.showDiff(name, store.Output(a.stateDir, point), newer, against, point)
 }
 
 // DiffTimelinePoint is `D` from the timeline: what changed between the run under the cursor
@@ -161,17 +160,15 @@ func (a *App) DiffTimelinePoint() {
 		store.Output(a.stateDir, point),
 		"the run before",
 		before,
-		point.Command(),
 	)
 }
 
-// showDiff builds the diff view. `subject` names what the newer side is, for the header.
-func (a *App) showDiff(task string, older, newer []string, against string, base store.Point, subject string) {
+// showDiff builds the diff view.
+func (a *App) showDiff(task string, older, newer []string, against string, base store.Point) {
 	edits := diff.Lines(older, newer)
 	a.DiffOf = task
 	a.DiffAgainst = base
 	a.DiffAgainstWhat = against
-	a.DiffSubject = subject
 	a.DiffStat = diff.Count(edits)
 	a.diffEdits = edits
 	a.DiffCursor = 0

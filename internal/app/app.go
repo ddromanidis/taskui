@@ -320,13 +320,11 @@ type App struct {
 	// before". The header says which comparison you are looking at because there are two,
 	// and a diff you have mistaken for the other one is worse than no diff.
 	DiffAgainstWhat string
-	// DiffSubject is how the newer side was invoked.
-	DiffSubject string
-	DiffAgainst store.Point
-	DiffStat    diff.Stat
-	DiffRows    []DiffRow
-	DiffCursor  int
-	DiffOffset  int
+	DiffAgainst     store.Point
+	DiffStat        diff.Stat
+	DiffRows        []DiffRow
+	DiffCursor      int
+	DiffOffset      int
 	// DiffContext is how many unchanged lines are kept either side of a change. The whole
 	// value of the view is that it is short, so this starts low.
 	DiffContext int

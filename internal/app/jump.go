@@ -128,10 +128,3 @@ func (a *App) openLocationFrom(l loc.Loc, note string) {
 // consulted until a key is actually pressed, because this runs on every visible row of
 // every frame and the answer is only needed once.
 func locationsIn(text string) []loc.Loc { return loc.All(text) }
-
-// HasLocation reports whether a line has something `e` could open. The renderer asks per
-// visible row, so this is syntax only — no filesystem, no editor lookup.
-func (a *App) HasLocation(text string) bool {
-	_, ok := loc.First(text)
-	return ok
-}
