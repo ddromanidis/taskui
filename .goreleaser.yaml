@@ -64,7 +64,10 @@ homebrew_casks:
     repository:
       owner: ddromanidis
       name: homebrew-tap
-      branch: main
+      # The branch the tap actually has. It is a separate repository with its own history
+      # and possibly its own users, so this follows it rather than the other way round —
+      # renaming somebody's default branch to match a config file is backwards.
+      branch: master
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
     # Without the tap token the cask is skipped rather than failing the release. A tap that
