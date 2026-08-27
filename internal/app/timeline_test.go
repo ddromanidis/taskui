@@ -580,3 +580,101 @@ func TestTheEarliestRunHasNothingToCompareAgainst(t *testing.T) {
 		t.Errorf("status = %q", a.Status)
 	}
 }
+
+// A diff opened from a timeline has no live run behind it — `a.Run` is whatever was open
+// before, or nothing. The fallback has to read the diff it is looking at.
+func TestEInADiffFallsBackToTheDiffItself(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim")
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "beta_test.go"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(pivot.Fixture([]string{"suite"}), root)
+	a.SetStateDir(t.TempDir())
+	archived(t, a, "suite", true, 300, "running", "PASS")
+	archived(t, a, "suite", false, 200, "running", "    beta_test.go:42: want 3, got 4", "FAIL")
+
+	a.OpenTimeline("suite")
+	press(a, Char('D'))
+	if a.Screen != ScreenDiff {
+		t.Fatalf("screen = %v — status %q", a.Screen, a.Status)
+	}
+	if a.Run != nil {
+		t.Fatal("this test is pointless if a run is open")
+	}
+
+	// Anywhere in the diff, not only on the line that carries the location.
+	a.DiffCursor = 0
+	press(a, Char('e'))
+
+	editor, ok := a.TakeEdit()
+	if !ok {
+		t.Fatalf("no editor — status %q", a.Status)
+	}
+	if editor.Args[0] != "+42" {
+		t.Errorf("args = %v", editor.Args)
+	}
+	if !strings.Contains(a.Status, "of the diff") {
+		t.Errorf("status should say it came from the diff: %q", a.Status)
+	}
+}
+
+// In a diff, the line that just appeared is the one you are there about — a location on a
+// line both runs printed is the one that was already fine.
+func TestTheDiffFallbackPrefersTheLinesThatArrived(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim")
+
+	root := t.TempDir()
+	for _, name := range []string{"old.go", "new.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := New(pivot.Fixture([]string{"suite"}), root)
+	a.SetStateDir(t.TempDir())
+	// `old.go:1` is on a line both runs printed and comes first; `new.go:9` only arrived.
+	archived(t, a, "suite", true, 300, "note: old.go:1: fine", "PASS")
+	archived(t, a, "suite", false, 200, "note: old.go:1: fine", "boom at new.go:9", "FAIL")
+
+	a.OpenTimeline("suite")
+	press(a, Char('D'))
+	// Onto a row with no location of its own, or `e` would find that one and never reach
+	// the fallback this test is about.
+	for i, row := range a.DiffRows {
+		if !row.Gap && !strings.Contains(row.Text, ".go:") {
+			a.DiffCursor = i
+			break
+		}
+	}
+	press(a, Char('e'))
+
+	editor, ok := a.TakeEdit()
+	if !ok {
+		t.Fatalf("no editor — status %q", a.Status)
+	}
+	if !strings.HasSuffix(editor.Args[1], "new.go") {
+		t.Errorf("opened %s, want the file the new line named", editor.Args[1])
+	}
+}
+
+func TestADiffWithNoLocationsSaysSo(t *testing.T) {
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "vim")
+	a := sample(t)
+	archived(t, a, "backend:lint", true, 300, "all fine")
+	archived(t, a, "backend:lint", false, 200, "not fine")
+
+	a.OpenTimeline("backend:lint")
+	press(a, Char('D'))
+	press(a, Char('e'))
+
+	if _, ok := a.TakeEdit(); ok {
+		t.Error("opened something")
+	}
+	if !strings.Contains(a.Status, "anywhere in this diff") {
+		t.Errorf("status = %q", a.Status)
+	}
+}

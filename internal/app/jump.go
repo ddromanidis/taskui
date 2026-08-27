@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 
+	"github.com/ddromanidis/taskui/internal/diff"
 	"github.com/ddromanidis/taskui/internal/loc"
 )
 
@@ -48,11 +49,52 @@ func (a *App) EditUnderCursor() {
 		a.openLocation(l)
 		return
 	}
-	if l, at, found := a.firstLocationIn(task); found {
-		a.openLocationFrom(l, fmt.Sprintf(" (from line %d of `%s`)", at+1, task))
+	if l, note, found := a.fallbackLocation(task); found {
+		a.openLocationFrom(l, note)
+		return
+	}
+	if a.Screen == ScreenDiff {
+		a.Status = "no file:line anywhere in this diff"
 		return
 	}
 	a.Status = "no file:line here — `" + task + "` did not print one"
+}
+
+// fallbackLocation is where `e` goes when the row under the cursor names no file, and the
+// note explaining where it came from.
+//
+// It has to be per screen because the two screens are looking at different things. The run
+// view has the task's captured output in memory; a diff opened from a timeline does not —
+// `a.Run` there is whatever happened to be open before, which is a different run or none at
+// all, and reading it would answer a question about the wrong thing.
+func (a *App) fallbackLocation(task string) (loc.Loc, string, bool) {
+	if a.Screen == ScreenDiff {
+		if l, at, ok := a.firstLocationInDiff(); ok {
+			return l, fmt.Sprintf(" (from line %d of the diff)", at+1), true
+		}
+		return loc.Loc{}, "", false
+	}
+	if l, at, ok := a.firstLocationIn(task); ok {
+		return l, fmt.Sprintf(" (from line %d of `%s`)", at+1, task), true
+	}
+	return loc.Loc{}, "", false
+}
+
+// firstLocationInDiff prefers the lines that arrived. In a diff, what is new is what you
+// are there about — a location on a line both runs printed is the one that was already
+// fine.
+func (a *App) firstLocationInDiff() (loc.Loc, int, bool) {
+	for _, want := range []bool{true, false} {
+		for i, row := range a.DiffRows {
+			if row.Gap || (row.Op == diff.Ins) != want {
+				continue
+			}
+			if found, ok := loc.First(row.Text); ok {
+				return found, i, true
+			}
+		}
+	}
+	return loc.Loc{}, 0, false
 }
 
 // rowTextForEdit is the text `e` should look in, the task it belongs to, and whether there
