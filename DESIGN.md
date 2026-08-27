@@ -569,6 +569,30 @@ detached run has no end to wait for.
 `x` still reaches a detached run. Detaching is not a promise never to stop it — it is the
 blanket that no longer covers it.
 
+### Two columns of depth
+
+Every row spends exactly two columns saying where it sits, whatever it puts in them. That is
+what keeps every label in the same place, and it is the constraint the tree drawing has to
+work inside.
+
+A group used to spend both on its fold marker and a space, at every depth. So a namespace
+one level down and a namespace at the top rendered *byte-identically*: in a Taskfile with
+`backend:migrate:*`, the row for `migrate` was indistinguishable from the row for `deploy`
+beside it, and the only thing saying one was nested was a header several rows up that
+scrolls away. The tree stopped being a tree exactly where it got deep enough to need to be
+one.
+
+A group below the top now spends the first column on its branch and the second on its fold
+marker — `├▸`, against a leaf's `├ ` and a top-level group's `▸ `. Same two columns, and the
+three cases are now three shapes.
+
+The other alignment this cost: a group's task count sits hard against the right edge, which
+pushed everything else in the signal block four columns left. So the ✓/✗ landed in one place
+on a leaf and another on a namespace, and the column the eye runs down looking for what is
+broken zigzagged — which is most of what that column is for. Rows without a count reserve its
+width now, but only when they have something to line up; a row showing no outcome would
+rather spend the space on its description.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still

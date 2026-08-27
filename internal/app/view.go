@@ -958,6 +958,10 @@ func (a *App) pivotStyle(mode pivot.Mode) lipgloss.Style {
 // two rows lined up. There is nothing to scan down when the column moves.
 const nameColumn = 17
 
+// countWidth is the column a group's task count occupies, and which every other row leaves
+// empty so the signals to its left stay in line.
+const countWidth = 4
+
 // frameWidth is the two columns the cursor's frame occupies — the lit edge on the left and
 // its shade on the right — which every row builder has to leave for it.
 //
@@ -977,22 +981,34 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 	t := a.Theme
 	node := a.Tree.Nodes[row.Node]
 
-	// Tree guides, so depth is something you see rather than something you count. A group
-	// keeps its fold glyph; a leaf gets the branch it hangs off.
+	// Tree guides, so depth is something you see rather than something you count.
+	//
+	// Two columns, always, whatever is in them — that is what keeps every label in the same
+	// place. A group used to spend both on its fold marker and a space, at every depth, which
+	// meant a nested group and a top-level one rendered identically: in a Taskfile with
+	// `backend:migrate:*`, the row for `migrate` was indistinguishable from the row for
+	// `deploy` beside it, and the tree stopped being a tree exactly where it got deep enough
+	// to need to be one. A group below the top now spends the first column on its branch and
+	// the second on its fold marker, so it sits with its siblings and still says it opens.
 	g := t.Glyphs
 	indent := strings.Repeat(g.GuideVertical+" ", max(0, row.Depth-1))
+	branch := g.GuideBranch
+	if last {
+		branch = g.GuideLast
+	}
+	fold := g.FoldClosed
+	if row.Open {
+		fold = g.FoldOpen
+	}
+
 	glyph := "  "
 	switch {
+	case node.IsGroup() && row.Depth > 0:
+		glyph = branch + fold
 	case node.IsGroup():
-		glyph = g.FoldClosed + " "
-		if row.Open {
-			glyph = g.FoldOpen + " "
-		}
+		glyph = fold + " "
 	case row.Depth > 0:
-		glyph = g.GuideBranch + " "
-		if last {
-			glyph = g.GuideLast + " "
-		}
+		glyph = branch + " "
 	}
 
 	labelStyle := fg(theme.Default)
@@ -1021,7 +1037,7 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 	// into a signal column against the edge, so all of it ends where the eye expects it.
 	var signals line
 	if node.IsGroup() {
-		signals = append(signals, styled(fmt.Sprintf("%4d", node.Count), fg(t.Colors.Dim)))
+		signals = append(signals, styled(fmt.Sprintf("%*d", countWidth, node.Count), fg(t.Colors.Dim)))
 	}
 
 	var extra []line
@@ -1055,6 +1071,15 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 			badges = append(badges, styled(glyph, fgBold(colour)), styled(ago(o.WhenUnix), fg(t.Colors.Dim)))
 		}
 		signals = append(badges, signals...)
+		// Reserve the count's columns on a row that has no count, so that the ✓/✗ ends in the
+		// same place whether or not this row is also a group. Without it the outcome sits four
+		// columns further right on every leaf than on every namespace, and the column the eye
+		// runs down looking for what is broken zigzags — which is most of what that column was
+		// for. Only where there is something to align: a row showing no outcome has nothing to
+		// put in the space and would rather spend it on its description.
+		if len(badges) > 0 && !node.IsGroup() {
+			signals = append(signals, plain(strings.Repeat(" ", countWidth)))
+		}
 
 		// Descriptions wrap into their own column rather than being cut off mid-word — a
 		// truncated description is the half that does not tell you anything. Continuation

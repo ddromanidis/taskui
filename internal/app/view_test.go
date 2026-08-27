@@ -705,3 +705,99 @@ func TestAWrappedDescriptionStaysInItsColumn(t *testing.T) {
 		t.Errorf("continuation starts at column %d, the first line at %d", second, first)
 	}
 }
+
+// A tree that stops distinguishing depth is not a tree. `backend:migrate` and `deploy` are
+// at different levels and used to render byte-identically: both spent their two columns on
+// a fold marker and a space, so the only thing that said one was nested was the row above
+// it — which scrolls away.
+func TestANestedGroupDoesNotLookLikeATopLevelOne(t *testing.T) {
+	a := appWith(t, []string{
+		"backend:migrate:up", "backend:migrate:down", "backend:check", "deploy:prod",
+	})
+	a.SetFoldAll(true)
+	lines := a.RenderHeadless(100, 20)
+
+	find := func(label string) string {
+		t.Helper()
+		for _, l := range lines {
+			if strings.Contains(l, label) {
+				return l
+			}
+		}
+		t.Fatalf("no row for %q in:\n%s", label, strings.Join(lines, "\n"))
+		return ""
+	}
+
+	// `migrate` is inside `backend`; `deploy` is beside it.
+	nested := find("migrate")
+	top := find("deploy")
+	prefix := func(l, label string) string { return l[:strings.Index(l, label)] }
+
+	if prefix(nested, "migrate") == prefix(top, "deploy") {
+		t.Errorf("a nested group and a top-level one share a prefix %q", prefix(top, "deploy"))
+	}
+	// It still says it opens, and it still hangs off a branch.
+	if !strings.Contains(nested, a.Theme.Glyphs.GuideBranch) && !strings.Contains(nested, a.Theme.Glyphs.GuideLast) {
+		t.Errorf("a nested group has no branch: %q", nested)
+	}
+	if !strings.Contains(nested, a.Theme.Glyphs.FoldClosed) && !strings.Contains(nested, a.Theme.Glyphs.FoldOpen) {
+		t.Errorf("a nested group has no fold marker: %q", nested)
+	}
+}
+
+// Depth still costs the same two columns per level, whatever is in them — every label in a
+// group lines up or the tree reads as ragged.
+func TestSiblingsShareALabelColumnWhateverTheyAre(t *testing.T) {
+	a := appWith(t, []string{"backend:check", "backend:migrate:up", "backend:lint"})
+	a.SetFoldAll(true)
+	lines := a.RenderHeadless(100, 20)
+
+	at := func(label string) int {
+		t.Helper()
+		for _, l := range lines {
+			if i := strings.Index(l, label); i >= 0 {
+				return utf8.RuneCountInString(l[:i])
+			}
+		}
+		t.Fatalf("no row for %q", label)
+		return -1
+	}
+	// `check` is a leaf, `migrate` a group; both are children of `backend`.
+	if leaf, group := at("check"), at("migrate"); leaf != group {
+		t.Errorf("sibling labels start at %d and %d", leaf, group)
+	}
+}
+
+// The ✓/✗ column is there to be run down looking for what is broken. It used to sit four
+// columns further right on a leaf than on a namespace, because the namespace's task count
+// took the edge and pushed everything else left — so the column zigzagged.
+func TestTheOutcomeColumnDoesNotMoveForAGroupsCount(t *testing.T) {
+	// `backend:migrate` is both a runnable task and a namespace — the shape `fmt` and `lint`
+	// have in a real Taskfile, and the only shape where the two columns can collide.
+	a := appWith(t, []string{
+		"backend:check", "backend:migrate", "backend:migrate:up", "backend:migrate:down",
+	})
+	a.SetFoldAll(true)
+	a.Outcomes = map[string]store.Outcome{
+		"backend:check":   {Ok: true, WhenUnix: time.Now().Add(-time.Hour).Unix()},
+		"backend:migrate": {Ok: true, WhenUnix: time.Now().Add(-time.Hour).Unix()},
+	}
+	lines := a.RenderHeadless(100, 20)
+
+	tick := a.Theme.Glyphs.StatusOk
+	var columns []int
+	for _, l := range lines {
+		if i := strings.Index(l, tick); i >= 0 {
+			columns = append(columns, utf8.RuneCountInString(l[:i]))
+		}
+	}
+	if len(columns) < 2 {
+		t.Fatalf("expected two outcomes, found %d in:\n%s", len(columns), strings.Join(lines, "\n"))
+	}
+	for _, c := range columns[1:] {
+		if c != columns[0] {
+			t.Errorf("outcome glyphs at columns %v — they should share one", columns)
+			break
+		}
+	}
+}
