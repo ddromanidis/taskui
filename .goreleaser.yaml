@@ -73,7 +73,11 @@ homebrew_casks:
     # Without the tap token the cask is skipped rather than failing the release. A tap that
     # is not set up yet should cost you the cask, not the binaries — and the token cannot
     # be checked any earlier, because it only exists inside the workflow.
-    skip_upload: '{{ if .Env.HOMEBREW_TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}'
+    # `index .Env` rather than `.Env.X`: the dotted form is a template error when the variable
+    # is not set at all, and only works here because the workflow passes an undefined secret
+    # through as an empty string. Running goreleaser by hand, where the variable is simply
+    # absent, failed the whole release on a line whose entire job is to make it optional.
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
     homepage: "https://github.com/ddromanidis/taskui"
     description: "A folding, searchable front end for go-task"
     license: "MIT"
