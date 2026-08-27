@@ -41,6 +41,11 @@ type Glyphs struct {
 	Warning string
 	Danger  string
 	Cursor  string
+	Bar     string
+
+	DiffAdded   string
+	DiffRemoved string
+	DiffGap     string
 
 	StatusOk      string
 	StatusFailed  string
@@ -112,6 +117,25 @@ var glyphFields = []glyphField{
 	},
 	{"warning", "Marks go-task's report of what failed.", false, func(g *Glyphs) *string { return &g.Warning }},
 	{
+		"bar",
+		"The duration bar on a task's timeline, drawn one cell per unit of the slowest run.",
+		false,
+		func(g *Glyphs) *string { return &g.Bar },
+	},
+	{"diff-added", "Marks a line only the newer run printed.", false, func(g *Glyphs) *string { return &g.DiffAdded }},
+	{
+		"diff-removed",
+		"Marks a line only the older run printed.",
+		false,
+		func(g *Glyphs) *string { return &g.DiffRemoved },
+	},
+	{
+		"diff-gap",
+		"Marks where a diff elided the lines both runs shared.",
+		false,
+		func(g *Glyphs) *string { return &g.DiffGap },
+	},
+	{
 		"danger",
 		"Marks a task that needs a confirmation before it runs.",
 		false,
@@ -148,6 +172,13 @@ func DefaultGlyphs() Glyphs {
 		Warning: "⚠",
 		Danger:  "⚠",
 		Cursor:  "█",
+		Bar:     "▄",
+
+		// `+` and `-` rather than anything prettier: this is the one place in the UI where
+		// a reader already has a lifetime of muscle memory for what the marker means.
+		DiffAdded:   "+",
+		DiffRemoved: "-",
+		DiffGap:     "⋮",
 
 		StatusOk:      "✓",
 		StatusFailed:  "✗",

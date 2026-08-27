@@ -33,6 +33,11 @@ colors:
   match-fg: "#1a1626"
   match-bg: "#ff5fa2"
 
+  location: "#7d56f4"
+
+  diff-added: "#43d9ad"
+  diff-removed: "#ff5f87"
+
   notice: "#ffcc66"
   stored: "#7d56f4"
   interactive: "#43d9ad"
@@ -60,6 +65,11 @@ glyphs:
 
   command: "›"
   warning: "▲"
+  bar: "▬"
+
+  diff-added: "+"
+  diff-removed: "−"
+  diff-gap: "⋯"
   danger: "▲"
   cursor: "▌"
 

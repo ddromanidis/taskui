@@ -14,8 +14,10 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
+	"github.com/ddromanidis/taskui/internal/diff"
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/ddromanidis/taskui/internal/loc"
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/search"
@@ -38,6 +40,10 @@ const (
 	ScreenHelp
 	// ScreenDetail is what a task is and what it will run.
 	ScreenDetail
+	// ScreenTimeline is how one task has gone, run after run.
+	ScreenTimeline
+	// ScreenDiff is what changed between two runs of one task.
+	ScreenDiff
 )
 
 // Fold is how much of a task's output is on screen.
@@ -302,6 +308,38 @@ type App struct {
 	Watching string
 	watcher  *watch.Watch
 
+	// One task's history, and the diff between two of its runs.
+	TimelineOf     string
+	Timeline       []store.Point
+	TimelineCursor int
+	TimelineOffset int
+	timelineReturn Screen
+
+	DiffOf string
+	// DiffAgainstWhat names the older side in words — "when it last passed", "the run
+	// before". The header says which comparison you are looking at because there are two,
+	// and a diff you have mistaken for the other one is worse than no diff.
+	DiffAgainstWhat string
+	// DiffSubject is how the newer side was invoked.
+	DiffSubject string
+	DiffAgainst store.Point
+	DiffStat    diff.Stat
+	DiffRows    []DiffRow
+	DiffCursor  int
+	DiffOffset  int
+	// DiffContext is how many unchanged lines are kept either side of a change. The whole
+	// value of the view is that it is short, so this starts low.
+	DiffContext int
+	diffEdits   []diff.Edit
+	diffReturn  Screen
+
+	// locs indexes the project so a `file:line` in captured output can be opened. Built on
+	// first use — most sessions never press `e`.
+	locs *loc.Resolver
+	// pendingEdit is an editor waiting to be launched, parked here because a key handler
+	// cannot return a Bubble Tea command.
+	pendingEdit *loc.Editor
+
 	// Viewport is the body height of the last frame, so `^d` can move by half a screen.
 	Viewport int
 
@@ -373,6 +411,7 @@ func New(tasks []task.Task, root string) *App {
 		HistoryHits:   map[string]int{},
 		Viewport:      20,
 		FilterContext: 2,
+		DiffContext:   3,
 		Width:         80,
 		Height:        24,
 		stateDir:      store.StateDir(),
@@ -1179,6 +1218,12 @@ func (a *App) GotoTop() {
 		a.HelpOffset = 0
 	case ScreenDetail:
 		a.DetailOffset = 0
+	case ScreenTimeline:
+		a.TimelineCursor = 0
+		a.TimelineOffset = 0
+	case ScreenDiff:
+		a.DiffCursor = 0
+		a.DiffOffset = 0
 	}
 }
 
@@ -1198,6 +1243,10 @@ func (a *App) GotoBottom() {
 		a.HelpOffset = 1 << 20
 	case ScreenDetail:
 		a.DetailOffset = 1 << 20
+	case ScreenTimeline:
+		a.TimelineCursor = max(0, len(a.Timeline)-1)
+	case ScreenDiff:
+		a.DiffCursor = max(0, len(a.DiffRows)-1)
 	}
 }
 

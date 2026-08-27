@@ -237,6 +237,11 @@ type Colors struct {
 	MatchFg Color
 	MatchBg Color
 
+	Location Color
+
+	DiffAdded   Color
+	DiffRemoved Color
+
 	Notice      Color
 	Stored      Color
 	Interactive Color
@@ -296,6 +301,15 @@ var colorFields = []colorField{
 	{"match-fg", "Foreground of a highlighted match.", func(t *Colors) *Color { return &t.MatchFg }},
 	{"match-bg", "Background of a highlighted match.", func(t *Colors) *Color { return &t.MatchBg }},
 
+	{
+		"location",
+		"A `file:line` in captured output — the part `e` opens in your editor. Underlined as well as coloured, so it reads as reachable rather than merely tinted.",
+		func(t *Colors) *Color { return &t.Location },
+	},
+
+	{"diff-added", "A line only the newer run printed.", func(t *Colors) *Color { return &t.DiffAdded }},
+	{"diff-removed", "A line only the older run printed.", func(t *Colors) *Color { return &t.DiffRemoved }},
+
 	{"notice", "Status messages along the bottom.", func(t *Colors) *Color { return &t.Notice }},
 	{"stored", "Marks a run loaded from history.", func(t *Colors) *Color { return &t.Stored }},
 	{"interactive", "The interactive-mode marker and input bar.", func(t *Colors) *Color { return &t.Interactive }},
@@ -335,6 +349,13 @@ func DefaultColors() Colors {
 		Search:  Magenta,
 		MatchFg: Black,
 		MatchBg: Magenta,
+
+		// Cyan rather than the accent: a location is a link, and it has to be legible on
+		// a failure line that is already red without competing with it for the same job.
+		Location: Cyan,
+
+		DiffAdded:   Green,
+		DiffRemoved: Red,
 
 		Notice:      Yellow,
 		Stored:      Blue,

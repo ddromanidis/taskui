@@ -16,6 +16,15 @@ import (
 type span struct {
 	text  string
 	style lipgloss.Style
+	// underline is applied by hand rather than through lipgloss.
+	//
+	// Setting Underline on a style makes lipgloss style every rune separately — it does that
+	// so an underline can skip the spaces between words, and there is no way to opt out in
+	// v1.1.0. A fifteen-character path then costs fifteen escape sequences instead of one,
+	// on every line of every frame, and a compiler error dump is nothing but such lines.
+	// Emitting the SGR here keeps the text itself unstyled, so the width arithmetic below
+	// still measures what it draws.
+	underline bool
 }
 
 type line []span
@@ -23,6 +32,17 @@ type line []span
 func plain(text string) span { return span{text: text} }
 
 func styled(text string, st lipgloss.Style) span { return span{text: text, style: st} }
+
+// underlined is `styled` for the one thing the UI underlines: a file location.
+func underlined(text string, st lipgloss.Style) span {
+	return span{text: text, style: st, underline: true}
+}
+
+// underlineOn and underlineOff are SGR 4 and 24.
+const (
+	underlineOn  = "\x1b[4m"
+	underlineOff = "\x1b[24m"
+)
 
 // fg is the common case: colour the text, unless the theme says "leave it alone".
 func fg(c theme.Color) lipgloss.Style {
@@ -122,7 +142,13 @@ func (l line) render(width int, selected bool, sel theme.Color) string {
 		if selected {
 			st = selectionOf(st, sel)
 		}
-		b.WriteString(st.Render(text))
+		rendered := st.Render(text)
+		// Only where the renderer is already emitting escapes: with colour off, an
+		// underline on its own would be the only escape in an otherwise plain frame.
+		if s.underline && rendered != text {
+			rendered = underlineOn + rendered + underlineOff
+		}
+		b.WriteString(rendered)
 		used += len(runes)
 	}
 	if used < width {

@@ -113,8 +113,11 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 		started -= int64(r.Duration.Seconds())
 	}
 	// Seconds alone collide when two runs finish in the same second, which happens
-	// constantly with fast tasks; the task name disambiguates.
-	id := fmt.Sprintf("%d-%s", started, safeName(r.Root))
+	// constantly with fast tasks; the task name disambiguates most of them, and a counter
+	// takes the rest. Two runs of the *same* task inside one second used to be one run —
+	// which is exactly the pair a timeline is built to show you, so silently keeping the
+	// second and dropping the first is the worst place for that to happen.
+	id := uniqueID(base, fmt.Sprintf("%d-%s", started, safeName(r.Root)))
 
 	dir := filepath.Join(runsDir(base), id)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -197,6 +200,30 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 	return dir, nil
 }
 
+// uniqueID appends a counter until the id names a directory that does not exist yet.
+//
+// Zero-padded so the suffixes still sort the way List expects: `.10` has to come after
+// `.02`, and lexically it only does with the padding.
+func uniqueID(base, want string) string {
+	if !exists(filepath.Join(runsDir(base), want)) {
+		return want
+	}
+	for n := 1; n < 100; n++ {
+		candidate := fmt.Sprintf("%s.%02d", want, n)
+		if !exists(filepath.Join(runsDir(base), candidate)) {
+			return candidate
+		}
+	}
+	// A hundred runs of one task inside one second is not a case worth more code than this;
+	// the last one wins, as it always did.
+	return want
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func exitOf(r *run.Run) int {
 	if r.HasExit {
 		return r.Exit
@@ -273,6 +300,7 @@ func Load(base string, manifest Manifest) (*run.Run, error) {
 	}
 
 	return run.FromStored(run.Stored{
+		ID:              manifest.ID,
 		Root:            manifest.Root,
 		Args:            manifest.Args,
 		Graph:           graph.Graph{Edges: edges},
@@ -331,6 +359,86 @@ func LastOutcomes(base, project string) map[string]Outcome {
 		}
 	}
 	return out
+}
+
+// Point is one appearance of a task in the archive: how it went that time, and when.
+type Point struct {
+	RunID string
+	// Root is the run it was part of. `test:one` reached from a `task all` and from a `task
+	// test:one` are the same task and different circumstances, and the difference explains
+	// most of the surprising durations.
+	Root       string
+	WhenUnix   int64
+	Status     string
+	DurationMs int64
+	Lines      int
+	// File is the basename its output was written under, for reading it back.
+	File string
+}
+
+func (p Point) Ok() bool { return p.Status == "Ok" }
+
+// Command is how the run this task was part of was invoked, for naming it on screen.
+func (p Point) Command() string { return "task " + p.Root }
+
+// Timeline is every stored appearance of one task, newest first.
+//
+// This is the question the archive was kept for and could not answer: `--search` greps for
+// a string across runs, and the history list is every run in order — neither of them is
+// "how has this one task been going". The manifests have held the answer all along.
+//
+// Pending and skipped appearances are dropped: a task go-task decided was up to date did
+// not run, and a row saying so is a row that makes the trend harder to read.
+func Timeline(base, project, task string) []Point {
+	var out []Point
+	for _, m := range List(base) {
+		if project != "" && m.Dir != project {
+			continue
+		}
+		for _, e := range m.Tasks {
+			if e.Name != task || e.Status == "Pending" || e.Status == "Skipped" {
+				continue
+			}
+			out = append(out, Point{
+				RunID: m.ID, Root: m.Root, WhenUnix: m.StartedUnix,
+				Status: e.Status, DurationMs: e.DurationMs, Lines: e.Lines, File: e.File,
+			})
+		}
+	}
+	return out
+}
+
+// LastGreen is the most recent stored run in which this task succeeded.
+//
+// `skip` is a run id to ignore, so a diff of a stored run against the archive does not find
+// itself.
+func LastGreen(base, project, task, skip string) (Point, bool) {
+	for _, p := range Timeline(base, project, task) {
+		if p.Ok() && p.RunID != skip {
+			return p, true
+		}
+	}
+	return Point{}, false
+}
+
+// Previous is the most recent stored appearance at all, green or not — the comparison you
+// want when the task has never passed and "what changed since last time" is still a real
+// question.
+func Previous(base, project, task, skip string) (Point, bool) {
+	for _, p := range Timeline(base, project, task) {
+		if p.RunID != skip {
+			return p, true
+		}
+	}
+	return Point{}, false
+}
+
+// Output reads back what one task printed in one stored run, stripped of escapes.
+//
+// The `.txt` half rather than the `.ansi` half: this feeds the diff, and two lines that
+// differ only in the colour they were painted are not a difference anyone wants reported.
+func Output(base string, p Point) []string {
+	return readLines(filepath.Join(RunDir(base, p.RunID), p.File+".txt"))
 }
 
 // Prune drops the oldest runs beyond keep.

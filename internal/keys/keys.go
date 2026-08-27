@@ -54,6 +54,9 @@ const (
 	Fold
 	FoldAll
 	CloseSlot
+	Edit
+	Timeline
+	Diff
 )
 
 type binding struct {
@@ -97,6 +100,9 @@ var defaults = []binding{
 	{Fold, 'o', "fold"},
 	{FoldAll, 'O', "fold-all"},
 	{CloseSlot, 'X', "close-slot"},
+	{Edit, 'e', "edit"},
+	{Timeline, 'H', "timeline"},
+	{Diff, 'D', "diff"},
 }
 
 var pickerActions = []Action{
@@ -106,6 +112,7 @@ var pickerActions = []Action{
 	Jump,
 	Filter,
 	History,
+	Timeline,
 	ResumeRun,
 	Interactive,
 	Force,
@@ -140,12 +147,23 @@ var runActions = []Action{
 	Watch,
 	Yank,
 	YankAll,
+	Edit,
 	History,
+	Timeline,
+	Diff,
 	Help,
 	Quit,
 }
 
 var historyActions = []Action{Search, AllProjects, Help, Quit}
+
+// The timeline is a list of one task's runs, and the diff is what changed between two of
+// them — so `D` belongs there as much as it does in the run view.
+var timelineActions = []Action{Diff, Help, Quit}
+
+// The diff view can reach an editor too: a `file:line` in a line that just appeared is
+// the most direct answer the tool has to "what broke".
+var diffActions = []Action{Edit, ContextMore, ContextLess, Help, Quit}
 
 func defaultKey(action Action) rune {
 	for _, d := range defaults {
@@ -207,9 +225,11 @@ type bound struct {
 // you are — `a` is "run with arguments" in the picker and "all projects" in the history
 // list, and `i` arms interactive mode in one and types at the task in the other.
 type Keymap struct {
-	picker  []bound
-	run     []bound
-	history []bound
+	picker   []bound
+	run      []bound
+	history  []bound
+	timeline []bound
+	diff     []bound
 }
 
 func NewKeymap() *Keymap {
@@ -221,21 +241,26 @@ func NewKeymap() *Keymap {
 		return out
 	}
 	return &Keymap{
-		picker:  build(pickerActions),
-		run:     build(runActions),
-		history: build(historyActions),
+		picker:   build(pickerActions),
+		run:      build(runActions),
+		history:  build(historyActions),
+		timeline: build(timelineActions),
+		diff:     build(diffActions),
 	}
 }
 
 // Clone is what lets a config be applied without mutating the defaults.
 func (k *Keymap) Clone() *Keymap {
 	cp := func(in []bound) []bound { return append([]bound(nil), in...) }
-	return &Keymap{picker: cp(k.picker), run: cp(k.run), history: cp(k.history)}
+	return &Keymap{
+		picker: cp(k.picker), run: cp(k.run), history: cp(k.history),
+		timeline: cp(k.timeline), diff: cp(k.diff),
+	}
 }
 
 // Rebind points an action at a different key, wherever that action is available.
 func (k *Keymap) Rebind(action Action, key rune) {
-	for _, m := range [][]bound{k.picker, k.run, k.history} {
+	for _, m := range [][]bound{k.picker, k.run, k.history, k.timeline, k.diff} {
 		for i := range m {
 			if m[i].action == action {
 				m[i].key = key
@@ -244,9 +269,11 @@ func (k *Keymap) Rebind(action Action, key rune) {
 	}
 }
 
-func (k *Keymap) Picker(key rune) Action  { return look(k.picker, key) }
-func (k *Keymap) Run(key rune) Action     { return look(k.run, key) }
-func (k *Keymap) History(key rune) Action { return look(k.history, key) }
+func (k *Keymap) Picker(key rune) Action   { return look(k.picker, key) }
+func (k *Keymap) Run(key rune) Action      { return look(k.run, key) }
+func (k *Keymap) History(key rune) Action  { return look(k.history, key) }
+func (k *Keymap) Timeline(key rune) Action { return look(k.timeline, key) }
+func (k *Keymap) Diff(key rune) Action     { return look(k.diff, key) }
 
 // look returns the first match, so a rebinding that collides with another action shadows
 // it rather than doing both.
@@ -270,6 +297,8 @@ func (k *Keymap) Conflicts() []string {
 		{"picker", k.picker},
 		{"run", k.run},
 		{"history", k.history},
+		{"timeline", k.timeline},
+		{"diff", k.diff},
 	} {
 		for i, b := range screen.m {
 			for _, earlier := range screen.m[:i] {
@@ -327,6 +356,7 @@ var Picker = Section{
 		f("t", "jump to a task, leaving the list intact", "jump"),
 		f("s", "what this task is, and what it will run", "detail"),
 		f("v", "go to whatever is running, or the last run", "watch"),
+		b("⇧H", "how this one task has been going, run after run"),
 		f("h", "past runs", "history"),
 		b("x", "stop this task's run, wherever it is — again to kill it"),
 		b("⇧K", "stop every run, staying here"),
@@ -346,7 +376,9 @@ var Run = Section{
 		f("space o", "how much output: hidden, a peek at the last few lines, all of it", "fold"),
 		b("⇧O", "move every task through the same three states"),
 		f("/", "search the output", "search"),
-		f("n N", "next / previous match", "next"),
+		// No footer label: like `[ ]`, it only means anything once a search is running, and
+		// the footer has to make room for the slot switcher.
+		b("n N", "next / previous match"),
 		f("f", "filter to matching lines only", "filter"),
 		// No footer label: it only means anything once you are already filtering, and the
 		// footer has to make room for the slot switcher.
@@ -360,6 +392,9 @@ var Run = Section{
 		b("⇧K", "stop every run, not just this one"),
 		b("y", "copy the line under the cursor"),
 		b("⇧Y", "copy everything this task printed"),
+		f("e", "open the file:line under the cursor in $EDITOR", "edit"),
+		b("⇧D", "what changed since this task last passed"),
+		b("⇧H", "how this one task has been going, run after run"),
 		b("w", "resume following the running task"),
 		b("⇧W", "watch: re-run this task whenever the source changes"),
 		b("h", "past runs"),
@@ -387,6 +422,34 @@ var HistorySection = Section{
 	},
 }
 
+var TimelineSection = Section{
+	Title: "Timeline",
+	Note:  "one task, run after run",
+	Bindings: []Binding{
+		b("j k ↑ ↓", "move"),
+		b("gg G", "first / last row"),
+		f("⏎", "open that run", "open"),
+		f("⇧D", "what changed between this run and the one before it", "diff"),
+		b("?", "this screen"),
+		f("esc", "back", "back"),
+		b("q", "quit"),
+	},
+}
+
+var DiffSection = Section{
+	Title: "Diff",
+	Note:  "what changed between two runs of one task",
+	Bindings: []Binding{
+		b("j k ↑ ↓", "scroll"),
+		b("gg G", "first / last row"),
+		f("[ ]", "less / more unchanged context", "context"),
+		f("e", "open the file:line under the cursor in $EDITOR", "edit"),
+		b("?", "this screen"),
+		f("esc", "back", "back"),
+		b("q", "quit"),
+	},
+}
+
 var DetailSection = Section{
 	Title: "Detail",
 	Note:  "what a task is, before you run it",
@@ -409,7 +472,9 @@ var Prompts = Section{
 	},
 }
 
-var Sections = []*Section{&Picker, &Run, &HistorySection, &DetailSection, &Prompts}
+var Sections = []*Section{
+	&Picker, &Run, &HistorySection, &TimelineSection, &DiffSection, &DetailSection, &Prompts,
+}
 
 // FooterHints is the bindings a section puts in the footer, in table order, each already
 // split into the keys and the label so the renderer can style them separately.

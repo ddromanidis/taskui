@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -83,6 +84,14 @@ func (a *App) View() string {
 		header = a.detailHeader()
 		body = a.drawDetail(width, bodyH)
 		footer = a.detailFooter()
+	case ScreenTimeline:
+		header = a.timelineHeader()
+		body = a.drawTimeline(width, bodyH)
+		footer = a.timelineFooter()
+	case ScreenDiff:
+		header = a.diffHeader()
+		body = a.drawDiff(width, bodyH)
+		footer = a.diffFooter()
 	}
 
 	if headerH == 1 {
@@ -726,7 +735,8 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 			l = append(l, plain(strings.Repeat(" ", pad+3)))
 		}
 
-		// Highlight per chunk, so a match survives being wrapped.
+		// Highlight per chunk, so a match survives being wrapped. A search hit wins over a
+		// file location: you went looking for the one and merely happened upon the other.
 		if a.Search != nil {
 			if start, end, ok := a.Search.FirstMatch(chunk); ok && end <= len(chunk) {
 				l = append(l,
@@ -738,7 +748,7 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 				continue
 			}
 		}
-		out = append(out, append(l, styled(chunk, base)))
+		out = append(out, append(l, a.textWithLocations(chunk, base)...))
 	}
 	return out
 }
@@ -1409,6 +1419,15 @@ func promptOf(r *run.Run) (string, bool) {
 }
 
 // --- small helpers ----------------------------------------------------------------
+
+// relativeTo shortens a path for display when it is inside the project, and leaves it alone
+// when it is not. An absolute path repeated on every status line is mostly prefix.
+func relativeTo(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return path
+}
 
 func baseName(path string) string {
 	trimmed := strings.TrimRight(path, "/")

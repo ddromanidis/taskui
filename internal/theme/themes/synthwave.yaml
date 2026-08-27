@@ -42,6 +42,11 @@ colors:
   match-fg: "#1a0838"
   match-bg: "#fffb96"
 
+  location: "#01cdfe"
+
+  diff-added: "#05ffa1"
+  diff-removed: "#ff4d6d"
+
   notice: "#fffb96"
   stored: "#01cdfe"
   interactive: "#05ffa1"
@@ -84,6 +89,12 @@ glyphs:
 
   command: "▸"
   warning: "▲"
+  # A full block, so a bar is a run of pixels like everything else here.
+  bar: "█"
+
+  diff-added: "+"
+  diff-removed: "-"
+  diff-gap: "▪"
   danger: "▲"
   cursor: "█"
 

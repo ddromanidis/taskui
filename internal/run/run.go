@@ -230,6 +230,10 @@ type stop struct {
 
 // Stored is a finished run being rebuilt from the archive.
 type Stored struct {
+	// ID is the archive directory this came out of. Carried so a stored run can be told
+	// apart from the archive entry it *is* — diffing a run against itself is a diff of
+	// nothing, and finding that out by producing it is worse than not offering it.
+	ID              string
 	Root            string
 	Args            []string
 	Graph           graph.Graph
@@ -268,7 +272,8 @@ type Run struct {
 	Sent string
 
 	// stored marks a run loaded from the archive rather than executed here.
-	stored bool
+	stored   bool
+	storedID string
 
 	mu     sync.Mutex
 	proc   *os.Process
@@ -385,6 +390,9 @@ func (r *Run) Killed() bool { return r.killed }
 // IsStored is true when this Run came off disk rather than off a pty. The run view uses it
 // to avoid implying a stored run is still doing something.
 func (r *Run) IsStored() bool { return r.stored }
+
+// StoredID is the archive id a stored run came from, and empty for a live one.
+func (r *Run) StoredID() string { return r.storedID }
 
 // TaskNames lists every task with a bucket, sorted — the deterministic stand-in for Rust's
 // ordered map.
@@ -615,6 +623,7 @@ func FromStored(s Stored) *Run {
 		HasDuration:     true,
 		RedactedSecrets: s.RedactedSecrets,
 		stored:          true,
+		storedID:        s.ID,
 		lastOutput:      time.Now(),
 	}
 }

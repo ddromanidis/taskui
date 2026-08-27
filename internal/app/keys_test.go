@@ -675,8 +675,10 @@ func TestAReboundKeyDispatchesToTheNewKey(t *testing.T) {
 // An action means the same thing wherever it is offered.
 func TestRebindingAppliesOnEveryScreenThatOffersIt(t *testing.T) {
 	a := appAt(t, "backend:lint")
-	a.Keymap.Rebind(keys.Help, 'H')
-	press(a, Char('H'))
+	// `z` rather than a letter the defaults already use — rebinding onto a bound key
+	// shadows it, which is a different behaviour with its own test in the keys package.
+	a.Keymap.Rebind(keys.Help, 'z')
+	press(a, Char('z'))
 	if a.Screen != ScreenHelp {
 		t.Errorf("screen = %v", a.Screen)
 	}

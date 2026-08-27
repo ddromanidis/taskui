@@ -10,6 +10,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -25,6 +26,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/ddromanidis/taskui/internal/app"
+	"github.com/ddromanidis/taskui/internal/diff"
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
@@ -52,6 +54,8 @@ type options struct {
 	configPath string
 	dumpConfig bool
 	searchFor  string
+	timeline   string
+	diffTask   string
 	keys       string
 	themeName  string
 	listThemes bool
@@ -77,6 +81,8 @@ and search afterwards — live and across previous runs.`,
   taskui ~/src/myrepo           …or somewhere else
   taskui --search 'FAIL|error'  grep every stored run, from anywhere
   taskui --run all              run headlessly and print the captured tree
+  taskui --timeline test        how ` + "`test`" + ` has been going, run after run
+  taskui --diff test            what changed since ` + "`test`" + ` last passed
   taskui --dump-config          print every colour at its default`,
 	Args:          cobra.MaximumNArgs(1),
 	Version:       versionString(),
@@ -137,6 +143,8 @@ func init() {
 		"print an annotated config.yaml with every colour at its default, and exit",
 	)
 	f.StringVar(&opts.searchFor, "search", "", "search stored runs and exit")
+	f.StringVar(&opts.timeline, "timeline", "", "print how one task has gone, run after run")
+	f.StringVar(&opts.diffTask, "diff", "", "print what changed in one task since it last passed")
 	f.StringVar(
 		&opts.keys,
 		"keys",
@@ -213,6 +221,15 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	// anywhere, including a directory with no Taskfile in it.
 	if opts.searchFor != "" {
 		return searchStored(opts.searchFor)
+	}
+
+	// Like --search, these read the archive rather than the project — but unlike it they
+	// are scoped to one project, so they need the root and not a Taskfile.
+	if opts.timeline != "" {
+		return printTimeline(cmd.OutOrStdout(), root, opts.timeline)
+	}
+	if opts.diffTask != "" {
+		return printDiff(cmd.OutOrStdout(), root, opts.diffTask)
 	}
 
 	tasks, err := task.Discover(root)
@@ -397,6 +414,86 @@ func printGraph(root, rootTask string) error {
 		}
 	}
 	return nil
+}
+
+// printTimeline is `--timeline`: one task's stored runs, newest first.
+//
+// Tab-separated and one run per line, like `--list`, so the answer to "when did this start
+// failing" is available to a script and not only to a pair of eyes.
+func printTimeline(out io.Writer, root, taskName string) error {
+	points := store.Timeline(store.StateDir(), root, taskName)
+	if len(points) == 0 {
+		return fmt.Errorf("no stored runs of %q in this project", taskName)
+	}
+	for _, p := range points {
+		status := "ok"
+		if !p.Ok() {
+			status = "failed"
+		}
+		fmt.Fprintf(out, "%s\t%s\t%dms\t%d lines\t%s\n",
+			time.Unix(p.WhenUnix, 0).Format(time.RFC3339), status, p.DurationMs, p.Lines, p.Command())
+	}
+	fmt.Fprintf(out, "-- %d runs\n", len(points))
+	return nil
+}
+
+// printDiff is `--diff`: what changed in one task between its last run and the last one
+// that passed.
+//
+// Unified-ish rather than exactly `diff -u`: there are no `@@` hunk headers, because the
+// line numbers are on every row instead and a header that has to be cross-referenced with
+// the rows below it is a worse answer than the rows carrying it themselves.
+func printDiff(out io.Writer, root, taskName string) error {
+	base := store.StateDir()
+	points := store.Timeline(base, root, taskName)
+	if len(points) == 0 {
+		return fmt.Errorf("no stored runs of %q in this project", taskName)
+	}
+	newest := points[0]
+	older, ok := store.LastGreen(base, root, taskName, newest.RunID)
+	against := "when it last passed"
+	if !ok {
+		older, ok = store.Previous(base, root, taskName, newest.RunID)
+		against = "the run before"
+		if !ok {
+			return fmt.Errorf("only one stored run of %q — nothing to compare it against", taskName)
+		}
+	}
+
+	edits := diff.Lines(store.Output(base, older), store.Output(base, newest))
+	stat := diff.Count(edits)
+	fmt.Fprintf(out, "--- %s  (%s, %s)\n", taskName, against, ago(older.WhenUnix))
+	fmt.Fprintf(out, "+++ %s  (%s)\n", taskName, ago(newest.WhenUnix))
+	for _, e := range diff.Hunks(edits, 3) {
+		switch {
+		case diff.IsGap(e):
+			fmt.Fprintln(out, "...")
+		case e.Op == diff.Ins:
+			fmt.Fprintln(out, "+"+e.Text)
+		case e.Op == diff.Del:
+			fmt.Fprintln(out, "-"+e.Text)
+		default:
+			fmt.Fprintln(out, " "+e.Text)
+		}
+	}
+	fmt.Fprintf(out, "-- +%d -%d\n", stat.Added, stat.Removed)
+	return nil
+}
+
+// ago is a rough "how long back", for the headless output. The TUI has its own; this one
+// only has to be readable in a pipe.
+func ago(unix int64) string {
+	d := time.Since(time.Unix(unix, 0))
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 // runHeadless runs a task to completion and prints what the capture layer reconstructed:

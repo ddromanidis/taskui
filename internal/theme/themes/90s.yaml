@@ -40,6 +40,13 @@ colors:
   match-fg: "#12002a"
   match-bg: "#ffe94a"
 
+  # A location is a link, and cyan is the colour this theme uses for anything you can
+  # act on. Green and red for the two sides of a diff, as they have been since diff.
+  location: "#00f0ff"
+
+  diff-added: "#3dff88"
+  diff-removed: "#ff3b3b"
+
   notice: "#ffe94a"
   stored: "#00f0ff"
   interactive: "#3dff88"
@@ -70,6 +77,12 @@ glyphs:
 
   command: "»"
   warning: "‼"
+  # Solid, like every progress bar the era ever drew.
+  bar: "█"
+
+  diff-added: "+"
+  diff-removed: "-"
+  diff-gap: "·"
   danger: "☢"
   cursor: "▓"
 

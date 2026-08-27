@@ -1,6 +1,7 @@
 package app
 
 import (
+	"os/exec"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -44,6 +45,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.Width, a.Height = msg.Width, msg.Height
 		return a, nil
 
+	case editorFailed:
+		a.Status = "could not run your editor: " + msg.err.Error()
+		return a, nil
+
 	case tickMsg:
 		if a.Theme.Animation.Moves() {
 			a.Phase++
@@ -59,10 +64,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.PollRun()
 		a.PollWatch()
-		return a, nil
+		return a, a.launchEditor()
 	}
 	return a, nil
 }
+
+// launchEditor runs whatever `e` asked for, if anything.
+//
+// A terminal editor gets the terminal: Bubble Tea puts it back the way it found it, runs
+// the program attached to the real stdin and stdout, and redraws afterwards. Anything that
+// opens its own window is run alongside instead — handing the terminal to a `code --goto`
+// that returns in ten milliseconds blacks the UI out for no reason, and on a slow start it
+// looks like a crash.
+func (a *App) launchEditor() tea.Cmd {
+	editor, ok := a.TakeEdit()
+	if !ok {
+		return nil
+	}
+	//nolint:gosec // this is $EDITOR being run on purpose; the argv is built from the
+	// variable the user set and a path that had to exist on disk to get here.
+	cmd := exec.Command(editor.Name, editor.Args...)
+	if !editor.Terminal {
+		return func() tea.Msg {
+			// Detached: the window it opens outlives the keystroke, and its exit status is
+			// not something taskui has an opinion about.
+			if err := cmd.Start(); err != nil {
+				return editorFailed{err}
+			}
+			go func() { _ = cmd.Wait() }()
+			return nil
+		}
+	}
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return editorFailed{err}
+		}
+		return nil
+	})
+}
+
+// editorFailed reports an editor that would not start — a misspelled $EDITOR is otherwise a
+// key that appears to do nothing.
+type editorFailed struct{ err error }
 
 // shutdownGrace is how long to wait for the slots to report themselves gone before
 // insisting.
@@ -218,6 +261,10 @@ func (a *App) action(k Key, screen Screen) keys.Action {
 		return a.Keymap.Run(k.ch)
 	case ScreenHistory:
 		return a.Keymap.History(k.ch)
+	case ScreenTimeline:
+		return a.Keymap.Timeline(k.ch)
+	case ScreenDiff:
+		return a.Keymap.Diff(k.ch)
 	default:
 		return keys.None
 	}
@@ -266,6 +313,10 @@ func (a *App) handleKey(k Key) bool {
 		return a.handleDetailKey(k)
 	case ScreenHelp:
 		return a.handleHelpKey(k)
+	case ScreenTimeline:
+		return a.handleTimelineKey(k)
+	case ScreenDiff:
+		return a.handleDiffKey(k)
 	case ScreenPicker:
 		// Handled below, once the prompts have had their turn.
 	}
@@ -544,6 +595,11 @@ func (a *App) handlePickerKey(k Key) bool {
 	case act() == keys.History:
 		a.OpenHistory()
 
+	// How this one task has been going — the other half of `h`, scoped to what is under
+	// the cursor rather than to the project.
+	case act() == keys.Timeline:
+		a.OpenTimeline(a.TimelineTaskFor())
+
 	// Stop the run belonging to the task under the cursor. Addressing it by name is what
 	// makes this reach the slots that are not on screen — which, from here, is all of them.
 	case act() == keys.Stop:
@@ -736,6 +792,19 @@ func (a *App) handleRunKey(k Key) bool {
 	case act() == keys.YankAll:
 		a.YankTaskOutput()
 
+	// …or with going there. The line under the cursor names a file and a line; this is the
+	// step the tool used to leave you to do by hand.
+	case act() == keys.Edit:
+		a.EditUnderCursor()
+
+	// What changed since this task last worked.
+	case act() == keys.Diff:
+		a.DiffAgainstLastGreen()
+
+	// How it has been going, run after run.
+	case act() == keys.Timeline:
+		a.OpenTimeline(a.TimelineTaskFor())
+
 	case k.kind == keyPageDown:
 		a.RunMoveCursor(15)
 	case k.kind == keyPageUp:
@@ -808,6 +877,86 @@ func (a *App) handleRunKey(k Key) bool {
 	// onto a digit still wins — the keymap is the thing users can change.
 	case k.kind == keyChar && k.ch >= '1' && k.ch <= '9' && !k.ctrl:
 		a.FocusSlotNumber(int(k.ch - '0'))
+	}
+	return false
+}
+
+func (a *App) handleTimelineKey(k Key) bool {
+	act := func() keys.Action { return a.action(k, ScreenTimeline) }
+
+	switch {
+	case act() == keys.Quit, k.isCtrl('c'):
+		return a.quit()
+	case k.kind == keyEsc:
+		a.CloseTimeline()
+	case act() == keys.Help:
+		a.ToggleHelp()
+
+	case k.isChar('j'), k.kind == keyDown:
+		a.TimelineMoveCursor(1)
+	case k.isChar('k'), k.kind == keyUp:
+		a.TimelineMoveCursor(-1)
+	case k.isCtrl('d'):
+		a.TimelineMoveCursor(a.HalfPage())
+	case k.isCtrl('u'):
+		a.TimelineMoveCursor(-a.HalfPage())
+	case k.kind == keyPageDown:
+		a.TimelineMoveCursor(15)
+	case k.kind == keyPageUp:
+		a.TimelineMoveCursor(-15)
+	case k.kind == keyHome:
+		a.TimelineMoveCursor(-len(a.Timeline))
+	case k.kind == keyEnd:
+		a.TimelineMoveCursor(len(a.Timeline))
+
+	// What changed between this run and the one before it — the question the list is
+	// arranged to make you ask.
+	case act() == keys.Diff:
+		a.DiffTimelinePoint()
+
+	case k.kind == keyEnter:
+		a.OpenTimelineRun()
+	}
+	return false
+}
+
+func (a *App) handleDiffKey(k Key) bool {
+	act := func() keys.Action { return a.action(k, ScreenDiff) }
+
+	switch {
+	case act() == keys.Quit, k.isCtrl('c'):
+		return a.quit()
+	case k.kind == keyEsc:
+		a.CloseDiff()
+	case act() == keys.Help:
+		a.ToggleHelp()
+
+	case k.isChar('j'), k.kind == keyDown:
+		a.DiffMoveCursor(1)
+	case k.isChar('k'), k.kind == keyUp:
+		a.DiffMoveCursor(-1)
+	case k.isCtrl('d'):
+		a.DiffMoveCursor(a.HalfPage())
+	case k.isCtrl('u'):
+		a.DiffMoveCursor(-a.HalfPage())
+	case k.kind == keyPageDown:
+		a.DiffMoveCursor(15)
+	case k.kind == keyPageUp:
+		a.DiffMoveCursor(-15)
+	case k.kind == keyHome:
+		a.DiffMoveCursor(-len(a.DiffRows))
+	case k.kind == keyEnd:
+		a.DiffMoveCursor(len(a.DiffRows))
+
+	// More or less of the unchanged output around each change.
+	case act() == keys.ContextMore:
+		a.SetDiffContext(1)
+	case act() == keys.ContextLess:
+		a.SetDiffContext(-1)
+
+	// A line that just appeared often names the file it appeared about.
+	case act() == keys.Edit:
+		a.EditUnderCursor()
 	}
 	return false
 }

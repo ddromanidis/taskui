@@ -74,12 +74,19 @@ func TestFootersFitAReasonableTerminal(t *testing.T) {
 // Rebinding an action moves it on every screen that offers it.
 func TestRebindingAppliesEverywhereTheActionIsOffered(t *testing.T) {
 	k := NewKeymap()
-	k.Rebind(Help, 'H')
-	if k.Picker('H') != Help || k.Run('H') != Help || k.History('H') != Help {
+	// `z` rather than a letter the defaults already use: rebinding onto a bound key is a
+	// shadowing conflict, which is a different thing and has its own test below.
+	k.Rebind(Help, 'z')
+	if k.Picker('z') != Help || k.Run('z') != Help || k.History('z') != Help {
 		t.Error("the rebinding did not reach every screen")
 	}
 	if k.Picker('?') != None {
 		t.Error("the old key should be free")
+	}
+	// The screens added later have to take the rebinding too, or `?` stops working on
+	// exactly the screens nobody remembers to check.
+	if k.Timeline('z') != Help || k.Diff('z') != Help {
+		t.Error("the rebinding missed the timeline or the diff")
 	}
 }
 

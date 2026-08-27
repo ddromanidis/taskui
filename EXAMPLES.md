@@ -178,7 +178,46 @@ the assertion underneath it, which is the half that says what broke.
 
 ## "When did this start failing?"
 
-Every finished run is stored. `h` lists them, scoped to this project:
+`⇧H` on any task is that question, asked directly. It lists every stored run of that one
+task, newest first:
+
+```
+ taskui ▸ backend:test                            ✓✓✓✗✗   5 runs   2 failed
+ ──────────────────────────────────────────────────────────────────────────
+▌✗ 9m ago       1.31s  ██████████████      44 lines  task ci
+ ✗ 42m ago      1.28s  █████████████       44 lines  task ci
+ ✓ 3h ago       1.19s  ████████████        31 lines  task ci
+ ✓ 5h ago         88ms █                   31 lines  task backend:test
+ ✓ yesterday    1.21s  ████████████        30 lines  task ci
+```
+
+The trend across the top is where it turned. The bars are scaled to the slowest run in the
+list, so a step that got slower shows up as a shape rather than five numbers to compare by
+hand — and the right-hand column is the run each appearance was part of, which is usually
+the explanation.
+
+`⇧D` then answers the next question, which is what actually changed:
+
+```
+ taskui ▸ backend:test              vs when it last passed   3h ago   +7   -3
+ ──────────────────────────────────────────────────────────────────────────────
+▌     ⋮
+  2  2  === RUN   TestOrderTotal
+  3   - --- PASS: TestOrderTotal (0.01s)
+     3+     order_test.go:88: want 1200, got 1180
+     4+ --- FAIL: TestOrderTotal (0.01s)
+  4  5  === RUN   TestRefund
+      ⋮
+```
+
+Seven lines new, three gone, out of forty-four. Everything both runs shared is elided to a
+`⋮`; `[` and `]` widen and narrow what is kept around each change. The `order_test.go:88` is
+underlined, so `e` opens it — see [the edit–check loop](#the-editcheck-loop).
+
+Against the last **green** run rather than the last run at all: diffing two consecutive
+failures usually shows only that the timestamps moved.
+
+`h` is the other half — every run in the project rather than one task's:
 
 ```
  taskui ▸ history                                   atlas   14 runs   6 failed
@@ -201,6 +240,8 @@ From the shell, without opening the TUI:
 
 ```
 taskui --search 'migration.*pending'
+taskui --timeline backend:test         # one run per line, tab-separated
+taskui --diff backend:test             # unified-ish, line numbers on the rows
 taskui --last                          # reopen the most recent run
 ```
 
@@ -256,6 +297,35 @@ Run `check`, then `⇧W`:
 Save a file and it re-runs. Build output, `.git`, `.task`, `node_modules` and editor
 scratch files are ignored, changes are debounced so one save is one run, and a save during
 a run is skipped rather than stacking.
+
+The other half of the loop is `e`. Any `file:line` in captured output is underlined, and `e`
+opens it in `$EDITOR` at that line:
+
+```
+ ▾ ✗ test                                                              780ms
+    3   --- FAIL: TestOrderTotal
+    4       order_test.go:88: want 1200, got 1180     ← e opens this
+```
+
+```
+ opening backend/order_test.go:88 in nvim
+```
+
+`go test` prints a bare basename relative to its *package* directory — not the directory the
+run started in, and not named anywhere in the line. taskui indexes the project the first
+time you press `e` and finds it. Two files with the same name resolve to the shallower one
+and the status line says it had to guess.
+
+Pressing `e` on a line that names no file — a `--- FAIL:` header, say — falls back to the
+first location the task printed and says where it came from, so it is never a dead
+keystroke:
+
+```
+ opening backend/order_test.go:88 in nvim (from line 4 of `backend:test`)
+```
+
+A terminal editor takes over the terminal and taskui redraws when you quit it; `code`,
+`zed`, `subl` and the JetBrains tools are handed the file and left to their own window.
 
 ---
 
@@ -321,7 +391,15 @@ taskui --dump verb                     # a pivot, fully expanded
 taskui --graph all                     # the execution graph
 taskui --run ci                        # run headlessly, print the captured tree
 taskui --run ci --args '-- -p ingest'
+taskui --timeline backend:test         # one task's runs, one per line
+taskui --diff backend:test             # what changed since it last passed
 taskui --screenshot 120x30 --keys 'p'  # render one frame to stdout
+```
+
+`--timeline` is tab-separated, so the trend is one `awk` away:
+
+```
+taskui --timeline backend:test | awk -F'\t' '$2=="failed"' | head -1
 ```
 
 `--screenshot` with `--run` plays the keys into a *live* run, so interactive flows can be

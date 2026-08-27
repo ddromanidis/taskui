@@ -373,6 +373,110 @@ since that is nearly always why you went looking. Colour survives the round trip
 `is_command` is not stored, because a marker in the `.txt` file would make the archive
 worse to grep. It is recomputed on load from the shape of go-task's own echo line.
 
+## Acting on what you found
+
+The three screens above stop one step short of what you actually want. They get you to
+"`test` failed and here is what it said"; what you wanted was to be in the file. These
+close that gap.
+
+### Locations
+
+Every compiler, test runner and linter prints `file:line`. Finding them is a regular
+expression; the decision worth writing down is that **the extension is required**.
+
+Without it, every duration (`12:34`), timestamp (`10:30:45`) and port (`localhost:8080`) in
+a build log becomes a candidate. A highlight that lands on a third of the numbers on screen
+is a highlight you learn to ignore, and then the feature has negative value: it has taught
+you to distrust a signal that is usually right. With the extension required, a false
+positive has to look like a filename, which in practice means it is one.
+
+Whether the file *exists* is a much better filter still, and it is deliberately not used
+for the highlight. That check runs on every visible row of every frame — sixty stats a
+frame, twenty frames a second — to answer a question that only matters once, when a key is
+actually pressed. So the renderer decides syntactically and the jump decides for real.
+
+Resolving is the part with the interesting failure. Go's own test output is:
+
+```
+--- FAIL: TestWrap (0.00s)
+    view_test.go:88: want 3, got 4
+```
+
+`view_test.go` is relative to the *package* directory. That is not the directory the run
+started in, and nothing in the line says which package it was. Resolving it against the
+project root fails, and failing there would make every Go test failure — the single most
+common thing this feature exists for — unreachable.
+
+So a path that does not resolve directly is looked up by basename in an index of the
+project, built on first use and never for a session that does not press `e`. Two files
+sharing a name resolve to the shallower, and Resolve reports that it had to guess so the
+status line can say so. Silently opening the wrong file is the one outcome worse than
+opening nothing.
+
+The editor argv is per-editor rather than a bare `$EDITOR file`, because an editor that
+opens at line 1 when the output said line 212 has done the tedious half of the job. An
+unrecognised editor gets the file and no line number: `+N` is close to universal among
+terminal editors, and "close to" is not good enough when being wrong means the editor reads
+it as a second filename and creates it.
+
+Terminal editors get the terminal handed over and the UI redraws afterwards; windowed ones
+are started alongside. Handing the terminal to a `code --goto` that returns in ten
+milliseconds blacks the screen out for no reason, and on a slow start it reads as a crash.
+
+### The timeline
+
+`--search` greps a string across every stored run. The history list is every run in order.
+Neither of them is *"how has `test` been going"*, and that is the question you actually have
+when something that used to work does not. The manifests have held the answer since the
+archive existed; nothing asked them for it.
+
+A timeline is one task's stored appearances, newest first. Two details earn their space:
+
+The **trend** across the header (`✓✓✓✗✗`) reads left to right, which is forwards in time and
+therefore the opposite order to the list underneath it. That inconsistency is deliberate —
+it is the direction every other sparkline in the world runs, and the shape of *where it
+turned* is more use than a count of failures.
+
+The **bar** is scaled to the slowest run in the list rather than to any fixed duration,
+because the question is "which of these was slow" and that is a comparison within the list.
+A run that took any measurable time gets at least one cell: a bar that rounds to nothing
+beside a number that says 40ms is two things on one row disagreeing.
+
+Each row names the run it was part of, because `test` reached from `task all` and `test` on
+its own are the same task under different circumstances — and that is the explanation for
+most surprising durations.
+
+Building this surfaced a real bug in the archive. Run ids are `<second>-<task>`, and two
+runs of the *same* task inside one second collided: the second overwrote the first. That is
+exactly the pair a timeline exists to show, so a counter now disambiguates them.
+
+### The diff
+
+When a task fails and it passed yesterday, the useful thing is not the eight hundred lines
+it printed. It is the five that are new.
+
+Against the last **green** run rather than the last run at all: "it worked before" is the
+comparison that isolates a failure, where diffing two consecutive failures usually shows
+only that the timestamps moved. A task that has never passed falls back to the previous run
+— that is the honest second choice rather than an error — and the header names which of the
+two comparisons it made, because a diff you have mistaken for the other one is worse than no
+diff.
+
+The algorithm is Myers, which is O(ND): fast exactly when the two sides are similar, which
+is the case worth being fast for. Common prefix and suffix are stripped first, and that is
+not only an optimisation — build logs are mostly identical run to run, so trimming turns
+almost every real input into the cheap case. Past a bounded edit distance there is no useful
+alignment left to find, and the fallback says so by showing both sides in full rather than
+producing a plausible-looking alignment of two unrelated logs.
+
+Shared stretches are elided to a `⋮`, because the entire value of the view is that it is
+short. A diff of two 800-line logs differing in five places is 800 rows of which 790 are
+noise.
+
+A stored run being diffed has to skip *itself* in the archive: it is in there, it is the
+newest, and a diff of a thing against itself is a diff of nothing — which you would find out
+by producing it.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
@@ -382,9 +486,11 @@ worse to grep. It is recomputed on load from the shape of go-task's own echo lin
   both architectures already; a tap that pours them would beat building from source.
 - A file pivot. `location.taskfile` is already parsed and would answer "where do I edit
   this", which the domain tree gets wrong for `sec:*` and `wt:*`.
-- Cross-run search inside the TUI. `--search` covers it from the shell, but `/` in the
-  history list does not yet search across runs.
 - An explicit production marker in the Taskfile to replace the `⚠` heuristic.
+- Diffing two runs of a task that are not adjacent — the timeline can only compare a run
+  with the one below it, and "against the run from before the refactor" needs a mark.
+- Normalising timestamps and durations out of a diff. Today they show as changes, because
+  they are; a log where every line carries a timestamp diffs as entirely new.
 - Detaching a slot, so a stack survives quitting taskui. Today `q` stops every run, which
   is the safe default but not always the one you want.
 - Incremental archiving, so a run that never ends still leaves something on disk before

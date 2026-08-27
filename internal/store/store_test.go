@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ddromanidis/taskui/internal/run"
 )
@@ -284,5 +285,209 @@ func TestCommandEchoesAreRecognisedAgainOnReload(t *testing.T) {
 	}
 	if reloaded.Tasks["a"].Lines[1].IsCommand {
 		t.Error("ordinary output was mistaken for a command echo")
+	}
+}
+
+// --- timeline -----------------------------------------------------------------------
+
+// agedRun is a finished run that looks like it started `ago` seconds back. Save derives the
+// start from the duration, and the run id is `<started>-<root>` — so without distinct ages
+// three runs of the same task in one test second would be one run three times.
+//
+// It always feeds at least one line: a task that printed nothing is, deliberately, not
+// distinguishable from one that go-task never reached, and both are left Pending. Under
+// `--output prefixed` a real task that runs always echoes its command, so a silent one is
+// the artificial case, not the ordinary one.
+func agedRun(root, task string, ok bool, ago int, lines ...string) *run.Run {
+	r := run.Detached(root, run.GraphFrom(
+		run.Edge{Parent: root, Children: []string{task}},
+		run.Edge{Parent: task},
+	))
+	if len(lines) == 0 {
+		lines = []string{"task: [" + task + "] echo hello"}
+	}
+	for _, l := range lines {
+		r.Feed(task, l)
+	}
+	exit := 0
+	if !ok {
+		r.ApplyFailed(task)
+		exit = 1
+	}
+	r.Finish(exit)
+	r.Duration = time.Duration(ago) * time.Second
+	r.HasDuration = true
+	return r
+}
+
+func TestATimelineIsOneTasksHistoryNewestFirst(t *testing.T) {
+	base := t.TempDir()
+	for _, r := range []*run.Run{
+		agedRun("all", "test", true, 300, "ok"),
+		agedRun("all", "test", false, 200, "boom"),
+		agedRun("test", "test", true, 100, "ok again"),
+	} {
+		if _, err := Save(base, "/proj", r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	points := Timeline(base, "/proj", "test")
+	if len(points) != 3 {
+		t.Fatalf("got %d points, want 3", len(points))
+	}
+	for i := 1; i < len(points); i++ {
+		if points[i].WhenUnix > points[i-1].WhenUnix {
+			t.Errorf("point %d is newer than the one before it", i)
+		}
+	}
+	// Newest first: the standalone `task test`, then the failure, then the first pass.
+	if points[0].Root != "test" || !points[0].Ok() {
+		t.Errorf("newest is %+v", points[0])
+	}
+	if points[1].Ok() {
+		t.Error("the middle run failed")
+	}
+}
+
+// The root is what explains a surprising duration: the same task reached from `task all`
+// and on its own is the same task under different circumstances.
+func TestATimelinePointRemembersTheRunItWasPartOf(t *testing.T) {
+	base := t.TempDir()
+	if _, err := Save(base, "/proj", agedRun("all", "lint", true, 60)); err != nil {
+		t.Fatal(err)
+	}
+	points := Timeline(base, "/proj", "lint")
+	if len(points) != 1 || points[0].Root != "all" {
+		t.Fatalf("got %+v", points)
+	}
+}
+
+func TestATimelineIsScopedToItsProject(t *testing.T) {
+	base := t.TempDir()
+	if _, err := Save(base, "/elsewhere", agedRun("all", "test", true, 60)); err != nil {
+		t.Fatal(err)
+	}
+	if got := Timeline(base, "/proj", "test"); len(got) != 0 {
+		t.Errorf("another project's runs leaked in: %+v", got)
+	}
+	if got := Timeline(base, "", "test"); len(got) != 1 {
+		t.Errorf("an empty project should mean every project, got %d", len(got))
+	}
+}
+
+// A task go-task decided was up to date did not run. A row saying so makes the trend harder
+// to read, not easier.
+func TestATimelineSkipsTheTasksThatNeverRan(t *testing.T) {
+	base := t.TempDir()
+	r := run.Detached("all", run.GraphFrom(
+		run.Edge{Parent: "all", Children: []string{"ran", "never"}},
+	))
+	r.Feed("ran", "hello")
+	r.Finish(0)
+	if _, err := Save(base, "/proj", r); err != nil {
+		t.Fatal(err)
+	}
+	if got := Timeline(base, "/proj", "never"); len(got) != 0 {
+		t.Errorf("a task that never ran has no timeline, got %+v", got)
+	}
+}
+
+func TestLastGreenSkipsTheFailuresAndItself(t *testing.T) {
+	base := t.TempDir()
+	var ids []string
+	for _, c := range []struct {
+		ok  bool
+		ago int
+	}{{true, 300}, {true, 200}, {false, 100}} {
+		dir, err := Save(base, "/proj", agedRun("all", "test", c.ok, c.ago))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, filepath.Base(dir))
+	}
+	newest := ids[2]
+
+	green, ok := LastGreen(base, "/proj", "test", "")
+	if !ok {
+		t.Fatal("no green run found")
+	}
+	if !green.Ok() {
+		t.Error("last green is not green")
+	}
+	// Two passes, 300s and 200s ago, then a failure. The newer pass is the one to compare
+	// against — the older one is green too, and picking it would answer a question nobody
+	// asked.
+	if green.RunID != ids[1] {
+		t.Errorf("got %s, want the newer pass %s", green.RunID, ids[1])
+	}
+
+	// Previous, unlike LastGreen, does not care how it went — and skipping itself is what
+	// keeps a stored run from diffing against its own output.
+	prev, ok := Previous(base, "/proj", "test", newest)
+	if !ok {
+		t.Fatal("no previous run")
+	}
+	if prev.RunID == newest {
+		t.Error("Previous returned the run it was told to skip")
+	}
+}
+
+func TestLastGreenOfATaskThatNeverPassed(t *testing.T) {
+	base := t.TempDir()
+	if _, err := Save(base, "/proj", agedRun("all", "test", false, 60)); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := LastGreen(base, "/proj", "test", ""); ok {
+		t.Error("found a green run that does not exist")
+	}
+	if _, ok := Previous(base, "/proj", "test", ""); !ok {
+		t.Error("but there is a previous run, and it should be offered")
+	}
+}
+
+// The diff reads through this, so it has to come back exactly as it went in.
+func TestOutputReadsBackWhatTheTaskPrinted(t *testing.T) {
+	base := t.TempDir()
+	if _, err := Save(base, "/proj", agedRun("all", "test", true, 60, "first", "second", "third")); err != nil {
+		t.Fatal(err)
+	}
+	points := Timeline(base, "/proj", "test")
+	if len(points) != 1 {
+		t.Fatalf("got %d points", len(points))
+	}
+	got := Output(base, points[0])
+	want := []string{"first", "second", "third"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// Two runs of one task inside a second used to be one run: the id is `<second>-<task>`, and
+// the second save landed on the first's directory. That is precisely the pair a timeline
+// exists to show, so losing it there is the worst place for it to happen.
+func TestTwoRunsOfOneTaskInOneSecondBothSurvive(t *testing.T) {
+	base := t.TempDir()
+	first, err := Save(base, "/proj", agedRun("suite", "suite", true, 5, "green"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Save(base, "/proj", agedRun("suite", "suite", false, 5, "red"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("both runs landed in %s", first)
+	}
+	if got := len(List(base)); got != 2 {
+		t.Errorf("archive holds %d runs, want 2", got)
+	}
+	points := Timeline(base, "/proj", "suite")
+	if len(points) != 2 {
+		t.Fatalf("timeline has %d points, want 2", len(points))
+	}
+	// Newest first, and the newest is the failure.
+	if points[0].Ok() || !points[1].Ok() {
+		t.Errorf("out of order: %v then %v", points[0].Status, points[1].Status)
 	}
 }

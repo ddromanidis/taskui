@@ -19,7 +19,7 @@ previous runs.
 
 ## What it is
 
-Four screens, one keymap.
+Six screens, one keymap.
 
 **The picker** is the Taskfile as a fold tree, which it already is — `backend:migrate:down`
 is a path, not a name. It pivots: by domain (`backend` › `migrate` › `down`) or by verb
@@ -39,8 +39,20 @@ than orphaning it.
 
 **The archive** keeps finished runs on disk as plain text — a directory per run, a
 `manifest.json`, and a `.txt` and `.ansi` file per task. `taskui --search 'FAIL'` greps all
-of it from anywhere, which is the "when did this start failing" question you could not ask
-before.
+of it from anywhere.
+
+**A timeline** is one task's own history: `⇧H` on any task lists every stored run of it,
+newest first, with a duration bar and a `✓✓✓✗✗` trend across the top. `h` answers "what has
+this project been doing"; `⇧H` answers "how has *this* been going", and those turn out to be
+different questions.
+
+**A diff** is what changed. `⇧D` on a failing task compares its output against the last run
+in which it passed, elides the hundreds of lines both runs share, and leaves you with the
+few that are new. Nothing else on your machine can do this, because nothing else kept both
+runs.
+
+And `e` opens the file. A `file:line` anywhere in captured output is underlined, and `e`
+launches `$EDITOR` on it at that line.
 
 ## Why
 
@@ -53,7 +65,7 @@ domain and a verb, and the flat list throws away both — you scroll looking for
 whose name you half remember. Meanwhile a `task all` that fails somewhere in the middle
 gives you eight thousand lines and a cursor, and the useful part is forty of them.
 
-taskui does four things about that, and they are the only four ideas in it:
+taskui does five things about that, and they are the only five ideas in it:
 
 - **The names are a tree, so show a tree.** And show it two ways, because "everything in
   the backend" and "every lint everywhere" are both real questions.
@@ -65,7 +77,12 @@ taskui does four things about that, and they are the only four ideas in it:
   The last few lines answer it, because the end of a command's output is the part that says
   how it went.
 - **A run that ended is not a run that is gone.** Keep it, in a format anything can read,
-  and make it searchable.
+  make it searchable, and let one task's runs be lined up against each other — a list of
+  outcomes answers "when did this start failing", and a diff of two of them answers "what
+  changed".
+- **Reading where it broke should not end in retyping.** Every compiler, test runner and
+  linter prints `file:line`. taskui knows which task printed each line and where that task
+  ran, which is what makes a bare `view_test.go` resolvable — so `e` opens it.
 
 Everything else follows from those, and the reasoning is in [DESIGN.md](DESIGN.md).
 
@@ -161,6 +178,8 @@ taskui --dump domain|verb     # print a pivot fully expanded and exit
 taskui --graph all            # print the execution graph reachable from a task
 taskui --run all              # run headlessly and print the captured tree
 taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
+taskui --timeline test        # how one task has gone, run after run
+taskui --diff test            # what changed since it last passed
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
 ```
 
@@ -189,7 +208,8 @@ In the picker:
 | `t` | jump to a task, leaving the list intact |
 | `s` | what this task is, and what it will run |
 | `v` | go to whatever is running, or the last run |
-| `h` | past runs |
+| `h` | past runs, across the project |
+| `⇧H` | past runs of *this* task |
 | `x` | stop this task's run, wherever it is |
 | `⇧K` | stop every run |
 | `esc` | back out of a filter or a panel — it does not quit |
@@ -214,8 +234,127 @@ In a run:
 | `⇥` `⇧⇥` `1`…`9` | switch between open runs |
 | `⇧X` | close the slot (once its run has stopped) |
 | `w` | resume following |
-| `h` | past runs |
+| `y` `⇧Y` | copy the line, or everything the task printed |
+| `e` | open the `file:line` under the cursor in `$EDITOR` |
+| `⇧D` | what changed since this task last passed |
+| `h` | past runs, across the project |
+| `⇧H` | past runs of *this* task |
 | `esc` | back to the picker (every run keeps going) |
+
+On a timeline (`⇧H`):
+
+| key | |
+|---|---|
+| `j` `k` `gg` `⇧G` | move |
+| `⏎` | open that run |
+| `⇧D` | what changed between it and the run before it |
+| `esc` | back |
+
+In a diff:
+
+| key | |
+|---|---|
+| `j` `k` `gg` `⇧G` | scroll |
+| `[` `]` | less / more unchanged context |
+| `e` | open the `file:line` under the cursor in `$EDITOR` |
+| `esc` | back |
+
+## Going where it broke
+
+Three things turn "something failed" into "here is the line".
+
+### `e` — open the file
+
+Every compiler, test runner and linter prints `file:line`. taskui underlines them in
+captured output and `e` opens the one under the cursor:
+
+```
+ ▾ ✗ test
+   1 ❯ go test ./...
+   2   === RUN   TestWrap
+   3       view_test.go:88: want 3, got 4      ← underlined; e opens it
+   4   --- FAIL: TestWrap (0.00s)
+```
+
+The hard part is not the parsing, it is the resolving. `go test` prints a bare basename
+relative to the *package* directory, which is not the directory the run started in and is
+not named anywhere in the line. So a path that does not resolve against the project gets
+looked up in an index of it, built once and only when something needs it. Two files with
+the same name resolve to the shallower one and the status line says it had to guess.
+
+Pressing `e` on a line that names no file falls back to the first location the task printed
+— for a compiler that is the error, for a test runner the first failing assertion — and
+says where it got it, so it is never a dead keystroke.
+
+The command comes from `$VISUAL`, then `$EDITOR`, spelled the way that editor wants it:
+
+| `$EDITOR` | |
+|---|---|
+| `vim` `nvim` `vi` | `vim +212 file` |
+| `nano` | `nano +212,5 file` |
+| `emacs` `emacsclient` | `emacs +212:5 file` |
+| `hx` `kak` | `hx file:212:5` |
+| `code` `cursor` `zed` `codium` | `code --goto file:212:5` |
+| `subl` `atom` `mate` | `subl file:212:5` |
+| `goland` `idea` `pycharm` … | `goland --line 212 --column 5 file` |
+| anything else | `$EDITOR file`, at the top |
+
+Flags already in the variable survive: `EDITOR="code -w"` keeps its `-w`. A terminal editor
+gets the terminal handed to it and taskui redraws when it exits; anything that opens its own
+window is started alongside, because blacking out the UI for a command that returns in ten
+milliseconds looks like a crash.
+
+### `⇧H` — how this task has been going
+
+```
+ taskui ▸ test                                    ✓✓✓✗✗   5 runs   2 failed
+ ──────────────────────────────────────────────────────────────────────────
+▌✗ 12m ago      1.31s  ██████████████      44 lines  task test
+ ✗ 2h ago       1.28s  █████████████       44 lines  task all
+ ✓ 5h ago       1.19s  ████████████        31 lines  task all
+ ✓ 6h ago         88ms █                   31 lines  task test
+ ✓ yesterday    1.21s  ████████████        30 lines  task all
+```
+
+The trend across the top is where it turned, which is more use than how many failures there
+were. The bar is scaled to the slowest run in the list, so "when did this get slow" is a
+shape rather than a column of numbers to compare by hand. The right-hand column is the run
+each appearance was part of, because `test` reached from `task all` and `test` on its own
+are the same task under different circumstances, and that explains most surprising
+durations.
+
+`⏎` reopens that run in full. `⇧D` diffs it against the one below it.
+
+### `⇧D` — what changed
+
+```
+ taskui ▸ suite                       vs when it last passed   2h ago   +7   -3
+ ──────────────────────────────────────────────────────────────────────────────
+▌     ⋮
+  2  2  === RUN   TestAlpha
+  3  3  --- PASS: TestAlpha (0.00s)
+  4  4  === RUN   TestBeta
+  5   - --- PASS: TestBeta (0.00s)
+     5+     beta_test.go:42: want 3, got 4
+     6+ --- FAIL: TestBeta (0.00s)
+  6  7  === RUN   TestGamma
+```
+
+Last *green* rather than last run: "it worked before" is the comparison that isolates the
+failure, where diffing two consecutive failures usually shows only that the timestamps
+moved. A task that has never passed falls back to the previous run, and the header says so
+rather than letting you mistake one comparison for the other.
+
+The stretches both runs share are elided down to a `⋮`; `[` and `]` widen and narrow what is
+kept around each change. Locations are underlined here too, so `e` works on a line that has
+just appeared — which is the shortest path there is from "it broke" to the file.
+
+Both are scriptable, like everything else:
+
+```
+taskui --timeline test   # one run per line, tab-separated
+taskui --diff test       # unified-ish, with the line numbers on the rows
+```
 
 ## Two pivots
 
@@ -307,11 +446,13 @@ theme: synthwave
 
 keys:
   filter-matches: z
+  edit: E
 
 peek-lines: 8
 
 colors:
   selection: "#101030"
+  location: "#7dcfff"
 ```
 
 Every key is optional, so a two-line file is valid. Anything wrong with it is reported in
@@ -429,9 +570,9 @@ glyphs:
 
 A theme sets two blocks, and they fail differently.
 
-**Colours** are the twenty-six roles below. A bad one costs you that colour and says so.
+**Colours** are the twenty-nine roles below. A bad one costs you that colour and says so.
 
-**Glyphs** are the twenty-one characters the UI draws its structure out of — fold markers,
+**Glyphs** are the twenty-five characters the UI draws its structure out of — fold markers,
 tree guides, the cursor rail, status ticks, the hairlines. Each is **one terminal column**,
 and that is checked when the theme loads. The layout arithmetic is built on knowing how
 wide a glyph is before it is drawn, so a theme that could smuggle in a three-column marker
@@ -580,6 +721,8 @@ internal/run          the pty, the capture, the process group
 internal/redact       masking credentials out of captured output
 internal/store        the archive
 internal/search       one matcher over the live run and the archive both
+internal/diff         Myers, for comparing two runs of one task
+internal/loc          finding `file:line` in output, and how to open it
 internal/keys         the keymap, as data
 internal/theme        colours, glyphs, animation, and the theme files
 internal/app          state, key handling, rendering

@@ -361,7 +361,27 @@ func TestEveryScreenRendersAtEveryAwkwardSize(t *testing.T) {
 	// body — the sizes below include terminals with barely any body to take from.
 	a.OpenRunForTest(run.Detached("task002", run.GraphFrom(run.Edge{Parent: "task002"})))
 
-	screens := []Screen{ScreenPicker, ScreenRun, ScreenHistory, ScreenHelp, ScreenDetail}
+	// The timeline and the diff are lists like the others, and have to survive the same
+	// shapes — a diff row is three columns before it gets to any text, which on a
+	// twenty-column terminal is most of it.
+	a.TimelineOf = "task001"
+	a.Timeline = []store.Point{
+		{RunID: "a", Root: "task000", WhenUnix: 1, Status: "Ok", DurationMs: 1200, Lines: 30},
+		{RunID: "b", Root: "task001", WhenUnix: 2, Status: "Failed", DurationMs: 90, Lines: 4},
+	}
+	a.showDiff(
+		"task001",
+		[]string{"shared", "gone", "also shared"},
+		[]string{"shared", "arrived at internal/app/view.go:212:5", "also shared"},
+		"when it last passed", a.Timeline[0], "task task001",
+	)
+	// showDiff leaves the app on the diff screen; the loop below sets it per iteration.
+	a.Screen = ScreenPicker
+
+	screens := []Screen{
+		ScreenPicker, ScreenRun, ScreenHistory, ScreenHelp, ScreenDetail,
+		ScreenTimeline, ScreenDiff,
+	}
 	for _, size := range sizes {
 		w, h := size[0], size[1]
 		for _, screen := range screens {
