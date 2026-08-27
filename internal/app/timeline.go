@@ -139,11 +139,16 @@ func (a *App) DiffAgainstLastGreen() {
 	a.showDiff(name, store.Output(a.stateDir, point), newer, against, point)
 }
 
-// DiffTimelinePoint is `D` from the timeline: what changed between the run under the cursor
-// and the one before it.
+// DiffTimelinePoint is `⇧D` from the timeline: what changed at the run under the cursor.
 //
-// The row below is the previous run because the list is newest first — which is also why
-// the last row has nothing to compare against and says so rather than wrapping around.
+// Not the row immediately below it. The trend across the header is `✓✓✓✗✗`, and the question
+// that shape puts in your head is what happened at the turn — so this looks back for the
+// most recent earlier run that ended *differently* and compares against that. Against the
+// adjacent row, a `⇧D` on the newest of five consecutive failures answers "nothing changed",
+// which is true, useless, and lands exactly where the question was most worth asking.
+//
+// A run of unbroken same-outcome results all the way back has no turn to find, and then the
+// row below is the honest answer.
 func (a *App) DiffTimelinePoint() {
 	point, ok := a.SelectedPoint()
 	if !ok {
@@ -153,12 +158,24 @@ func (a *App) DiffTimelinePoint() {
 		a.Status = "that is the earliest stored run of `" + a.TimelineOf + "` — nothing before it"
 		return
 	}
-	before := a.Timeline[a.TimelineCursor+1]
+
+	before, against := a.Timeline[a.TimelineCursor+1], "the run before"
+	for _, earlier := range a.Timeline[a.TimelineCursor+1:] {
+		if earlier.Ok() != point.Ok() {
+			before = earlier
+			against = "when it last passed"
+			if point.Ok() {
+				against = "the last failure"
+			}
+			break
+		}
+	}
+
 	a.showDiff(
 		a.TimelineOf,
 		store.Output(a.stateDir, before),
 		store.Output(a.stateDir, point),
-		"the run before",
+		against,
 		before,
 	)
 }

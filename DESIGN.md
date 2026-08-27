@@ -473,6 +473,12 @@ Shared stretches are elided to a `⋮`, because the entire value of the view is 
 short. A diff of two 800-line logs differing in five places is 800 rows of which 790 are
 noise.
 
+From a timeline the comparison looks back to the *turn*: the most recent earlier run that
+ended differently. The trend in the header is `✓✓✓✗✗`, and the question that shape puts in
+your head is what happened at the transition — where diffing against the row immediately
+below answers "nothing changed" on the newest of three consecutive failures. True, useless,
+and precisely where the question was most worth asking.
+
 A stored run being diffed has to skip *itself* in the archive: it is in there, it is the
 newest, and a diff of a thing against itself is a diff of nothing — which you would find out
 by producing it.

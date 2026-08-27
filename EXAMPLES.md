@@ -196,7 +196,8 @@ list, so a step that got slower shows up as a shape rather than five numbers to 
 hand — and the right-hand column is the run each appearance was part of, which is usually
 the explanation.
 
-`⇧D` then answers the next question, which is what actually changed:
+`⇧D` answers the next question — what actually changed — against the last run that went
+differently, which here is the last one that passed:
 
 ```
  taskui ▸ backend:test              vs when it last passed   3h ago   +7   -3

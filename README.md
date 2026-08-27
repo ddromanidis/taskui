@@ -247,7 +247,7 @@ On a timeline (`⇧H`):
 |---|---|
 | `j` `k` `gg` `⇧G` | move |
 | `⏎` | open that run |
-| `⇧D` | what changed between it and the run before it |
+| `⇧D` | what changed at it — against the last run that went differently |
 | `esc` | back |
 
 In a diff:
@@ -323,7 +323,10 @@ each appearance was part of, because `test` reached from `task all` and `test` o
 are the same task under different circumstances, and that explains most surprising
 durations.
 
-`⏎` reopens that run in full. `⇧D` diffs it against the one below it.
+`⏎` reopens that run in full. `⇧D` diffs it against the last run that went *differently* —
+not the row below. On the newest of three consecutive failures, the row below answers
+"nothing changed", which is true, useless, and lands exactly where the question was most
+worth asking.
 
 ### `⇧D` — what changed
 

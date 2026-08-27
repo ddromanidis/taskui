@@ -493,3 +493,90 @@ func TestNoEditorConfiguredSaysWhatToSet(t *testing.T) {
 		t.Errorf("status = %q", a.Status)
 	}
 }
+
+// The trend across a timeline header is `✓✓✓✗✗`, and the question that shape puts in your
+// head is what happened at the turn. Diffing against the row immediately below answers
+// "nothing changed" on the newest of a run of failures — true, useless, and exactly where
+// the question was most worth asking.
+func TestDiffingFromTheTimelineLooksBackToTheTurn(t *testing.T) {
+	a := sample(t)
+	archived(t, a, "backend:lint", true, 500, "clean")
+	archived(t, a, "backend:lint", false, 400, "boom")
+	archived(t, a, "backend:lint", false, 300, "boom")
+	archived(t, a, "backend:lint", false, 200, "boom")
+
+	parkOn(t, a, "backend:lint")
+	press(a, Char('H'))
+	if len(a.Timeline) != 4 {
+		t.Fatalf("got %d points", len(a.Timeline))
+	}
+	// The cursor starts on the newest, which is the third failure in a row.
+	press(a, Char('D'))
+
+	if a.Screen != ScreenDiff {
+		t.Fatalf("screen = %v — status %q", a.Screen, a.Status)
+	}
+	if a.DiffAgainstWhat != "when it last passed" {
+		t.Errorf("compared against %q, want the last pass", a.DiffAgainstWhat)
+	}
+	if a.DiffStat.Added != 1 || a.DiffStat.Removed != 1 {
+		t.Errorf("stat = %+v — it compared against another identical failure", a.DiffStat)
+	}
+}
+
+// It works the other way too: on a run that passed, the turn is the failure before it.
+func TestFromAPassTheTurnIsTheLastFailure(t *testing.T) {
+	a := sample(t)
+	archived(t, a, "backend:lint", false, 400, "boom")
+	archived(t, a, "backend:lint", true, 300, "clean")
+	archived(t, a, "backend:lint", true, 200, "clean")
+
+	parkOn(t, a, "backend:lint")
+	press(a, Char('H'))
+	press(a, Char('D'))
+
+	if a.DiffAgainstWhat != "the last failure" {
+		t.Errorf("compared against %q", a.DiffAgainstWhat)
+	}
+	if a.DiffStat.Added != 1 || a.DiffStat.Removed != 1 {
+		t.Errorf("stat = %+v", a.DiffStat)
+	}
+}
+
+// With no turn anywhere behind it there is nothing to look back to, and the row below is
+// the honest answer rather than a reason to refuse.
+func TestWithNoTurnItFallsBackToTheAdjacentRun(t *testing.T) {
+	a := sample(t)
+	archived(t, a, "backend:lint", true, 300, "one")
+	archived(t, a, "backend:lint", true, 200, "two")
+
+	parkOn(t, a, "backend:lint")
+	press(a, Char('H'))
+	press(a, Char('D'))
+
+	if a.Screen != ScreenDiff {
+		t.Fatalf("screen = %v — status %q", a.Screen, a.Status)
+	}
+	if a.DiffAgainstWhat != "the run before" {
+		t.Errorf("compared against %q", a.DiffAgainstWhat)
+	}
+}
+
+// The oldest row has nothing behind it at all.
+func TestTheEarliestRunHasNothingToCompareAgainst(t *testing.T) {
+	a := sample(t)
+	archived(t, a, "backend:lint", true, 300, "one")
+	archived(t, a, "backend:lint", false, 200, "two")
+
+	parkOn(t, a, "backend:lint")
+	press(a, Char('H'))
+	press(a, Char('G'))
+	press(a, Char('D'))
+
+	if a.Screen == ScreenDiff {
+		t.Error("opened a diff for the earliest stored run")
+	}
+	if !strings.Contains(a.Status, "earliest") {
+		t.Errorf("status = %q", a.Status)
+	}
+}

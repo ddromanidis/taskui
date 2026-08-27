@@ -429,7 +429,7 @@ var TimelineSection = Section{
 		b("j k ↑ ↓", "move"),
 		b("gg G", "first / last row"),
 		f("⏎", "open that run", "open"),
-		f("⇧D", "what changed between this run and the one before it", "diff"),
+		f("⇧D", "what changed at this run — against the last one that went differently", "diff"),
 		b("?", "this screen"),
 		f("esc", "back", "back"),
 		b("q", "quit"),
