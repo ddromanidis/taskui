@@ -274,6 +274,8 @@ type Run struct {
 	proc   *os.Process
 	master *os.File
 	stop   stop
+	// reapMu keeps the group signal and the wait on the leader from overlapping.
+	reapMu sync.Mutex
 
 	// reaped is set by the capture goroutine on its way out. Read from the escalation
 	// goroutine, which is why it is an atomic rather than HasExit.
@@ -508,35 +510,44 @@ func (r *Run) Cancel() {
 		// SIGHUP is the backstop for a child that never became a group leader — and is
 		// still catchable, which is the point.
 		_ = proc.Signal(syscall.SIGHUP)
-		go r.escalateLeader()
+		go r.reapGroup()
 	}
 }
 
-// leaderGrace is how long go-task itself gets to act on the polite signals before it is
-// taken by force.
-const leaderGrace = 250 * time.Millisecond
-
-// escalateLeader SIGKILLs go-task — and only go-task — if it is still there after the
-// grace.
+// reapGroup takes what is left of the process group once the grace is up.
 //
-// This is not the same escalation as a second `x`, which takes the whole group. go-task
-// catches both signals above and then waits for its commands to finish, so a command that
-// ignores signals keeps go-task alive indefinitely. And go-task is the session leader
-// holding the pty: while it lives, the master never reaches EOF, the capture goroutine
-// stays blocked in its read, and the one place that can reap the group on the way out
-// never runs. Stopping therefore has to reach the leader by force, or a stubborn command
-// makes the run unstoppable rather than merely slow to stop.
+// This runs on its own goroutine rather than after the capture loop, and that is the whole
+// point. go-task catches both polite signals and then waits for its commands, so a command
+// that ignores signals keeps it alive; go-task is the session leader holding the pty; and
+// while anything in the group holds the pty slave open, the master never reaches EOF and
+// the capture goroutine stays blocked in its read. Hanging the cleanup off the end of that
+// read meant the cleanup could only run once the thing it was cleaning up had already let
+// go.
 //
-// The commands underneath keep their SIGTERM and whatever they chose to do with it; only
-// the supervisor is taken.
-func (r *Run) escalateLeader() {
-	deadline := time.Now().Add(leaderGrace)
-	for time.Now().Before(deadline) {
+// macOS hid this. BSD revokes the controlling terminal when the session leader dies, so
+// taking the leader was enough to force the EOF and everything downstream ran. Linux does
+// not revoke, so the same run simply never ended — which is exactly what
+// `a command that ignores SIGTERM does not outlive the run` was written to catch, and did,
+// on the first CI run that put it on Linux.
+//
+// Killing the group is what frees the pty on both, so the read ends because the run is
+// over rather than the run ending because the read did.
+func (r *Run) reapGroup() {
+	// go-task exits the instant it is signalled; its commands are still reacting. Wait out
+	// the grace before insisting, unless somebody already has.
+	deadline := time.Now().Add(stopGrace)
+	for time.Now().Before(deadline) && !r.stop.now.Load() {
 		if r.reaped.Load() {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+
+	// Under the same lock the capture goroutine waits on, so the group can never be
+	// signalled after the leader has been reaped: that pid goes straight back into
+	// circulation, and signalling a recycled one means signalling a stranger.
+	r.reapMu.Lock()
+	defer r.reapMu.Unlock()
 	if r.reaped.Load() {
 		return
 	}
@@ -544,6 +555,7 @@ func (r *Run) escalateLeader() {
 	proc := r.proc
 	r.mu.Unlock()
 	if proc != nil {
+		_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
 		_ = proc.Signal(syscall.SIGKILL)
 	}
 }
@@ -571,15 +583,9 @@ func (r *Run) Kill() {
 		// there is left to do — signalling anything here would be signalling a stranger.
 		return
 	}
-	r.mu.Lock()
-	proc := r.proc
-	r.mu.Unlock()
-	if proc != nil {
-		// The group, for the shell commands underneath; then the leader by name, for the
-		// case where it is not in a group of its own after all.
-		_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
-		_ = proc.Signal(syscall.SIGKILL)
-	}
+	// `now` is already set, so this takes the group immediately rather than waiting out a
+	// grace nobody asked for a second time.
+	go r.reapGroup()
 }
 
 // Command is what was actually invoked, for the header and the history list.
@@ -964,42 +970,25 @@ func (r *Run) capture(dir string, redactor *redact.Redactor) error {
 		}
 	}
 
-	// The pty is at EOF, which under `--output prefixed` means go-task has gone — every
-	// command writes into its prefixing pipe rather than the pty, so nothing underneath can
-	// hold this open. That is why a survivor is invisible from here and has to be dealt
-	// with by name.
+	// The pty is at EOF, which means nothing is holding the slave open any more: go-task
+	// has gone, and so has anything it left behind that was attached to the terminal. A
+	// run that was stopped got there because reapGroup took the group; one that ended on
+	// its own got there by finishing.
 	//
-	// Only for a run that was stopped. One that ended on its own may perfectly well have
-	// left something behind on purpose — `docker compose up -d` is a task whose entire job
-	// is to outlive itself — and killing that would be taking down a stack because a task
-	// succeeded.
-	if r.stop.requested.Load() {
-		// go-task exits the instant it is signalled; its commands are still reacting. Wait
-		// out the grace before insisting, unless somebody already has.
-		deadline := time.Now().Add(stopGrace)
-		for time.Now().Before(deadline) && !r.stop.now.Load() {
-			time.Sleep(25 * time.Millisecond)
-		}
-		// Still before the wait below, and that is the whole point: the leader is a
-		// zombie, so its pid is still reserved and still names this group. Afterwards it
-		// names whatever the OS hands it to next.
-		r.mu.Lock()
-		proc := r.proc
-		r.mu.Unlock()
-		if proc != nil {
-			_ = syscall.Kill(-proc.Pid, syscall.SIGKILL)
-		}
-	}
-
-	// Keep the master alive until the child is reaped, then report the exit code.
+	// Reaping under the same lock reapGroup uses is what keeps the two apart. A pid names
+	// its group only until it is waited on; after that it names whatever the OS hands it
+	// to next, and a signal arriving in that window would go to a stranger.
 	code := -1
+	r.reapMu.Lock()
 	if err := cmd.Wait(); err == nil {
 		code = 0
 	} else if state := cmd.ProcessState; state != nil {
 		code = state.ExitCode()
 	}
-	_ = master.Close()
 	r.reaped.Store(true)
+	r.reapMu.Unlock()
+
+	_ = master.Close()
 	r.send(Exited{Code: code})
 	return nil
 }

@@ -61,6 +61,16 @@ tasks:
     cmds:
       - go test -race ./...
 
+  test:linux:
+    desc: "The suite on real Linux, in Docker — the pty and process-group code differs there"
+    cmds:
+      - |
+        docker run --rm -v '{{.ROOT_DIR}}':/src -v "$(go env GOMODCACHE)":/go/pkg/mod \
+          -w /src golang:1.27 bash -c '
+            sh -c "$(curl --location -s https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin >/dev/null 2>&1
+            go test ./... {{.CLI_ARGS}}
+          '
+
   fmt:
     desc: "Format the source (writes changes)"
     cmds:
