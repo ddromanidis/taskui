@@ -238,6 +238,7 @@ type Colors struct {
 	MatchBg Color
 
 	Location Color
+	Marked   Color
 
 	DiffAdded   Color
 	DiffRemoved Color
@@ -307,6 +308,8 @@ var colorFields = []colorField{
 		func(t *Colors) *Color { return &t.Location },
 	},
 
+	{"marked", "A task chosen to run alongside others.", func(t *Colors) *Color { return &t.Marked }},
+
 	{"diff-added", "A line only the newer run printed.", func(t *Colors) *Color { return &t.DiffAdded }},
 	{"diff-removed", "A line only the older run printed.", func(t *Colors) *Color { return &t.DiffRemoved }},
 
@@ -353,6 +356,7 @@ func DefaultColors() Colors {
 		// Cyan rather than the accent: a location is a link, and it has to be legible on
 		// a failure line that is already red without competing with it for the same job.
 		Location: Cyan,
+		Marked:   Yellow,
 
 		DiffAdded:   Green,
 		DiffRemoved: Red,

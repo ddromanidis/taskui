@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -131,7 +132,13 @@ const DropBlock = 4_000
 
 type TaskRun struct {
 	Status Status
-	Lines  []Line
+	// Note is why this task did not do what you expected, in go-task's own words — "up to
+	// date", "precondition not met". It is attributed here rather than left where it was
+	// printed: go-task announces a skip with no `[name]` prefix, so the line lands in the
+	// *parent's* output, several rows away from the `⏸` it explains. A skipped task with no
+	// reason beside it is the whole reason `⇧R` exists.
+	Note  string
+	Lines []Line
 	// Dropped counts the lines that fell off the front of Lines to stay under MaxLines.
 	Dropped  int
 	started  time.Time
@@ -756,6 +763,14 @@ func (r *Run) apply(event Event) {
 			}
 		}
 		r.touch(name)
+		// Before the provisional branch, which returns early: a line that supersedes an
+		// unterminated one takes a different path to storage, and a check placed after that
+		// branch reads only the lines that did not. Which is exactly what happened — the
+		// first of two identical skips was explained and the second was not, purely by which
+		// arrived whole.
+		if task, why, ok := skipReason(ansi.Strip(e.Raw)); ok {
+			r.apply(Skipping{Task: task, Why: why})
+		}
 		// A completed line supersedes the provisional one it grew out of.
 		if r.provisional != nil && r.provisional.task == name {
 			at := r.provisional.index
@@ -770,6 +785,13 @@ func (r *Run) apply(event Event) {
 	case FailedEvent:
 		r.touch(e.Task)
 		r.fail(e.Task)
+
+	case Skipping:
+		// Deliberately does not touch(): a task go-task decided not to run has not started,
+		// and opening it would put it in Order as though it had.
+		if t, ok := r.Tasks[e.Task]; ok {
+			t.Note = e.Why
+		}
 
 	case Exited:
 		r.provisional = nil
@@ -1114,4 +1136,48 @@ func isTaskName(name string) bool {
 		}
 	}
 	return true
+}
+
+// Skipping records why go-task declined to run a task.
+type Skipping struct {
+	Task string
+	Why  string
+}
+
+func (Skipping) event() {}
+
+// go-task's own announcements. It names the task in the message and gives the line no
+// `[name]` prefix, so without this the reason and the task it is about end up in different
+// places on screen.
+var (
+	upToDateNotice = regexp.MustCompile(`^task: Task "([^"]+)" is up to date$`)
+	// Unanchored, and the *last* match is the one that counts: a failure inside an
+	// aggregate is reported nested — `Failed to run task "all": task: Failed to run task
+	// "guarded": task: precondition not met` — and the task that actually has the
+	// unsatisfied precondition is the innermost one, not the one that invoked it.
+	preconditionNotice = regexp.MustCompile(`Failed to run task "([^"]+)": task: precondition not met`)
+)
+
+// skipReason reads one line of output for an announcement that a task was not run.
+//
+// Trimmed first, and that is not cosmetic: the pty delivers CRLF, so a line arrives with a
+// trailing carriage return and an anchored match quietly fails on it. Which it did — the
+// first of two consecutive skips was explained and the second was not, because only the
+// second carried the CR.
+func skipReason(text string) (string, string, bool) {
+	text = strings.TrimSpace(text)
+	if m := upToDateNotice.FindStringSubmatch(text); m != nil {
+		return m[1], "up to date", true
+	}
+	if all := preconditionNotice.FindAllStringSubmatch(text, -1); len(all) > 0 {
+		return all[len(all)-1][1], "precondition not met", true
+	}
+	return "", "", false
+}
+
+// SetDurationForTest pins a task's settled duration, so a test can describe a run's shape
+// without depending on how long the test itself took.
+func (t *TaskRun) SetDurationForTest(d time.Duration) {
+	t.duration = d
+	t.settled = true
 }

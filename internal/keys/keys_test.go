@@ -74,10 +74,12 @@ func TestFootersFitAReasonableTerminal(t *testing.T) {
 // Rebinding an action moves it on every screen that offers it.
 func TestRebindingAppliesEverywhereTheActionIsOffered(t *testing.T) {
 	k := NewKeymap()
-	// `z` rather than a letter the defaults already use: rebinding onto a bound key is a
-	// shadowing conflict, which is a different thing and has its own test below.
-	k.Rebind(Help, 'z')
-	if k.Picker('z') != Help || k.Run('z') != Help || k.History('z') != Help {
+	// Derived rather than hardcoded. Rebinding onto a key some action already uses is a
+	// shadowing conflict, which is a different thing with its own test below — and every
+	// hardcoded "free" key in this test so far has stopped being free as the keymap grew.
+	key := unboundKey(t, k)
+	k.Rebind(Help, key)
+	if k.Picker(key) != Help || k.Run(key) != Help || k.History(key) != Help {
 		t.Error("the rebinding did not reach every screen")
 	}
 	if k.Picker('?') != None {
@@ -85,8 +87,8 @@ func TestRebindingAppliesEverywhereTheActionIsOffered(t *testing.T) {
 	}
 	// The screens added later have to take the rebinding too, or `?` stops working on
 	// exactly the screens nobody remembers to check.
-	if k.Timeline('z') != Help || k.Diff('z') != Help {
-		t.Error("the rebinding missed the timeline or the diff")
+	if k.Timeline(key) != Help || k.Diff(key) != Help || k.Profile(key) != Help {
+		t.Error("the rebinding missed one of the later screens")
 	}
 }
 
@@ -123,4 +125,20 @@ func TestTheDefaultsDoNotCollide(t *testing.T) {
 	if c := NewKeymap().Conflicts(); len(c) != 0 {
 		t.Errorf("the shipped keymap shadows itself: %v", c)
 	}
+}
+
+// unboundKey is a character no action answers to on any screen.
+//
+// Every screen, so that a key free in the picker but taken in the run view is not mistaken
+// for a free one — which is how each hardcoded choice here rotted in turn.
+func unboundKey(t *testing.T, k *Keymap) rune {
+	t.Helper()
+	for c := '!'; c <= '~'; c++ {
+		if k.Picker(c) == None && k.Run(c) == None && k.History(c) == None &&
+			k.Timeline(c) == None && k.Diff(c) == None && k.Profile(c) == None {
+			return c
+		}
+	}
+	t.Fatal("every printable character is bound to something")
+	return 0
 }

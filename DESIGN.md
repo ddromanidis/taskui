@@ -483,6 +483,92 @@ A stored run being diffed has to skip *itself* in the archive: it is in there, i
 newest, and a diff of a thing against itself is a diff of nothing — which you would find out
 by producing it.
 
+## Predicting, ranking, and letting go
+
+### Saying why a task did not run
+
+`⇧R` — re-run with `--force` — exists because `r` coming back green without having run
+anything is confusing. That key was a workaround for a missing explanation.
+
+go-task always had the answer and always printed it. It announces `task: Task "x" is up to
+date` on a line with no `[name]` prefix, so under `--output prefixed` it is attributed to
+whichever task was last active — the *parent* — and lands several rows from the `⏸` it
+explains. Copying the reason onto the task it names is the whole fix. The line itself stays
+where go-task put it, because it is real output.
+
+Two bugs surfaced while wiring that up, both from the same class: the check ran on one of the
+two paths a line can take into storage. A line completing an unterminated one returns early,
+so a check placed after that branch reads only the lines that arrived whole — and the first
+of two consecutive skips was explained while the second was not, purely by which was which.
+The other was a trailing carriage return from the pty defeating an anchored match.
+
+`--list-all --json` carries `up_to_date` as well, which turns the explanation into a
+prediction: the detail panel can say `would run — but go-task says it is up to date` before
+you press anything. That listing also carries each task's file and line, which is what makes
+`e` open a task's own definition — a note in the task package predicted exactly this and
+prescribed the fix, because the JSON form is fifty-six times slower on a workspace with many
+`sources:` globs and must not block the first frame. It is fetched on a background goroutine.
+
+### Self time
+
+Every task already carries its own clock and the run view already shows it, beside the task,
+in tree order. That answers "is this step slow" and not "what makes this take four minutes",
+which is a question about the whole run at once — a sort, not a walk.
+
+Ranking by duration does not work. A `task all` that invokes six things has a duration equal
+to the sum of theirs, so every aggregate outranks every task that did any work and the
+profile confidently reports that `all` is the slow one. Subtracting the children leaves the
+time a task spent on its own commands, which is the time that would actually go away if you
+made it faster. `all` then sits at the bottom with its inclusive figure beside it.
+
+Bars scale to the slowest row rather than the run's total: on a run where one step takes nine
+tenths of the time, bars against the total leave every other row blank, and the comparison
+between *those* rows is the one still worth making.
+
+A live profile keeps up, and the cursor follows its task rather than its index — the list is
+sorted by time, so rows overtake each other as the numbers move, and an index-holding cursor
+would drift onto whatever slid underneath it.
+
+### Flaky means the same commit
+
+Alternating outcomes only *suggest* flakiness. The obvious explanation for a task that failed
+and then passed is that somebody fixed it, and nothing in the archive could tell those apart
+— so each run now records the git revision it happened at, and flaky is defined as both
+outcomes at one commit. That is not suggestive of anything; it is the thing itself.
+
+Runs from a dirty tree are excluded rather than included with a caveat. Two runs of
+uncommitted work are not two runs of the same code, and calling them flaky would be wrong.
+
+### Marks
+
+Slots have held six concurrent runs since they existed, and every one of them had to be
+started by going back to the picker and remembering which two you had already done. Marking
+is the missing half: choose the set, then start it.
+
+A batch containing anything dangerous asks once, naming the offenders. Asking per task would
+put a modal prompt between each pair of starts, which is not a confirmation, it is an
+obstacle course. More marks than free slots starts what it can and says what it left —
+silently doing less than you asked is worse than refusing.
+
+### Detaching
+
+This sat in *Not built yet* on the assumption that a run could not survive taskui, and that
+making one survive needed a supervisor process.
+
+That assumption was wrong, and testing it rather than reasoning about it is what settled it.
+The child is already a session leader in its own process group with the pty slave as its
+controlling terminal. SIGKILL taskui and the run keeps going, reparented to init, still doing
+work — writes to a pty whose master has closed return EIO, which every shell that matters
+ignores. So detaching needs to change exactly one thing: quitting stops signalling it.
+
+What it cannot do is keep showing the output. Once taskui exits the master is closed and
+everything printed after that is gone. Which is why detaching archives what it has at that
+moment: it is the last point at which the run's output can be written down at all, since a
+detached run has no end to wait for.
+
+`x` still reaches a detached run. Detaching is not a promise never to stop it — it is the
+blanket that no longer covers it.
+
 ## Not built yet
 
 - **A binary-based formula.** Releases now carry prebuilt binaries, but the tap still
@@ -497,10 +583,12 @@ by producing it.
   with the one below it, and "against the run from before the refactor" needs a mark.
 - Normalising timestamps and durations out of a diff. Today they show as changes, because
   they are; a log where every line carries a timestamp diffs as entirely new.
-- Detaching a slot, so a stack survives quitting taskui. Today `q` stops every run, which
-  is the safe default but not always the one you want.
-- Incremental archiving, so a run that never ends still leaves something on disk before
-  you stop it.
+- Incremental archiving. Detaching writes a snapshot, but a run that is still going only
+  reaches the archive when you ask it to.
+- Following a detached run's output after taskui restarts. It keeps running; its output does
+  not keep arriving anywhere, and that needs a supervisor holding the pty.
+- A file pivot. The JSON listing now carries every task's location, so the data is there —
+  it is the third pivot that is missing, not the information.
 
 ### Interactive tasks
 

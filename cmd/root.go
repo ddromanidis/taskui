@@ -56,6 +56,7 @@ type options struct {
 	searchFor  string
 	timeline   string
 	diffTask   string
+	flaky      bool
 	keys       string
 	themeName  string
 	listThemes bool
@@ -83,6 +84,7 @@ and search afterwards — live and across previous runs.`,
   taskui --run all              run headlessly and print the captured tree
   taskui --timeline test        how ` + "`test`" + ` has been going, run after run
   taskui --diff test            what changed since ` + "`test`" + ` last passed
+  taskui --flaky                tasks that went both ways at one commit
   taskui --dump-config          print every colour at its default`,
 	Args:          cobra.MaximumNArgs(1),
 	Version:       versionString(),
@@ -145,6 +147,7 @@ func init() {
 	f.StringVar(&opts.searchFor, "search", "", "search stored runs and exit")
 	f.StringVar(&opts.timeline, "timeline", "", "print how one task has gone, run after run")
 	f.StringVar(&opts.diffTask, "diff", "", "print what changed in one task since it last passed")
+	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
 	f.StringVar(
 		&opts.keys,
 		"keys",
@@ -231,6 +234,9 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	if opts.diffTask != "" {
 		return printDiff(cmd.OutOrStdout(), root, opts.diffTask)
 	}
+	if opts.flaky {
+		return printFlaky(cmd.OutOrStdout(), root)
+	}
 
 	tasks, err := task.Discover(root)
 	if err != nil {
@@ -265,9 +271,11 @@ func rootRun(cmd *cobra.Command, args []string) error {
 			return runHeadless(root, opts.runTask, task.SplitArgs(opts.args))
 		}
 		a := app.New(tasks, root).WithConfig(config)
+		a.StartEnrichment()
 		if err := a.StartRun(opts.runTask); err != nil {
 			return err
 		}
+		a.AwaitDetails(detailGrace)
 		drive(a, opts.keys)
 		return screenshot(a, opts.screenshot, "")
 	}
@@ -279,8 +287,14 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.screenshot != "" {
+		a.StartEnrichment()
+		a.AwaitDetails(detailGrace)
 		return screenshot(a, opts.screenshot, opts.keys)
 	}
+
+	// Where each task is written, and whether it is up to date. Started here rather than in
+	// New because it shells out, and only the interactive path has a use for the answer.
+	a.StartEnrichment()
 
 	program := tea.NewProgram(a, tea.WithAltScreen())
 	_, err = program.Run()
@@ -480,6 +494,31 @@ func printDiff(out io.Writer, root, taskName string) error {
 	return nil
 }
 
+// printFlaky is `--flaky`: the tasks whose result did not depend on the code.
+//
+// Exits non-zero when it finds any, so it composes into a script the way a check should —
+// `taskui --flaky || echo "look into it"`.
+func printFlaky(out io.Writer, root string) error {
+	flakes := store.Flaky(store.StateDir(), root)
+	if len(flakes) == 0 {
+		fmt.Fprintln(out, "-- no task has gone both ways at one commit")
+		return nil
+	}
+	for _, f := range flakes {
+		fmt.Fprintf(out, "%s\t%s\t%d passed\t%d failed\t%s\n",
+			f.Task, f.Short(), f.Passed, f.Failed, ago(f.LastUnix))
+	}
+	fmt.Fprintf(out, "-- %d flaky\n", len(flakes))
+	return fmt.Errorf("%d %s went both ways at one commit", len(flakes), plural(len(flakes), "task", "tasks"))
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
 // ago is a rough "how long back", for the headless output. The TUI has its own; this one
 // only has to be readable in a pipe.
 func ago(unix int64) string {
@@ -574,6 +613,7 @@ func drive(a *app.App, feed string) {
 
 	for {
 		a.PollRun()
+		a.RefreshLive()
 		if time.Now().After(deadline) {
 			break
 		}
@@ -589,7 +629,13 @@ func drive(a *app.App, feed string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	a.PollRun()
+	a.RefreshLive()
 }
+
+// detailGrace is how long a one-frame render waits for the JSON listing. Generous, because
+// the alternative is a frame that differs run to run depending on how the race went — which
+// is the opposite of what `--screenshot` is for.
+const detailGrace = 5 * time.Second
 
 func screenshot(a *app.App, size, feed string) error {
 	w, h, err := parseSize(size)

@@ -34,6 +34,15 @@ func (a *App) OpenTimeline(task string) {
 	// series — the same task name in a different repo is a different task.
 	a.TimelineOf = task
 	a.Timeline = store.Timeline(a.stateDir, a.Root, task)
+	// Both outcomes at one commit. Worth saying here above all places: this screen is where
+	// you come to decide whether a failure means something, and "it also passed at this
+	// exact revision" is the answer that stops you looking for a cause in the code.
+	a.TimelineFlakes = nil
+	for _, f := range store.Flaky(a.stateDir, a.Root) {
+		if f.Task == task {
+			a.TimelineFlakes = append(a.TimelineFlakes, f)
+		}
+	}
 	a.TimelineCursor = 0
 	a.TimelineOffset = 0
 	a.timelineReturn = a.Screen
@@ -255,6 +264,10 @@ func (a *App) TimelineTaskFor() string {
 		}
 	case ScreenDiff:
 		return a.DiffOf
+	case ScreenProfile:
+		if cost, ok := a.SelectedCost(); ok {
+			return cost.Name
+		}
 	case ScreenHistory, ScreenHelp, ScreenDetail, ScreenTimeline:
 		// Nothing sensible to chart from these.
 	}

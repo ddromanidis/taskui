@@ -92,6 +92,10 @@ func (a *App) View() string {
 		header = a.diffHeader()
 		body = a.drawDiff(width, bodyH)
 		footer = a.diffFooter()
+	case ScreenProfile:
+		header = a.profileHeader()
+		body = a.drawProfile(width, bodyH)
+		footer = a.profileFooter()
 	}
 
 	if headerH == 1 {
@@ -303,7 +307,24 @@ func (a *App) drawDetail(width, height int) []string {
 	}
 
 	if len(d.Commands) > 0 {
-		section("will run")
+		heading := "will run"
+		if a.UpToDate(a.DetailOf) {
+			// go-task's own answer to "would running this do anything". Saying it here is
+			// the difference between predicting that `⏎` does nothing and discovering it.
+			heading = "would run — but go-task says it is up to date"
+		}
+		section(heading)
+		if len(d.Requires) > 0 {
+			// `task --summary` expands the template before printing it, so a variable you
+			// have not supplied is substituted with nothing: `case "" in` where the real run
+			// would have `case "v0.3.0" in`. The panel is not hiding anything — `requires`
+			// is right above — but a command preview that quietly differs from the command
+			// is worse than one that says it does.
+			lines = append(lines, line{styled(
+				"  shown with "+strings.Join(d.Requires, ", ")+" unset — `a` supplies them",
+				fg(t.Colors.Notice),
+			)})
+		}
 		for _, cmd := range d.Commands {
 			// Another task, or a shell line — worth telling apart at a glance.
 			style, text := fg(t.Colors.Text), "  "+cmd
@@ -327,7 +348,13 @@ func (a *App) detailFooter() line {
 	if l, ok := a.confirmBar(); ok {
 		return l
 	}
-	return line{plain(" "), styled("j k scroll   ⏎ run   a args   esc back   q quit", fg(a.Theme.Colors.Dim))}
+	// Through the table like every other screen. This footer used to be a literal, which is
+	// exactly the drift the table exists to prevent: `e` was added to the section and this
+	// line went on listing four keys, and it could not report a status either.
+	if a.Status != "" {
+		return line{plain(" "), styled(a.Status, fg(a.Theme.Colors.Notice))}
+	}
+	return a.hintBar(&keys.DetailSection)
 }
 
 // --- help -------------------------------------------------------------------------
@@ -494,6 +521,10 @@ func (a *App) drawSlotBar() line {
 			styled(slot.Root, nameStyle),
 			styled(" "+duration(slot.Elapsed), fg(t.Colors.Dim)),
 		)
+		// A slot quitting will not take down should say so where you choose between slots.
+		if a.IsDetached(slot.Seq) {
+			l = append(l, styled(" detached", fg(t.Colors.Stored)))
+		}
 	}
 	return l
 }
@@ -622,6 +653,13 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 			styled(glyph, fg(t.Colors.Faint)),
 			styled(statusGlyph(status, t)+" ", fgBold(statusStyle(status, t))),
 			styled(row.Name, nameStyle),
+		}
+
+		// The reason a task did not run belongs next to the task, not in the parent's output
+		// where go-task printed it. `⇧R` is the answer to most of them, and the footer
+		// already offers it.
+		if hasTask && tr.Note != "" {
+			l = append(l, styled("  "+tr.Note, fg(t.Colors.StatusSkipped)))
 		}
 
 		var tail strings.Builder
@@ -962,9 +1000,19 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 		labelStyle = bold()
 	}
 
+	// A marked task takes its guide column for the mark. That column is one wide and always
+	// there, so the mark costs no width and lands where the eye already runs down the list —
+	// which is the whole reason to put it there rather than in the signal column, where it
+	// would compete with how the task went last time.
+	glyphStyle := fg(t.Colors.Faint)
+	if node.Task != pivot.NoTask && a.IsMarked(a.Tasks[node.Task].Name) {
+		glyph = g.Marked + " "
+		glyphStyle = fgBold(t.Colors.Marked)
+	}
+
 	l := line{
 		styled(indent, fg(t.Colors.Faint)),
-		styled(glyph, fg(t.Colors.Faint)),
+		styled(glyph, glyphStyle),
 		styled(node.Label, labelStyle),
 	}
 	used := max(1, row.Depth)*2 + utf8.RuneCountInString(node.Label)
@@ -1198,6 +1246,24 @@ func (a *App) confirmBar() (line, bool) {
 		default:
 			why = fmt.Sprintf("  —  %d runs are still going, and quitting stops them.  ", pending.Live)
 		}
+		// The detached ones are the point of having detached them, and a prompt that only
+		// counted what it was about to kill would be leaving out the good news.
+		if n := pending.Detached; n > 0 {
+			why = strings.TrimSuffix(why, "  ") +
+				fmt.Sprintf(
+					"  %s will keep running.  ",
+					plural(n, "1 detached run", fmt.Sprintf("%d detached runs", n)),
+				)
+		}
+	case ConfirmRunMarked:
+		verb, does = " run ", " to run"
+		subject = fmt.Sprintf("%d marked tasks", pending.Live)
+		if pending.Live == 1 {
+			subject = "1 marked task"
+		}
+		// Named, because the whole reason this is one question rather than several is that
+		// the dangerous ones are in a batch with tasks that are not.
+		why = "  —  " + pending.Name + " touches production.  "
 	case ConfirmStopAll:
 		verb, does = " stop ", " to stop"
 		subject = fmt.Sprintf("all %d runs", pending.Live)
@@ -1272,6 +1338,22 @@ func (a *App) argsPrompt() (line, bool) {
 	return l, true
 }
 
+// markBar replaces the hints while a set is waiting: `⏎` means something different with
+// marks set, and a footer that went on saying "run" would be describing the other keymap.
+func (a *App) markBar() (line, bool) {
+	n := len(a.marked)
+	if n == 0 {
+		return nil, false
+	}
+	t := a.Theme
+	return line{
+		plain(" "),
+		styled(t.Glyphs.Marked+" ", fgBold(t.Colors.Marked)),
+		styled(fmt.Sprintf("%d marked", n), fgBold(t.Colors.Marked)),
+		styled("   ⏎ run them   m unmark   ⇧M clear", fg(t.Colors.Dim)),
+	}, true
+}
+
 func (a *App) pickerFooter() line {
 	t := a.Theme
 	if l, ok := a.confirmBar(); ok {
@@ -1294,6 +1376,11 @@ func (a *App) pickerFooter() line {
 		return append(l, styled("   ⇥ next   ⏎ stay   esc go back", fg(t.Colors.Dim)))
 	}
 	if l, ok := a.argsPrompt(); ok {
+		return l
+	}
+	// After the prompts, before the status: a prompt owns the footer while it is open, and
+	// a status message is transient where a set of marks is a state you are holding.
+	if l, ok := a.markBar(); ok {
 		return l
 	}
 	if a.Filtering {

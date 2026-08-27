@@ -57,6 +57,10 @@ const (
 	Edit
 	Timeline
 	Diff
+	Profile
+	Mark
+	ClearMarks
+	Detach
 )
 
 type binding struct {
@@ -103,6 +107,10 @@ var defaults = []binding{
 	{Edit, 'e', "edit"},
 	{Timeline, 'H', "timeline"},
 	{Diff, 'D', "diff"},
+	{Profile, 'T', "profile"},
+	{Mark, 'm', "mark"},
+	{ClearMarks, 'M', "clear-marks"},
+	{Detach, 'A', "detach"},
 }
 
 var pickerActions = []Action{
@@ -113,6 +121,9 @@ var pickerActions = []Action{
 	Filter,
 	History,
 	Timeline,
+	Edit,
+	Mark,
+	ClearMarks,
 	ResumeRun,
 	Interactive,
 	Force,
@@ -151,6 +162,8 @@ var runActions = []Action{
 	History,
 	Timeline,
 	Diff,
+	Profile,
+	Detach,
 	Help,
 	Quit,
 }
@@ -160,6 +173,8 @@ var historyActions = []Action{Search, AllProjects, Help, Quit}
 // The timeline is a list of one task's runs, and the diff is what changed between two of
 // them — so `D` belongs there as much as it does in the run view.
 var timelineActions = []Action{Diff, Help, Quit}
+
+var profileActions = []Action{Edit, Help, Quit}
 
 // The diff view can reach an editor too: a `file:line` in a line that just appeared is
 // the most direct answer the tool has to "what broke".
@@ -230,6 +245,7 @@ type Keymap struct {
 	history  []bound
 	timeline []bound
 	diff     []bound
+	profile  []bound
 }
 
 func NewKeymap() *Keymap {
@@ -246,6 +262,7 @@ func NewKeymap() *Keymap {
 		history:  build(historyActions),
 		timeline: build(timelineActions),
 		diff:     build(diffActions),
+		profile:  build(profileActions),
 	}
 }
 
@@ -254,13 +271,13 @@ func (k *Keymap) Clone() *Keymap {
 	cp := func(in []bound) []bound { return append([]bound(nil), in...) }
 	return &Keymap{
 		picker: cp(k.picker), run: cp(k.run), history: cp(k.history),
-		timeline: cp(k.timeline), diff: cp(k.diff),
+		timeline: cp(k.timeline), diff: cp(k.diff), profile: cp(k.profile),
 	}
 }
 
 // Rebind points an action at a different key, wherever that action is available.
 func (k *Keymap) Rebind(action Action, key rune) {
-	for _, m := range [][]bound{k.picker, k.run, k.history, k.timeline, k.diff} {
+	for _, m := range [][]bound{k.picker, k.run, k.history, k.timeline, k.diff, k.profile} {
 		for i := range m {
 			if m[i].action == action {
 				m[i].key = key
@@ -274,6 +291,7 @@ func (k *Keymap) Run(key rune) Action      { return look(k.run, key) }
 func (k *Keymap) History(key rune) Action  { return look(k.history, key) }
 func (k *Keymap) Timeline(key rune) Action { return look(k.timeline, key) }
 func (k *Keymap) Diff(key rune) Action     { return look(k.diff, key) }
+func (k *Keymap) Profile(key rune) Action  { return look(k.profile, key) }
 
 // look returns the first match, so a rebinding that collides with another action shadows
 // it rather than doing both.
@@ -299,6 +317,7 @@ func (k *Keymap) Conflicts() []string {
 		{"history", k.history},
 		{"timeline", k.timeline},
 		{"diff", k.diff},
+		{"profile", k.profile},
 	} {
 		for i, b := range screen.m {
 			for _, earlier := range screen.m[:i] {
@@ -348,7 +367,9 @@ var Picker = Section{
 		b("p", "toggle the pivot: by domain / by verb"),
 		f("space o", "fold or unfold a group", "fold"),
 		b("⇧O ⇥", "fold or unfold everything"),
-		f("⏎", "run the task", "run"),
+		f("⏎", "run the task, or every marked one", "run"),
+		f("m", "mark a task to run alongside others", "mark"),
+		b("⇧M", "clear every mark"),
 		f("a", "run it with arguments", "args"),
 		f("i", "arm interactive mode for the next run", "interactive"),
 		b("⇧F", "arm --force: ignore go-task's up-to-date checks"),
@@ -357,6 +378,7 @@ var Picker = Section{
 		f("s", "what this task is, and what it will run", "detail"),
 		f("v", "go to whatever is running, or the last run", "watch"),
 		b("⇧H", "how this one task has been going, run after run"),
+		b("e", "open this task's own definition in $EDITOR"),
 		f("h", "past runs", "history"),
 		b("x", "stop this task's run, wherever it is — again to kill it"),
 		b("⇧K", "stop every run, staying here"),
@@ -395,12 +417,14 @@ var Run = Section{
 		f("e", "open the file:line under the cursor in $EDITOR", "edit"),
 		b("⇧D", "what changed since this task last passed"),
 		b("⇧H", "how this one task has been going, run after run"),
+		b("⇧T", "where this run's time went, slowest first"),
 		b("w", "resume following the running task"),
 		b("⇧W", "watch: re-run this task whenever the source changes"),
 		b("h", "past runs"),
 		f("⇥ ⇧⇥", "switch to the next / previous run", "switch"),
 		b("1…9", "switch straight to that slot"),
 		b("⇧X", "close the slot — only once its run has stopped"),
+		b("⇧A", "detach: let this run outlive taskui, output stops here"),
 		b("?", "this screen"),
 		f("esc", "back to the picker — every run keeps going", "back"),
 		b("q", "quit, stopping every run — asks first"),
@@ -450,14 +474,30 @@ var DiffSection = Section{
 	},
 }
 
+var ProfileSection = Section{
+	Title: "Profile",
+	Note:  "where a run's time went",
+	Bindings: []Binding{
+		b("j k ↑ ↓", "move"),
+		b("gg G", "first / last row"),
+		f("⏎", "go to that task in the run", "go to"),
+		f("e", "open its definition in $EDITOR", "edit"),
+		b("?", "this screen"),
+		f("esc", "back to the run", "back"),
+		b("q", "quit"),
+	},
+}
+
 var DetailSection = Section{
 	Title: "Detail",
 	Note:  "what a task is, before you run it",
 	Bindings: []Binding{
 		b("j k", "scroll"),
-		b("⏎", "run it"),
-		b("a", "run it with arguments"),
-		b("s esc", "back"),
+		f("⏎", "run it", "run"),
+		f("a", "run it with arguments", "args"),
+		f("e", "open this task's own definition in $EDITOR", "edit"),
+		f("s esc", "back", "back"),
+		b("q", "quit"),
 	},
 }
 
@@ -473,7 +513,8 @@ var Prompts = Section{
 }
 
 var Sections = []*Section{
-	&Picker, &Run, &HistorySection, &TimelineSection, &DiffSection, &DetailSection, &Prompts,
+	&Picker, &Run, &HistorySection, &TimelineSection, &DiffSection, &ProfileSection, &DetailSection,
+	&Prompts,
 }
 
 // FooterHints is the bindings a section puts in the footer, in table order, each already

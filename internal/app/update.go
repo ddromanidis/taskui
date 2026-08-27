@@ -55,6 +55,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.PollRun()
 		a.PollWatch()
+		a.collectDetails()
+		a.refreshProfile()
 		return a, a.tick()
 
 	case tea.KeyMsg:
@@ -64,6 +66,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.PollRun()
 		a.PollWatch()
+		a.refreshProfile()
 		return a, a.launchEditor()
 	}
 	return a, nil
@@ -265,6 +268,8 @@ func (a *App) action(k Key, screen Screen) keys.Action {
 		return a.Keymap.Timeline(k.ch)
 	case ScreenDiff:
 		return a.Keymap.Diff(k.ch)
+	case ScreenProfile:
+		return a.Keymap.Profile(k.ch)
 	default:
 		return keys.None
 	}
@@ -282,7 +287,7 @@ func (a *App) action(k Key, screen Screen) keys.Action {
 // the last task finished. A key that sometimes exits instantly is a key you learn not to
 // press.
 func (a *App) quit() bool {
-	a.Confirm = &Confirm{Kind: ConfirmQuit, Live: a.InFlightCount()}
+	a.Confirm = &Confirm{Kind: ConfirmQuit, Live: a.InFlightCount(), Detached: a.DetachedCount()}
 	return false
 }
 
@@ -317,6 +322,8 @@ func (a *App) handleKey(k Key) bool {
 		return a.handleTimelineKey(k)
 	case ScreenDiff:
 		return a.handleDiffKey(k)
+	case ScreenProfile:
+		return a.handleProfileKey(k)
 	case ScreenPicker:
 		// Handled below, once the prompts have had their turn.
 	}
@@ -401,6 +408,9 @@ func (a *App) handleDetailKey(k Key) bool {
 			a.CloseDetail()
 			a.BeginArgs(name)
 		}
+	// Reading what a task will run is the moment you most want to change it.
+	case k.isChar('e'):
+		a.EditDefinition(a.DetailOf)
 	}
 	return false
 }
@@ -535,7 +545,11 @@ func (a *App) handlePickerKey(k Key) bool {
 	case k.isChar(' '):
 		a.ToggleFold()
 	case k.kind == keyEnter:
-		if ti := a.SelectedTask(); ti >= 0 {
+		// Marks first: having chosen a set, `⏎` means run the set. Running whatever the
+		// cursor happens to be on instead would quietly discard the choice.
+		if len(a.marked) > 0 {
+			a.RunMarked()
+		} else if ti := a.SelectedTask(); ti >= 0 {
 			a.RequestRun(a.Tasks[ti].Name, nil)
 		} else {
 			what := ""
@@ -600,6 +614,11 @@ func (a *App) handlePickerKey(k Key) bool {
 	case act() == keys.Timeline:
 		a.OpenTimeline(a.TimelineTaskFor())
 
+	// In a run `e` opens the file an error named; here there is no error, so it opens the
+	// thing you are actually looking at — the task's own definition.
+	case act() == keys.Edit:
+		a.EditDefinition(a.TimelineTaskFor())
+
 	// Stop the run belonging to the task under the cursor. Addressing it by name is what
 	// makes this reach the slots that are not on screen — which, from here, is all of them.
 	case act() == keys.Stop:
@@ -611,6 +630,13 @@ func (a *App) handlePickerKey(k Key) bool {
 
 	case act() == keys.StopAll:
 		a.RequestStopAll()
+
+	// Choose a set, then start it. Slots already hold several runs; this is how you fill
+	// them without three trips back through the list.
+	case act() == keys.Mark:
+		a.ToggleMark()
+	case act() == keys.ClearMarks:
+		a.ClearMarks()
 	}
 	return false
 }
@@ -805,6 +831,11 @@ func (a *App) handleRunKey(k Key) bool {
 	case act() == keys.Timeline:
 		a.OpenTimeline(a.TimelineTaskFor())
 
+	// Where the whole run's time went. Every task already shows its own clock in tree
+	// order, which answers "is this step slow" and not "what makes this take four minutes".
+	case act() == keys.Profile:
+		a.OpenProfile()
+
 	case k.kind == keyPageDown:
 		a.RunMoveCursor(15)
 	case k.kind == keyPageUp:
@@ -829,6 +860,10 @@ func (a *App) handleRunKey(k Key) bool {
 		a.CycleSlot(-1)
 	case act() == keys.CloseSlot:
 		a.CloseSlot()
+
+	// Let it go. Quitting stops being responsible for it; `x` still is not.
+	case act() == keys.Detach:
+		a.Detach()
 
 	// Search the output. `/` in the picker filters task names; here it searches what those
 	// tasks printed. Different corpora, deliberately different jobs.
@@ -916,6 +951,46 @@ func (a *App) handleTimelineKey(k Key) bool {
 
 	case k.kind == keyEnter:
 		a.OpenTimelineRun()
+	}
+	return false
+}
+
+func (a *App) handleProfileKey(k Key) bool {
+	act := func() keys.Action { return a.action(k, ScreenProfile) }
+
+	switch {
+	case act() == keys.Quit, k.isCtrl('c'):
+		return a.quit()
+	case k.kind == keyEsc:
+		a.CloseProfile()
+	case act() == keys.Help:
+		a.ToggleHelp()
+
+	case k.isChar('j'), k.kind == keyDown:
+		a.ProfileMoveCursor(1)
+	case k.isChar('k'), k.kind == keyUp:
+		a.ProfileMoveCursor(-1)
+	case k.isCtrl('d'):
+		a.ProfileMoveCursor(a.HalfPage())
+	case k.isCtrl('u'):
+		a.ProfileMoveCursor(-a.HalfPage())
+	case k.kind == keyPageDown:
+		a.ProfileMoveCursor(15)
+	case k.kind == keyPageUp:
+		a.ProfileMoveCursor(-15)
+	case k.kind == keyHome:
+		a.ProfileMoveCursor(-len(a.ProfileRows))
+	case k.kind == keyEnd:
+		a.ProfileMoveCursor(len(a.ProfileRows))
+
+	// The point of finding the slow step is going to look at it.
+	case k.kind == keyEnter:
+		a.GotoProfiledTask()
+
+	case act() == keys.Edit:
+		if cost, ok := a.SelectedCost(); ok {
+			a.EditDefinition(cost.Name)
+		}
 	}
 	return false
 }

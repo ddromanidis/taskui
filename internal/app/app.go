@@ -44,6 +44,8 @@ const (
 	ScreenTimeline
 	// ScreenDiff is what changed between two runs of one task.
 	ScreenDiff
+	// ScreenProfile is where a run's time went.
+	ScreenProfile
 )
 
 // Fold is how much of a task's output is on screen.
@@ -120,6 +122,9 @@ const (
 	ConfirmRun ConfirmKind = iota
 	ConfirmQuit
 	ConfirmStopAll
+	// ConfirmRunMarked is a whole batch at once. Asking per task would put a prompt between
+	// each pair of starts, which is not a confirmation, it is an obstacle course.
+	ConfirmRunMarked
 )
 
 // Confirm is something waiting on a yes.
@@ -138,6 +143,9 @@ type Confirm struct {
 	// what the prompt says, and re-counting as runs finish under it would make the number
 	// move while you read it.
 	Live int
+	// Detached is how many will survive it, counted at the same moment and for the same
+	// reason.
+	Detached int
 }
 
 // stopRun stops a run, escalating on a second ask, and says what happened.
@@ -220,6 +228,10 @@ type App struct {
 	Filtering bool
 	Query     string
 
+	// marked is the set `⏎` runs at once. Nil until something is marked, so the common case
+	// of running one task costs nothing.
+	marked map[string]bool
+
 	Root   string
 	Status string
 	Theme  theme.Theme
@@ -231,6 +243,10 @@ type App struct {
 	Run *run.Run
 	// Parked holds runs that are open but not on screen, still going.
 	Parked []Parked
+	// detached marks the slots quitting will leave alone. Keyed by slot rather than held on
+	// the run, so the decision survives switching focus and parking.
+	detached map[uint64]bool
+
 	// FocusSeq is which slot Run occupies. Zero before anything has ever run.
 	FocusSeq  uint64
 	nextSeq   uint64
@@ -313,6 +329,8 @@ type App struct {
 	Timeline       []store.Point
 	TimelineCursor int
 	TimelineOffset int
+	// TimelineFlakes are the commits at which this task went both ways.
+	TimelineFlakes []store.Flake
 	timelineReturn Screen
 
 	DiffOf string
@@ -330,6 +348,19 @@ type App struct {
 	DiffContext int
 	diffEdits   []diff.Edit
 	diffReturn  Screen
+
+	// Details is what `--list-all --json` knows and the text form does not: where each task
+	// is written, and whether go-task thinks it is up to date. Filled in from a background
+	// goroutine, because computing it can take seconds on a workspace with a lot of
+	// `sources:` globs and the UI is usable without it.
+	Details  map[string]task.Detail
+	detailCh chan map[string]task.Detail
+
+	// Where the run on screen spent its time, slowest first.
+	ProfileRows   []Cost
+	ProfileCursor int
+	ProfileOffset int
+	profileReturn Screen
 
 	// locs indexes the project so a `file:line` in captured output can be opened. Built on
 	// first use — most sessions never press `e`.
@@ -417,6 +448,90 @@ func New(tasks []task.Task, root string) *App {
 	a.Rebuild(-1)
 	a.ReloadOutcomes()
 	return a
+}
+
+// StartEnrichment fetches the JSON listing in the background.
+//
+// Opt-in rather than automatic in New: it shells out to `task`, and the several hundred
+// tests that build an App from a fixture have no Taskfile to shell out to and no interest
+// in one.
+func (a *App) StartEnrichment() {
+	if a.detailCh != nil {
+		return
+	}
+	ch := make(chan map[string]task.Detail, 1)
+	a.detailCh = ch
+	root := a.Root
+	go func() {
+		details, err := task.Details(root)
+		if err != nil {
+			// A listing that cannot be had costs two conveniences and nothing else. Saying
+			// so in the status bar would push a real message off it for a feature the user
+			// has not asked for yet.
+			close(ch)
+			return
+		}
+		ch <- details
+		close(ch)
+	}()
+}
+
+// collectDetails takes the JSON listing if it has arrived. Non-blocking: it is called from
+// the poll loop, which must not wait for anything.
+func (a *App) collectDetails() bool {
+	if a.detailCh == nil {
+		return false
+	}
+	select {
+	case details, ok := <-a.detailCh:
+		a.detailCh = nil
+		if !ok || details == nil {
+			return false
+		}
+		a.Details = details
+		return true
+	default:
+		return false
+	}
+}
+
+// AwaitDetails blocks until the listing lands or the grace runs out.
+//
+// For the paths that render one frame and exit. A screenshot is a picture of a loaded UI,
+// and one taken before the listing arrived would show a different thing every time
+// depending on how the race went — which is the opposite of what `--screenshot` is for.
+func (a *App) AwaitDetails(grace time.Duration) {
+	if a.detailCh == nil {
+		return
+	}
+	select {
+	case details, ok := <-a.detailCh:
+		a.detailCh = nil
+		if ok {
+			a.Details = details
+		}
+	case <-time.After(grace):
+		// Leave the channel in place — the poll loop will pick it up if this is not a
+		// one-frame process after all.
+	}
+}
+
+// WhereIs is where a task is written, once the listing has arrived.
+func (a *App) WhereIs(name string) (task.Where, bool) {
+	d, ok := a.Details[name]
+	if !ok || !d.Where.Ok() {
+		return task.Where{}, false
+	}
+	return d.Where, true
+}
+
+// UpToDate is go-task's own answer to "would running this do anything".
+//
+// Only `sources:`/`generates:` — a task gated by `status:` reports false here and still
+// skips, which is go-task's answer and not one to improve on locally.
+func (a *App) UpToDate(name string) bool {
+	d, ok := a.Details[name]
+	return ok && d.UpToDate
 }
 
 // StateDir is where this app archives its runs.
@@ -526,6 +641,9 @@ func (a *App) ConfirmYes() bool {
 		return false
 	case ConfirmStopAll:
 		a.StopAll()
+		return false
+	case ConfirmRunMarked:
+		a.startMarked(a.Marked(), MaxSlots-a.openSlots())
 		return false
 	default:
 		return true
@@ -1222,6 +1340,9 @@ func (a *App) GotoTop() {
 	case ScreenDiff:
 		a.DiffCursor = 0
 		a.DiffOffset = 0
+	case ScreenProfile:
+		a.ProfileCursor = 0
+		a.ProfileOffset = 0
 	}
 }
 
@@ -1245,6 +1366,8 @@ func (a *App) GotoBottom() {
 		a.TimelineCursor = max(0, len(a.Timeline)-1)
 	case ScreenDiff:
 		a.DiffCursor = max(0, len(a.DiffRows)-1)
+	case ScreenProfile:
+		a.ProfileCursor = max(0, len(a.ProfileRows)-1)
 	}
 }
 
@@ -2143,7 +2266,13 @@ func (a *App) RunInFlight() bool { return a.Run != nil && !a.Run.Finished() }
 
 // AnyInFlight is true while any slot still has a child out there. Quitting without dealing
 // with them would leave containers running with nothing watching them.
-func (a *App) AnyInFlight() bool {
+// AnyInFlight is what quitting waits for, so it counts only the runs quitting is still
+// responsible for. A detached one is going to outlive the wait by design.
+func (a *App) AnyInFlight() bool { return len(a.attachedRuns()) > 0 }
+
+// AnyRunning includes the detached ones — for anything asking "is something happening",
+// which is a different question from "is something holding up the exit".
+func (a *App) AnyRunning() bool {
 	if a.RunInFlight() {
 		return true
 	}
@@ -2156,26 +2285,14 @@ func (a *App) AnyInFlight() bool {
 }
 
 // InFlightCount is how many slots are still going, for the quit prompt.
-func (a *App) InFlightCount() int {
-	n := 0
-	if a.RunInFlight() {
-		n++
-	}
-	for _, p := range a.Parked {
-		if !p.Run.Finished() {
-			n++
-		}
-	}
-	return n
-}
+func (a *App) InFlightCount() int { return len(a.attachedRuns()) }
 
 // CancelAll stops every slot. Used on the way out.
+// CancelAll stops everything quitting is responsible for — which is not everything. `x`
+// still reaches a detached run; this is the blanket that no longer covers it.
 func (a *App) CancelAll() {
-	if a.Run != nil {
-		a.Run.Cancel()
-	}
-	for _, p := range a.Parked {
-		p.Run.Cancel()
+	for _, r := range a.attachedRuns() {
+		r.run.Cancel()
 	}
 }
 
@@ -2183,11 +2300,8 @@ func (a *App) CancelAll() {
 // been sent and given time to work: a process that ignored it is about to be orphaned, and
 // an orphaned container is worse than a skipped cleanup handler.
 func (a *App) KillAll() {
-	if a.Run != nil {
-		a.Run.Kill()
-	}
-	for _, p := range a.Parked {
-		p.Run.Kill()
+	for _, r := range a.attachedRuns() {
+		r.run.Kill()
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -28,8 +29,11 @@ import (
 const KeepRuns = 50
 
 type TaskEntry struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	// Note is why it did not run, when it did not. Omitted-friendly, so manifests written
+	// before skips were explained still load.
+	Note       string `json:"note,omitempty"`
 	DurationMs int64  `json:"duration_ms"`
 	Lines      int    `json:"lines"`
 	// File is the basename, without extension: `<file>.txt` and `<file>.ansi`.
@@ -46,7 +50,12 @@ type Manifest struct {
 	// Force likewise defaults to false for older manifests.
 	Force bool `json:"force,omitempty"`
 	// Dir is the project directory it ran in.
-	Dir         string `json:"dir"`
+	Dir string `json:"dir"`
+	// Commit is the git revision the project was at. Recorded so "passed and failed at the
+	// same commit" — which is what flaky means and what alternating outcomes only hint at —
+	// is a fact rather than a guess. Empty for a directory that is not a git checkout, and
+	// for every manifest written before this existed.
+	Commit      string `json:"commit,omitempty"`
 	StartedUnix int64  `json:"started_unix"`
 	DurationMs  int64  `json:"duration_ms"`
 	Exit        int    `json:"exit"`
@@ -162,6 +171,7 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 		entries = append(entries, TaskEntry{
 			Name:       name,
 			Status:     t.Status.String(),
+			Note:       t.Note,
 			DurationMs: t.Duration().Milliseconds(),
 			Lines:      len(t.Lines),
 			File:       file,
@@ -174,6 +184,7 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 		Args:            r.Args,
 		Force:           r.Force,
 		Dir:             projectDir,
+		Commit:          headCommit(projectDir),
 		StartedUnix:     started,
 		DurationMs:      r.Duration.Milliseconds(),
 		Exit:            exitOf(r),
@@ -222,6 +233,33 @@ func uniqueID(base, want string) string {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// headCommit is the project's git revision, or empty.
+//
+// Best effort by design: not every project is a checkout, and a run in one that is not is
+// still a run worth keeping. A dirty tree is reported as the commit plus `-dirty`, because
+// two runs of uncommitted work are not two runs of the same code and calling them flaky
+// would be wrong.
+func headCommit(dir string) string {
+	head, err := gitOutput(dir, "rev-parse", "HEAD")
+	if err != nil || head == "" {
+		return ""
+	}
+	if status, err := gitOutput(dir, "status", "--porcelain"); err == nil && status != "" {
+		return head + "-dirty"
+	}
+	return head
+}
+
+func gitOutput(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func exitOf(r *run.Run) int {
@@ -287,11 +325,13 @@ func Load(base string, manifest Manifest) (*run.Run, error) {
 		if len(lines) > 0 {
 			order = append(order, entry.Name)
 		}
-		tasks[entry.Name] = run.RestoredTask(
+		restored := run.RestoredTask(
 			run.StatusFromString(entry.Status),
 			lines,
 			time.Duration(entry.DurationMs)*time.Millisecond,
 		)
+		restored.Note = entry.Note
+		tasks[entry.Name] = restored
 	}
 
 	edges := manifest.Edges
@@ -367,8 +407,10 @@ type Point struct {
 	// Root is the run it was part of. `test:one` reached from a `task all` and from a `task
 	// test:one` are the same task and different circumstances, and the difference explains
 	// most of the surprising durations.
-	Root       string
-	WhenUnix   int64
+	Root     string
+	WhenUnix int64
+	// Commit is the git revision the project was at, or empty.
+	Commit     string
 	Status     string
 	DurationMs int64
 	Lines      int
@@ -400,7 +442,7 @@ func Timeline(base, project, task string) []Point {
 				continue
 			}
 			out = append(out, Point{
-				RunID: m.ID, Root: m.Root, WhenUnix: m.StartedUnix,
+				RunID: m.ID, Root: m.Root, WhenUnix: m.StartedUnix, Commit: m.Commit,
 				Status: e.Status, DurationMs: e.DurationMs, Lines: e.Lines, File: e.File,
 			})
 		}
@@ -451,4 +493,74 @@ func Prune(base string, keep int) (int, error) {
 		}
 	}
 	return removed, nil
+}
+
+// Flake is a task that has both passed and failed at the same commit.
+type Flake struct {
+	Task string
+	// Commit is where it happened, and Passed/Failed how many times each way.
+	Commit         string
+	Passed, Failed int
+	// LastUnix is the most recent of the runs involved, for ordering the report.
+	LastUnix int64
+}
+
+// Flaky finds the tasks whose result depends on something other than the code.
+//
+// Same commit, both outcomes. That is the whole definition, and it is why the commit is
+// recorded at all — alternating results across a series only *suggest* flakiness, because
+// the obvious explanation is that somebody broke it and fixed it. Two different answers to
+// the same question is not suggestive of anything, it is the thing itself.
+//
+// Runs from a dirty tree are excluded: `headCommit` marks them, and two runs of uncommitted
+// work are not two runs of the same code.
+func Flaky(base, project string) []Flake {
+	type key struct{ task, commit string }
+	seen := map[key]*Flake{}
+
+	for _, m := range List(base) {
+		if (project != "" && m.Dir != project) || m.Commit == "" || strings.HasSuffix(m.Commit, "-dirty") {
+			continue
+		}
+		for _, e := range m.Tasks {
+			if e.Status != "Ok" && e.Status != "Failed" {
+				continue
+			}
+			k := key{e.Name, m.Commit}
+			f, ok := seen[k]
+			if !ok {
+				f = &Flake{Task: e.Name, Commit: m.Commit}
+				seen[k] = f
+			}
+			if e.Status == "Ok" {
+				f.Passed++
+			} else {
+				f.Failed++
+			}
+			f.LastUnix = max(f.LastUnix, m.StartedUnix)
+		}
+	}
+
+	var out []Flake
+	for _, f := range seen {
+		if f.Passed > 0 && f.Failed > 0 {
+			out = append(out, *f)
+		}
+	}
+	// Most recent first, then by name so the order is stable when timestamps collide.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].LastUnix != out[j].LastUnix {
+			return out[i].LastUnix > out[j].LastUnix
+		}
+		return out[i].Task < out[j].Task
+	})
+	return out
+}
+
+// Short is the commit, abbreviated for display.
+func (f Flake) Short() string {
+	if len(f.Commit) > 7 {
+		return f.Commit[:7]
+	}
+	return f.Commit
 }

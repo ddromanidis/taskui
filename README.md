@@ -19,7 +19,7 @@ previous runs.
 
 ## What it is
 
-Six screens, one keymap.
+Seven screens, one keymap.
 
 **The picker** is the Taskfile as a fold tree, which it already is — `backend:migrate:down`
 is a path, not a name. It pivots: by domain (`backend` › `migrate` › `down`) or by verb
@@ -51,8 +51,13 @@ in which it passed, elides the hundreds of lines both runs share, and leaves you
 few that are new. Nothing else on your machine can do this, because nothing else kept both
 runs.
 
+**A profile** is where a run's time went. `⇧T` ranks its tasks by *self* time — what each
+spent on its own commands rather than waiting for its children — so `task all` does not sit
+at the top of every profile saying nothing.
+
 And `e` opens the file. A `file:line` anywhere in captured output is underlined, and `e`
-launches `$EDITOR` on it at that line.
+launches `$EDITOR` on it at that line. In the picker there is no error to follow, so `e`
+opens the task's own definition in the Taskfile instead.
 
 ## Why
 
@@ -180,6 +185,7 @@ taskui --run all              # run headlessly and print the captured tree
 taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
 taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
+taskui --flaky                # tasks that went both ways at one commit
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'g/lint')
 ```
 
@@ -200,13 +206,15 @@ In the picker:
 | `j` `k` `↑` `↓` | move |
 | `space` `o` `←` `→` | fold / unfold |
 | `⇧O` `⇥` | fold or unfold everything |
-| `⏎` | run |
+| `⏎` | run — or every marked task, each in its own slot |
 | `p` | toggle the pivot |
 | `a` | run with arguments |
 | `i` | arm interactive mode for the next run |
 | `/` | filter by name |
 | `t` | jump to a task, leaving the list intact |
 | `s` | what this task is, and what it will run |
+| `m` `⇧M` | mark a task to run alongside others / clear the marks |
+| `e` | open this task's definition in `$EDITOR` |
 | `v` | go to whatever is running, or the last run |
 | `h` | past runs, across the project |
 | `⇧H` | past runs of *this* task |
@@ -233,6 +241,8 @@ In a run:
 | `⇧K` | stop every run |
 | `⇥` `⇧⇥` `1`…`9` | switch between open runs |
 | `⇧X` | close the slot (once its run has stopped) |
+| `⇧A` | detach: let this run outlive taskui |
+| `⇧T` | where this run's time went |
 | `w` | resume following |
 | `y` `⇧Y` | copy the line, or everything the task printed |
 | `e` | open the `file:line` under the cursor in `$EDITOR` |
@@ -258,6 +268,15 @@ In a diff:
 | `[` `]` | less / more unchanged context |
 | `e` | open the `file:line` under the cursor in `$EDITOR` |
 | `esc` | back |
+
+In a profile (`⇧T`):
+
+| key | |
+|---|---|
+| `j` `k` `gg` `⇧G` | move |
+| `⏎` | go to that task in the run |
+| `e` | open its definition in `$EDITOR` |
+| `esc` | back to the run |
 
 ## Going where it broke
 
@@ -358,6 +377,94 @@ Both are scriptable, like everything else:
 taskui --timeline test   # one run per line, tab-separated
 taskui --diff test       # unified-ish, with the line numbers on the rows
 ```
+
+## Knowing what a run will do, and what it did
+
+### Why a task did not run
+
+go-task skips a task when its `sources:` are unchanged, its `status:` command passes, or a
+`precondition:` fails — and it says so, on a line with no `[name]` prefix, which lands in the
+*parent's* output several rows away from the `⏸` it explains. taskui copies the reason onto
+the task it is about:
+
+```
+ ▾ ✓ all
+   1   task: Task "cached" is up to date
+   2   task: Task "gated" is up to date
+     ⏸ cached  up to date
+     ⏸ gated  up to date
+   ▾ ✗ guarded  precondition not met
+```
+
+`⇧R` re-runs with `--force`, which is the answer to most of them. Before running anything,
+`s` says the same thing in advance — `would run — but go-task says it is up to date` — so
+that `⏎` doing nothing is a prediction rather than a discovery.
+
+### Where the time went
+
+`⇧T` in a run:
+
+```
+ taskui ▸ task all                                       2.1s total   4 tasks
+ ────────────────────────────────────────────────────────────────────────────
+▌✓     1.2s   58%  ▄▄▄▄▄▄▄▄  build
+ ✓    502ms   24%  ▄▄▄▄      test
+ ✓    208ms   10%  ▄▄        fmt
+ ✓      0ms    0%            all   1.9s inc.
+```
+
+Ranked by **self** time — what each task spent on its own commands, with its children's time
+subtracted. Ranked by total instead, every aggregate outranks every task that did any work
+and the profile announces that `all` is the slow one, which is true and useless. `all` sits
+at the bottom here with `1.9s inc.` beside it, which is the honest description of a task
+whose job is to invoke three others.
+
+It stays current while the run does, and holds still once the run stops. `⏎` goes to that
+task in the run view.
+
+### Flaky tasks
+
+Each run records the git revision it happened at, which makes flakiness a fact rather than a
+guess: **the same commit, both outcomes**. A task that failed and then passed has the obvious
+explanation that somebody fixed it, and only the commit tells those two apart.
+
+```
+$ taskui --flaky
+coinflip	d1f091a	4 passed	4 failed	just now
+-- 1 flaky
+```
+
+It exits non-zero when it finds any, so it composes: `taskui --flaky || echo "look into it"`.
+A task's timeline says so too, in the header — `flaky at d1f091a` — which is where you are
+already standing when you need to know whether a failure means anything. Runs from a dirty
+tree never count: two runs of uncommitted work are not two runs of the same code.
+
+### Running several at once
+
+Slots have always held six concurrent runs; filling them meant six trips through the picker.
+`m` marks a task, `⏎` runs every marked one in its own slot:
+
+```
+ ◉ all            Everything: format, lint, test, build
+ ├ check          Type-check and vet only — fastest feedback
+ ◉ clean          Remove build artifacts and Task's own run cache
+ ─────────────────────────────────────────────────────────────────
+ ◉ 2 marked   ⏎ run them   m unmark   ⇧M clear
+```
+
+A batch with anything on the danger list asks once for the whole set rather than putting a
+prompt between each pair of starts. More marks than free slots starts what it can and says
+what it left — a batch that quietly did less than you asked is worse than one that refuses.
+
+### Letting a run outlive taskui
+
+`⇧A` detaches the run in the focused slot. Quitting stops being responsible for it; `x` still
+is. The child is a session leader in its own process group, so it genuinely survives — that
+is verified rather than assumed, by killing taskui and watching the run keep working.
+
+What it cannot do is keep showing you the output: once taskui is gone the pty is closed and
+everything printed after that is lost. Which is why detaching archives what it has at that
+moment — otherwise a two-hour run leaves nothing behind.
 
 ## Two pivots
 

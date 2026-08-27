@@ -170,3 +170,27 @@ func (a *App) openLocationFrom(l loc.Loc, note string) {
 // consulted until a key is actually pressed, because this runs on every visible row of
 // every frame and the answer is only needed once.
 func locationsIn(text string) []loc.Loc { return loc.All(text) }
+
+// EditDefinition opens the Taskfile a task is written in, at its own line.
+//
+// The same key as the one that opens a `file:line` from output, because it is the same
+// intent: take me to the thing on screen. In a run that is whatever the error named; in the
+// picker there is no error, and the thing on screen is the task.
+func (a *App) EditDefinition(name string) {
+	if name == "" {
+		a.Status = "nothing here to open — space folds it"
+		return
+	}
+	where, ok := a.WhereIs(name)
+	if !ok {
+		// The listing arrives on a background goroutine and can take seconds on a workspace
+		// with a lot of `sources:` globs. Saying which of the two it is beats a bare no.
+		if a.Details == nil {
+			a.Status = "still reading the Taskfile — try `e` again in a moment"
+		} else {
+			a.Status = "go-task did not say where `" + name + "` is defined"
+		}
+		return
+	}
+	a.openLocationFrom(loc.Loc{Path: where.File, Line: where.Line}, "")
+}

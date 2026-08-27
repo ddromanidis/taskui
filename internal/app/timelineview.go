@@ -22,7 +22,15 @@ func (a *App) timelineHeader() line {
 			failed++
 		}
 	}
-	state := []span{styled(a.trend(), fg(t.Colors.Dim))}
+	var state []span
+	if n := len(a.TimelineFlakes); n > 0 {
+		where := a.TimelineFlakes[0].Short()
+		if n > 1 {
+			where = fmt.Sprintf("%d commits", n)
+		}
+		state = append(state, styled("flaky at "+where+"   ", fg(t.Colors.Notice)))
+	}
+	state = append(state, styled(a.trend(), fg(t.Colors.Dim)))
 	state = append(state, styled(
 		fmt.Sprintf("   %d %s   %d failed", len(a.Timeline), plural(len(a.Timeline), "run", "runs"), failed),
 		fg(t.Colors.Dim),
@@ -83,6 +91,12 @@ func (a *App) drawTimeline(width, height int) []string {
 		slowest = max(slowest, p.DurationMs)
 	}
 	barWidth := timelineBar(width)
+	// The commit is the last thing to earn its column and the first to lose it.
+	showCommit := width >= 104
+	flaky := map[string]bool{}
+	for _, f := range a.TimelineFlakes {
+		flaky[f.Commit] = true
+	}
 
 	out := make([]string, 0, height)
 	for i := a.TimelineOffset; i < len(a.Timeline) && len(out) < height; i++ {
@@ -100,10 +114,17 @@ func (a *App) drawTimeline(width, height int) []string {
 		if barWidth > 0 {
 			l = append(l, styled(padRight(bar(p.DurationMs, slowest, barWidth, t.Glyphs.Bar), barWidth+2), fg(colour)))
 		}
-		l = append(l,
-			styled(fmt.Sprintf("%6d lines  ", p.Lines), fg(t.Colors.Dim)),
-			styled(p.Command(), fg(theme.Default)),
-		)
+		l = append(l, styled(fmt.Sprintf("%6d lines  ", p.Lines), fg(t.Colors.Dim)))
+		if showCommit && p.Commit != "" {
+			// Dimmer than the command beside it: it is there to be compared with the rows
+			// above and below, not read.
+			style := fg(t.Colors.Faint)
+			if flaky[p.Commit] {
+				style = fg(t.Colors.Notice)
+			}
+			l = append(l, styled(padRight(shortCommit(p.Commit), 10), style))
+		}
+		l = append(l, styled(p.Command(), fg(theme.Default)))
 		out = append(out, l.renderRow(width, i == a.TimelineCursor, t, a.Phase))
 	}
 	return out
@@ -120,6 +141,19 @@ func bar(value, most int64, width int, glyph string) string {
 	}
 	cells := int((value*int64(width) + most - 1) / most)
 	return strings.Repeat(glyph, clamp(cells, 1, width))
+}
+
+// shortCommit abbreviates a revision, keeping the `-dirty` marker — a run of uncommitted
+// work is not a run of the commit it sits on, and the row should not claim otherwise.
+func shortCommit(commit string) string {
+	base, dirty := strings.CutSuffix(commit, "-dirty")
+	if len(base) > 7 {
+		base = base[:7]
+	}
+	if dirty {
+		return base + "*"
+	}
+	return base
 }
 
 func (a *App) timelineFooter() line {
@@ -271,4 +305,81 @@ func (a *App) diffFooter() line {
 		return line{plain(" "), styled(a.Status, fg(t.Colors.Notice))}
 	}
 	return a.hintBar(&keys.DiffSection)
+}
+
+// --- profile ------------------------------------------------------------------------
+
+func (a *App) profileHeader() line {
+	t := a.Theme
+	total := a.ProfileTotal()
+	state := []span{styled(duration(total)+" total", fg(t.Colors.Dim))}
+	if len(a.ProfileRows) > 0 {
+		state = append(state, styled(
+			fmt.Sprintf("   %d %s", len(a.ProfileRows), plural(len(a.ProfileRows), "task", "tasks")),
+			fg(t.Colors.Dim),
+		))
+	}
+	subject := "profile"
+	if a.Run != nil {
+		subject = a.Run.Command()
+	}
+	return a.header(subject, state)
+}
+
+func (a *App) drawProfile(width, height int) []string {
+	t := a.Theme
+	if len(a.ProfileRows) == 0 {
+		return nil
+	}
+	a.ProfileCursor = clamp(a.ProfileCursor, 0, len(a.ProfileRows)-1)
+	a.ProfileOffset = scrollTo(a.ProfileOffset, a.ProfileCursor, len(a.ProfileRows), height)
+
+	// Against the slowest row rather than the run's total: on a run where one step takes
+	// nine tenths of the time, bars drawn against the total leave every other row with no
+	// bar at all, and the comparison between those rows is the one still worth making.
+	slowest := a.ProfileRows[0].Self
+	total := a.ProfileTotal()
+	barWidth := timelineBar(width)
+
+	out := make([]string, 0, height)
+	for i := a.ProfileOffset; i < len(a.ProfileRows) && len(out) < height; i++ {
+		c := a.ProfileRows[i]
+
+		share := ""
+		if total > 0 {
+			share = fmt.Sprintf("%4.0f%%", 100*float64(c.Self)/float64(total))
+		}
+
+		l := line{
+			styled(statusGlyph(c.Status, t)+" ", fgBold(statusStyle(c.Status, t))),
+			styled(fmt.Sprintf("%8s ", duration(c.Self)), fg(t.Colors.Text)),
+			styled(share+"  ", fg(t.Colors.Dim)),
+		}
+		if barWidth > 0 {
+			l = append(l, styled(
+				padRight(bar(int64(c.Self), int64(slowest), barWidth, t.Glyphs.Bar), barWidth+2),
+				fg(statusStyle(c.Status, t)),
+			))
+		}
+		l = append(l, styled(c.Name, fg(theme.Default)))
+
+		// An aggregate's own time is nearly all its children's; saying so stops the row
+		// reading as though `all` were somehow slow by itself.
+		if c.Children > 0 {
+			l = append(l, styled(fmt.Sprintf("   %s inc.", duration(c.Duration)), fg(t.Colors.Faint)))
+		}
+		out = append(out, l.renderRow(width, i == a.ProfileCursor, t, a.Phase))
+	}
+	return out
+}
+
+func (a *App) profileFooter() line {
+	t := a.Theme
+	if l, ok := a.confirmBar(); ok {
+		return l
+	}
+	if a.Status != "" {
+		return line{plain(" "), styled(a.Status, fg(t.Colors.Notice))}
+	}
+	return a.hintBar(&keys.ProfileSection)
 }

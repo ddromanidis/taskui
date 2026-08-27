@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -489,5 +490,113 @@ func TestTwoRunsOfOneTaskInOneSecondBothSurvive(t *testing.T) {
 	// Newest first, and the newest is the failure.
 	if points[0].Ok() || !points[1].Ok() {
 		t.Errorf("out of order: %v then %v", points[0].Status, points[1].Status)
+	}
+}
+
+// --- flakes -------------------------------------------------------------------------
+
+// atCommit is agedRun plus the git revision the run happened at, written straight into the
+// manifest — Save reads the real repository, and a test must not depend on one.
+// atCommit archives a run of `test` at a given revision. The commit is written straight
+// into the manifest rather than derived: Save reads the real repository, and a test must not
+// depend on which one it happens to be sitting in.
+func atCommit(t *testing.T, base, project, commit string, ok bool, ago int) {
+	t.Helper()
+	dir, err := Save(base, project, agedRun("test", "test", ok, ago))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "manifest.json")
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m Manifest
+	if err := json.Unmarshal(blob, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Commit = commit
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Both outcomes at one commit is not suggestive of flakiness, it is flakiness: the code did
+// not change and the answer did.
+func TestBothOutcomesAtOneCommitIsAFlake(t *testing.T) {
+	base := t.TempDir()
+	atCommit(t, base, "/proj", "abc1234deadbeef", true, 300)
+	atCommit(t, base, "/proj", "abc1234deadbeef", false, 200)
+
+	flakes := Flaky(base, "/proj")
+	if len(flakes) != 1 {
+		t.Fatalf("got %d flakes, want 1: %+v", len(flakes), flakes)
+	}
+	if flakes[0].Task != "test" || flakes[0].Passed != 1 || flakes[0].Failed != 1 {
+		t.Errorf("got %+v", flakes[0])
+	}
+	if flakes[0].Short() != "abc1234" {
+		t.Errorf("short = %q", flakes[0].Short())
+	}
+}
+
+// The obvious explanation for a task that failed and then passed is that somebody fixed it.
+// Only the commit tells those two apart, which is why it is recorded.
+func TestFailingThenPassingAcrossACommitIsNotAFlake(t *testing.T) {
+	base := t.TempDir()
+	atCommit(t, base, "/proj", "broken0000", false, 300)
+	atCommit(t, base, "/proj", "fixed11111", true, 200)
+
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("called a fix a flake: %+v", got)
+	}
+}
+
+// Two runs of uncommitted work are not two runs of the same code.
+func TestADirtyTreeIsNeverFlaky(t *testing.T) {
+	base := t.TempDir()
+	atCommit(t, base, "/proj", "abc1234-dirty", true, 300)
+	atCommit(t, base, "/proj", "abc1234-dirty", false, 200)
+
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("a dirty tree cannot establish a flake: %+v", got)
+	}
+}
+
+// A project that is not a checkout still gets its runs kept; it just cannot answer this.
+func TestRunsWithNoCommitAreIgnored(t *testing.T) {
+	base := t.TempDir()
+	atCommit(t, base, "/proj", "", true, 300)
+	atCommit(t, base, "/proj", "", false, 200)
+
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestFlakesAreScopedToTheProject(t *testing.T) {
+	base := t.TempDir()
+	atCommit(t, base, "/elsewhere", "abc1234", true, 300)
+	atCommit(t, base, "/elsewhere", "abc1234", false, 200)
+
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("another project's flake leaked in: %+v", got)
+	}
+	if got := Flaky(base, "/elsewhere"); len(got) != 1 {
+		t.Errorf("its own project's flake went missing")
+	}
+}
+
+func TestASteadyTaskIsNotAFlake(t *testing.T) {
+	base := t.TempDir()
+	for i := range 5 {
+		atCommit(t, base, "/proj", "abc1234", true, 300-i*10)
+	}
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("got %+v", got)
 	}
 }

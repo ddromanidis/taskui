@@ -17,6 +17,7 @@
 package task
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -355,4 +356,69 @@ func Discover(dir string) ([]Task, error) {
 
 	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Name < tasks[j].Name })
 	return tasks, nil
+}
+
+// --- the JSON half -------------------------------------------------------------------
+
+// Where a task is defined.
+type Where struct {
+	File string
+	Line int
+}
+
+// Ok reports whether this location was actually filled in.
+func (w Where) Ok() bool { return w.File != "" && w.Line > 0 }
+
+// Detail is what `--list-all --json` knows that the text form does not: where each task is
+// written, and whether go-task currently considers it up to date.
+//
+// Kept separate from Task because it arrives later. Discover has to return before the first
+// frame; this can take four seconds on a workspace with a lot of `sources:` globs, and the
+// UI is perfectly usable in the meantime without it.
+type Detail struct {
+	Where    Where
+	UpToDate bool
+}
+
+// jsonListing is the shape of `task --list-all --json`, narrowed to what is read.
+type jsonListing struct {
+	Tasks []struct {
+		Name     string `json:"name"`
+		UpToDate bool   `json:"up_to_date"`
+		Location struct {
+			Taskfile string `json:"taskfile"`
+			Line     int    `json:"line"`
+		} `json:"location"`
+	} `json:"tasks"`
+}
+
+// Details runs `task --list-all --json` and returns what it knows, keyed by task name.
+//
+// Slow on purpose-built repositories: computing `up_to_date` means fingerprinting every
+// `sources:` glob, which on a workspace with a build directory in one means walking it.
+// Measured at fifty-six times the text form on such a repo — 4.28s against 0.076s — almost
+// all of it system time. Which is why nothing calls this before the first frame.
+func Details(dir string) (map[string]Detail, error) {
+	cmd := exec.Command("task", "--list-all", "--json")
+	cmd.Dir = dir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("`task --list-all --json` failed in %s: %s", dir, strings.TrimSpace(stderr.String()))
+	}
+
+	var listing jsonListing
+	if err := json.Unmarshal(stdout, &listing); err != nil {
+		return nil, fmt.Errorf("could not read `task --list-all --json`: %w", err)
+	}
+
+	out := make(map[string]Detail, len(listing.Tasks))
+	for _, t := range listing.Tasks {
+		out[t.Name] = Detail{
+			Where:    Where{File: t.Location.Taskfile, Line: t.Location.Line},
+			UpToDate: t.UpToDate,
+		}
+	}
+	return out, nil
 }

@@ -675,10 +675,21 @@ func TestAReboundKeyDispatchesToTheNewKey(t *testing.T) {
 // An action means the same thing wherever it is offered.
 func TestRebindingAppliesOnEveryScreenThatOffersIt(t *testing.T) {
 	a := appAt(t, "backend:lint")
-	// `z` rather than a letter the defaults already use — rebinding onto a bound key
-	// shadows it, which is a different behaviour with its own test in the keys package.
-	a.Keymap.Rebind(keys.Help, 'z')
-	press(a, Char('z'))
+	// Derived rather than hardcoded: rebinding onto a key some action already uses shadows
+	// it, which is a different behaviour with its own test in the keys package — and a
+	// hardcoded "free" key stops being free as the keymap grows.
+	key := rune(0)
+	for c := '!'; c <= '~'; c++ {
+		if a.Keymap.Picker(c) == keys.None && a.Keymap.Run(c) == keys.None {
+			key = c
+			break
+		}
+	}
+	if key == 0 {
+		t.Fatal("no free key to rebind onto")
+	}
+	a.Keymap.Rebind(keys.Help, key)
+	press(a, Char(key))
 	if a.Screen != ScreenHelp {
 		t.Errorf("screen = %v", a.Screen)
 	}

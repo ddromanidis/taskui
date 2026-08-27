@@ -378,9 +378,14 @@ func TestEveryScreenRendersAtEveryAwkwardSize(t *testing.T) {
 	// showDiff leaves the app on the diff screen; the loop below sets it per iteration.
 	a.Screen = ScreenPicker
 
+	// The profile is a list like the others, and a mark held in the picker changes a glyph
+	// and takes over the footer — both have to survive the same shapes.
+	a.ProfileRows = a.Profile()
+	a.marked = map[string]bool{"task001": true, "task002": true}
+
 	screens := []Screen{
 		ScreenPicker, ScreenRun, ScreenHistory, ScreenHelp, ScreenDetail,
-		ScreenTimeline, ScreenDiff,
+		ScreenTimeline, ScreenDiff, ScreenProfile,
 	}
 	for _, size := range sizes {
 		w, h := size[0], size[1]

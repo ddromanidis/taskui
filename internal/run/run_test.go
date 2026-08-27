@@ -647,3 +647,102 @@ func TestAnswersAnInteractivePrompt(t *testing.T) {
 		t.Errorf("the task should have seen the answer: %q", output.String())
 	}
 }
+
+// go-task announces a skip with no `[name]` prefix, so the line lands in the parent's
+// output — several rows from the `⏸` it explains. The reason has to be copied onto the task
+// it is about.
+func TestASkipIsExplainedOnTheTaskItIsAbout(t *testing.T) {
+	r := Detached("all", GraphFrom(
+		Edge{Parent: "all", Children: []string{"cached", "always"}},
+	))
+	r.Feed("", `task: Task "cached" is up to date`)
+	r.Feed("always", "working")
+	r.Finish(0)
+
+	if got := r.Tasks["cached"].Note; got != "up to date" {
+		t.Errorf("cached note = %q", got)
+	}
+	if r.Tasks["cached"].Status != Skipped {
+		t.Errorf("cached status = %v", r.Tasks["cached"].Status)
+	}
+	if got := r.Tasks["always"].Note; got != "" {
+		t.Errorf("always should have no note, got %q", got)
+	}
+	// The announcement is real output and stays where go-task printed it.
+	var found bool
+	for _, l := range r.Tasks["all"].Lines {
+		if strings.Contains(l.Plain, "is up to date") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the announcement was moved rather than copied")
+	}
+}
+
+// The pty delivers CRLF. An anchored match without a trim explained the first of two
+// consecutive skips and silently missed the second.
+func TestASkipIsStillReadWithACarriageReturnOnIt(t *testing.T) {
+	r := Detached("all", GraphFrom(Edge{Parent: "all", Children: []string{"one", "two"}}))
+	r.Feed("", "\x1b[35mtask: Task \"one\" is up to date\r")
+	r.Feed("", "\x1b[0m\x1b[35mtask: Task \"two\" is up to date\r")
+	r.Finish(0)
+
+	for _, name := range []string{"one", "two"} {
+		if got := r.Tasks[name].Note; got != "up to date" {
+			t.Errorf("%s note = %q", name, got)
+		}
+	}
+}
+
+func TestAFailedPreconditionIsExplainedToo(t *testing.T) {
+	r := Detached("guarded", GraphFrom(Edge{Parent: "guarded"}))
+	r.Feed("", "task: required.txt is missing")
+	r.Feed("", `task: Failed to run task "guarded": task: precondition not met`)
+	r.Finish(201)
+
+	if got := r.Tasks["guarded"].Note; got != "precondition not met" {
+		t.Errorf("note = %q", got)
+	}
+}
+
+// Inside an aggregate the report is nested — the parent wraps the child's failure — and the
+// task with the unsatisfied precondition is the innermost one, not the one that invoked it.
+func TestANestedPreconditionNamesTheInnermostTask(t *testing.T) {
+	r := Detached("all", GraphFrom(Edge{Parent: "all", Children: []string{"guarded"}}))
+	r.Feed("", `task: Failed to run task "all": task: Failed to run task "guarded": task: precondition not met`)
+	r.Finish(201)
+
+	if got := r.Tasks["guarded"].Note; got != "precondition not met" {
+		t.Errorf("guarded note = %q", got)
+	}
+	if got := r.Tasks["all"].Note; got != "" {
+		t.Errorf("all should not be blamed for its child's precondition, got %q", got)
+	}
+}
+
+// A line that arrives in pieces and is completed later takes a different path into storage.
+// A check placed after that path's early return reads only the lines that arrived whole.
+func TestASkipIsReadEvenWhenItsLineArrivedInPieces(t *testing.T) {
+	r := Detached("all", GraphFrom(Edge{Parent: "all", Children: []string{"cached"}}))
+	r.Apply(Partial{Text: `task: Task "cached" is u`})
+	r.Feed("", `task: Task "cached" is up to date`)
+	r.Finish(0)
+
+	if got := r.Tasks["cached"].Note; got != "up to date" {
+		t.Errorf("note = %q", got)
+	}
+}
+
+// A task that ran is not a task that was skipped, whatever else is in the output.
+func TestAnOrdinaryLineIsNotASkipNotice(t *testing.T) {
+	for _, text := range []string{
+		`echo 'task: Task "x" is up to date'`,
+		`task: Task "x" is up to date, probably`,
+		`# task: Task "x" is up to date`,
+	} {
+		if _, _, ok := skipReason(text); ok {
+			t.Errorf("%q was read as a skip", text)
+		}
+	}
+}
