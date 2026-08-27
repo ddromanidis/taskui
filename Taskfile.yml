@@ -1,0 +1,187 @@
+# taskui's own Taskfile — which is also the smallest honest test of taskui itself.
+#
+# Deliberately shaped to exercise the things it claims to handle: `build` and `test` are
+# both runnable tasks *and* parents of `build:release`/`test:one`, `check` and `lint` and
+# `fmt` are the cross-cutting verbs the verb pivot collects, and `test:one`/`search` use
+# `requires:` so the args prompt has something real to pre-fill.
+version: "3"
+
+vars:
+  PROBE: '{{.ROOT_DIR}}/probe'
+  BIN: '{{.ROOT_DIR}}/bin'
+  # Stamped into the binary so `taskui --version` says something truthful.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo none
+  LDFLAGS: >-
+    -X github.com/ddromanidis/taskui/cmd.version={{.VERSION}}
+    -X github.com/ddromanidis/taskui/cmd.commit={{.COMMIT}}
+
+tasks:
+  default:
+    desc: "List every available task"
+    cmds:
+      - task --list-all
+    silent: true
+
+  #########################################################################################
+  #                                     DAILY DRIVERS
+  #########################################################################################
+  build:
+    desc: "Debug build"
+    aliases: [b]
+    cmds:
+      - go build -ldflags '{{.LDFLAGS}}' -o {{.BIN}}/taskui .
+
+  build:release:
+    desc: "Optimised build — what `install` puts on your PATH"
+    cmds:
+      - go build -trimpath -ldflags '-s -w {{.LDFLAGS}}' -o {{.BIN}}/taskui .
+
+  install:
+    desc: "Build and install to $GOBIN/taskui"
+    cmds:
+      - go install -trimpath -ldflags '-s -w {{.LDFLAGS}}' .
+
+  test:
+    desc: "Run the whole suite"
+    aliases: [t]
+    cmds:
+      - go test ./...
+
+  test:one:
+    desc: "Run tests matching a filter (FILTER=Redact)"
+    requires: { vars: [FILTER] }
+    cmds:
+      - go test ./... -run '{{.FILTER}}' -v
+
+  test:race:
+    desc: "The suite again, under the race detector"
+    cmds:
+      - go test -race ./...
+
+  fmt:
+    desc: "Format the source (writes changes)"
+    cmds:
+      - go fmt ./...
+      - golangci-lint fmt
+
+  lint:
+    desc: "golangci-lint, plus a format check"
+    cmds:
+      - golangci-lint run
+      - golangci-lint fmt --diff
+
+  check:
+    desc: "Type-check and vet only — fastest feedback"
+    aliases: [c]
+    cmds:
+      - go build ./...
+      - go vet ./...
+
+  all:
+    desc: "Everything: format, lint, test, build"
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: test
+      - task: build:release
+
+  clean:
+    desc: "Remove build artifacts and Task's own run cache"
+    cmds:
+      - rm -rf {{.BIN}} dist .task
+      - go clean -testcache
+
+  tidy:
+    desc: "Tidy go.mod and go.sum"
+    cmds:
+      - go mod tidy
+
+  #########################################################################################
+  #                              DRIVING TASKUI ITSELF
+  #########################################################################################
+  run:
+    desc: 'Open taskui on a directory (task run -- ~/Documents/atlas)'
+    cmds:
+      - go run . {{.CLI_ARGS | default "."}}
+
+  search:
+    desc: 'Grep every stored run (PATTERN=FAIL)'
+    requires: { vars: [PATTERN] }
+    cmds:
+      - go run . --search '{{.PATTERN}}'
+
+  shot:
+    desc: 'Render one frame to stdout without a terminal (task shot -- --keys g)'
+    cmds:
+      - go run . --screenshot 100x30 {{.CLI_ARGS}} .
+
+  graph:
+    desc: 'Print the execution graph reachable from a task (TASK=all)'
+    requires: { vars: [TASK] }
+    cmds:
+      - go run . --graph '{{.TASK}}'
+
+  #########################################################################################
+  #                                      RELEASING
+  #########################################################################################
+  release:check:
+    desc: "Validate .goreleaser.yaml without building anything"
+    cmds:
+      - goreleaser check
+
+  release:snapshot:
+    desc: "Build every target locally, without tagging or publishing"
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  release:
+    desc: "Tag-driven release — run it from a clean tree on a tag"
+    cmds:
+      - goreleaser release --clean
+
+  #########################################################################################
+  #                                     PROBE TASKFILE
+  #########################################################################################
+  # A throwaway Taskfile with a failing pipeline in it — the fixture used to verify
+  # capture, folding and search against a real `task` process rather than a mock.
+  probe:make:
+    desc: "Write a scratch Taskfile with a deliberately failing pipeline into ./probe"
+    cmds:
+      - mkdir -p {{.PROBE}}
+      - |
+        cat > {{.PROBE}}/Taskfile.yml <<'EOF'
+        version: "3"
+        tasks:
+          build:
+            cmds: ['echo "compiling core"', 'echo "compiling api"']
+          test:
+            cmds:
+              - 'echo "running 42 tests"'
+              - 'echo "--- FAIL: TestOrderTotal"'
+              - 'echo "    order_test.go:88: want 1200, got 1180"'
+              - 'echo "3 migrations pending, refusing to start" >&2'
+              - 'exit 1'
+          ci:
+            cmds: [{task: build}, {task: test}]
+        EOF
+      - 'echo "wrote {{.PROBE}}/Taskfile.yml"'
+
+  probe:run:
+    desc: "Capture the probe's failing pipeline headlessly and print the tree"
+    deps: [probe:make]
+    cmds:
+      - go run . --run ci {{.PROBE}}
+
+  probe:open:
+    desc: "Open taskui on the probe Taskfile"
+    deps: [probe:make]
+    cmds:
+      - go run . {{.PROBE}}
+
+  probe:clean:
+    desc: "Remove the scratch Taskfile"
+    cmds:
+      - rm -rf {{.PROBE}}

@@ -1,0 +1,358 @@
+// Package task discovers tasks by shelling out to `task --list-all` and parsing the result.
+//
+// The obvious call is `--list-all --json`, which additionally carries aliases as an array
+// and each task's source location. It is also, measured on a repo with seven `includes:`
+// and twenty tasks declaring `sources:`, fifty-six times slower — 4.28s against 0.076s.
+// The `--json` form computes up_to_date for every task, which means fingerprinting every
+// `sources:` glob, which on a large workspace means walking the build directory. Almost
+// all of that 4.28s was system time, not parsing.
+//
+// Four seconds before the first frame is not a price worth paying for a source location
+// nothing reads yet, so this parses the text form instead. If the file pivot or
+// jump-to-definition ever land, they should fetch the JSON on a background goroutine and
+// fill it in — not block startup on it.
+//
+// Neither form carries dependencies, so this is only the static half of the picture; the
+// execution graph comes from the graph package.
+package task
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"unicode"
+)
+
+// Task is one entry of `task --list-all`.
+type Task struct {
+	// Name is the full colon path, e.g. `backend:migrate:down`.
+	Name    string
+	Desc    string
+	Aliases []string
+	// Dangerous is a heuristic: does the description suggest this touches production or
+	// destroys data?
+	Dangerous bool
+}
+
+// Segments splits the name: `backend:migrate:down` -> ["backend", "migrate", "down"].
+func (t Task) Segments() []string {
+	return strings.Split(t.Name, ":")
+}
+
+// Verb is the last segment — what the task pivot groups on.
+func (t Task) Verb() string {
+	if i := strings.LastIndex(t.Name, ":"); i >= 0 {
+		return t.Name[i+1:]
+	}
+	return t.Name
+}
+
+// ArgsHint mines a usage hint from the description, which by convention spells out an
+// example: "Scaffold a migration and register it (NAME=add_x)" or "task backend:test --
+// -p ingest for one crate".
+//
+// Shown beside the args prompt rather than pre-filled into it. The descriptions trail off
+// into prose often enough — "…-- -p ingest for one crate" — that pre-filling would hand
+// you a command that is wrong in a way you might not notice before pressing enter.
+func (t Task) ArgsHint() (string, bool) {
+	// Descriptions are written from inside the file that defines the task, so an included
+	// one often spells its example with the bare name: `site/Taskfile.yml` says
+	// "task new -- …" for what the root calls `site:new`. Try both.
+	needles := []string{"task " + t.Name + " "}
+	if v := t.Verb(); v != t.Name {
+		needles = append(needles, "task "+v+" ")
+	}
+	for _, needle := range needles {
+		at := strings.Index(t.Desc, needle)
+		if at < 0 {
+			continue
+		}
+		if hint := trimProse(t.Desc[at+len(needle):]); hint != "" {
+			return hint, true
+		}
+	}
+
+	// Bare `NAME=value` conventions, e.g. "(NAME=add_x)" or "(WORD=адрес)".
+	open := strings.Index(t.Desc, "(")
+	if open < 0 {
+		return "", false
+	}
+	rel := strings.Index(t.Desc[open:], ")")
+	if rel < 0 {
+		return "", false
+	}
+	inner := strings.TrimSpace(t.Desc[open+1 : open+rel])
+	fields := strings.Fields(inner)
+	if len(fields) == 0 {
+		return "", false
+	}
+	w := fields[0]
+	if !strings.Contains(w, "=") {
+		return "", false
+	}
+	first := []rune(w)[0]
+	if first < 'A' || first > 'Z' {
+		return "", false
+	}
+	return inner, true
+}
+
+// KeysInHint returns the `KEY=` prefixes implied by a hint like `NAME=backend` or
+// `WORD=адрес`.
+//
+// A fallback for tasks that take a variable but do not declare `requires:`. Only the key
+// is kept — pre-filling the example value would be handing you someone else's argument.
+func KeysInHint(hint string) []string {
+	out := []string{}
+	for w := range strings.FieldsSeq(hint) {
+		k, _, ok := strings.Cut(w, "=")
+		if !ok || k == "" {
+			continue
+		}
+		shouty := true
+		for _, c := range k {
+			if (c < 'A' || c > 'Z') && c != '_' && (c < '0' || c > '9') {
+				shouty = false
+				break
+			}
+		}
+		if shouty {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// trimProse cuts a mined hint back to the part that is plausibly an argument.
+//
+// Descriptions run on: "-- infra:deploy:plan`.", "NAME=backend (the BRANCH survives)".
+// The parenthetical and the trailing punctuation are commentary, not arguments.
+func trimProse(rest string) string {
+	end := len(rest)
+	for _, stop := range []string{")", " (", ";", ", "} {
+		if at := strings.Index(rest, stop); at >= 0 && at < end {
+			end = at
+		}
+	}
+	return strings.TrimRight(strings.TrimSpace(rest[:end]), ".,` ")
+}
+
+// SplitArgs splits an args line the way a shell would, so quoted arguments survive.
+//
+// `site:new -- "My Post Title"` has to reach go-task as one argument, not three.
+func SplitArgs(input string) []string {
+	out := []string{}
+	var current strings.Builder
+	var quote rune
+	started := false
+
+	runes := []rune(input)
+	for i := 0; i < len(runes); i++ {
+		c := runes[i]
+		switch {
+		case c == '\\':
+			if i+1 < len(runes) {
+				i++
+				current.WriteRune(runes[i])
+				started = true
+			}
+		case c == '\'' || c == '"':
+			switch {
+			case quote == c:
+				quote = 0
+			case quote != 0:
+				current.WriteRune(c)
+				started = true
+			default:
+				// An empty quoted string is still an argument.
+				quote = c
+				started = true
+			}
+		case unicode.IsSpace(c) && quote == 0:
+			if started {
+				out = append(out, current.String())
+				current.Reset()
+				started = false
+			}
+		default:
+			current.WriteRune(c)
+			started = true
+		}
+	}
+	if started {
+		out = append(out, current.String())
+	}
+	return out
+}
+
+// DangerFile is the opt-in file listing tasks that must not be run by accident.
+const DangerFile = ".taskui-danger"
+
+// GlobMatch matches a task name against a pattern supporting `*`.
+//
+// Deliberately not a full glob: task names are colon paths, and `deploy:*` plus exact
+// names covers every real case without pulling in a dependency whose semantics would then
+// need explaining.
+func GlobMatch(pattern, name string) bool {
+	parts := strings.Split(pattern, "*")
+	first := parts[0]
+	if !strings.HasPrefix(name, first) {
+		return false
+	}
+	rest := name[len(first):]
+	last := ""
+	haveLast := false
+	for _, part := range parts[1:] {
+		last, haveLast = part, true
+		if part == "" {
+			continue
+		}
+		at := strings.Index(rest, part)
+		if at < 0 {
+			return false
+		}
+		rest = rest[at+len(part):]
+	}
+	// A trailing `*` swallows whatever is left; otherwise the pattern must reach the end.
+	switch {
+	case !haveLast:
+		return rest == ""
+	case last == "":
+		return true
+	default:
+		return strings.HasSuffix(name, last)
+	}
+}
+
+// DangerPatterns reads `.taskui-danger`: one pattern per line, `#` comments, blanks
+// ignored.
+//
+// Its presence switches off the description heuristic entirely. A guess and a declaration
+// disagreeing about which tasks are dangerous is worse than either alone — once you have
+// written the list down, that list is the answer.
+func DangerPatterns(dir string) []string {
+	data, err := os.ReadFile(filepath.Join(dir, DangerFile))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(strings.SplitN(line, "#", 2)[0])
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// dangerWords mark a task as one you should not fire off from a fuzzy filter by accident.
+//
+// This is a heuristic over descriptions and it will both over- and under-match. It is a
+// stopgap: the real fix is an explicit marker in the Taskfile, which we can honour later
+// without changing anything else here.
+var dangerWords = [...]string{
+	"production",
+	"prod database",
+	"applies!",
+	"wipe",
+	"destroy",
+	"claims ",
+}
+
+func looksDangerous(name, desc string) bool {
+	d := strings.ToLower(desc)
+	for _, w := range dangerWords {
+		if strings.Contains(d, w) {
+			return true
+		}
+	}
+	// `backend:migrate:prod`, `backend:promo:prod`, `deploy:*`
+	return strings.HasSuffix(name, ":prod") || strings.HasPrefix(name, "deploy:") || name == "deploy"
+}
+
+// parseEntry reads one line of `task --list-all`:
+//
+//   - build:      Build all components                    (aliases: b)
+func parseEntry(line string) (Task, bool) {
+	rest, ok := strings.CutPrefix(line, "* ")
+	if !ok {
+		return Task{}, false
+	}
+	// Names contain colons, so split at the first whitespace rather than the first colon —
+	// `backend:migrate:down:` is one name, not three.
+	name, tail := rest, ""
+	if at := strings.IndexFunc(rest, unicode.IsSpace); at >= 0 {
+		name, tail = rest[:at], rest[at:]
+	}
+	name = strings.TrimRight(name, ":")
+	if name == "" {
+		return Task{}, false
+	}
+
+	desc := strings.TrimSpace(tail)
+	var aliases []string
+	// Parsed off the end rather than searched for, so a description that happens to
+	// mention the word does not get eaten.
+	if strings.HasSuffix(desc, ")") {
+		if at := strings.LastIndex(desc, "(aliases: "); at >= 0 {
+			for a := range strings.SplitSeq(desc[at+len("(aliases: "):len(desc)-1], ",") {
+				if a = strings.TrimSpace(a); a != "" {
+					aliases = append(aliases, a)
+				}
+			}
+			desc = strings.TrimSpace(desc[:at])
+		}
+	}
+
+	return Task{
+		Name:      name,
+		Desc:      desc,
+		Aliases:   aliases,
+		Dangerous: looksDangerous(name, desc),
+	}, true
+}
+
+// Discover runs `task --list-all` in dir and returns the tasks, minus the `*:default`
+// entries — in a UI where a namespace is itself a selectable row, a task whose only job is
+// "show available tasks" is noise.
+func Discover(dir string) ([]Task, error) {
+	declared := DangerPatterns(dir)
+
+	cmd := exec.Command("task", "--list-all")
+	cmd.Dir = dir
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		exitError := &exec.ExitError{}
+		if errors.As(err, &exitError) {
+			return nil, fmt.Errorf("`task --list-all` failed in %s: %s", dir, strings.TrimSpace(stderr.String()))
+		}
+		return nil, fmt.Errorf("failed to run `task` — is go-task installed and on PATH? (%w)", err)
+	}
+
+	var tasks []Task
+	for line := range strings.SplitSeq(string(stdout), "\n") {
+		t, ok := parseEntry(line)
+		if !ok || t.Name == "default" || strings.HasSuffix(t.Name, ":default") {
+			continue
+		}
+		if len(declared) > 0 {
+			t.Dangerous = false
+			for _, p := range declared {
+				if GlobMatch(p, t.Name) {
+					t.Dangerous = true
+					break
+				}
+			}
+		}
+		tasks = append(tasks, t)
+	}
+
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].Name < tasks[j].Name })
+	return tasks, nil
+}

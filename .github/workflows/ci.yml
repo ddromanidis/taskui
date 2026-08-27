@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # The README claims Linux works; this is what makes that a tested claim rather
+      # than an assumption. The platform-specific parts — the pty, the process-group
+      # signal used to stop a run, the clipboard — are exactly what differs.
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Several tests spawn a real `task` process — cancelling a run, answering an
+      # interactive prompt, proving stdin reaches the child. Without go-task on PATH
+      # they do not fail meaningfully, they skip.
+      - name: Install go-task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - run: task --version
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.1
+
+      - name: Format check
+        run: golangci-lint fmt --diff
+
+      - name: Test
+        run: go test ./...
+
+      # The capture layer hands lines from a goroutine to the UI on every frame, which
+      # is exactly the shape of bug the detector exists for.
+      - name: Test under the race detector
+        run: go test -race ./...
+
+  # The project's own Taskfile is the thing this tool exists to run, so running it is
+  # a real test of both.
+  dogfood:
+    name: dogfood
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install go-task
+        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+      - name: Discovery works against a real Taskfile
+        run: |
+          go run . --list | tail -1
+          go run . --dump verb | head -5
+          go run . --graph all
+          go run . --screenshot 100x20 > /dev/null
+      # A failing pipeline captured end to end: the tree, the statuses, the archive.
+      - name: Capture a real run
+        run: |
+          task probe:make
+          go run . --run ci ./probe | tail -5
+
+  goreleaser:
+    name: goreleaser check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: check
