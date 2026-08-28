@@ -14,6 +14,26 @@ import (
 	"github.com/ddromanidis/taskui/internal/theme"
 )
 
+// TestMain points the whole package's config path somewhere empty.
+//
+// Not only the tests that write a config: every command that goes through `execute` reads
+// one, so without this the suite renders in whatever theme the person running it happens to
+// have chosen, and `examples` — which asserts on what it drew — fails on their machine and
+// nobody else's. A test that depends on the developer's dotfiles is a test that passes for
+// the wrong reason far more often than it fails for the right one.
+//
+// Tests that need a config of their own still set the variable themselves; theirs is read
+// later and wins.
+func TestMain(m *testing.M) {
+	home, err := os.MkdirTemp("", "taskui-cmd-tests")
+	if err != nil {
+		panic(err)
+	}
+	defer os.RemoveAll(home)
+	os.Setenv("XDG_CONFIG_HOME", home)
+	m.Run()
+}
+
 // inTempConfig points the config path somewhere disposable and returns it. Every test here
 // writes files, and none of them may touch the real one.
 func inTempConfig(t *testing.T) string {

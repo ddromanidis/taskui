@@ -78,8 +78,7 @@ colors:
 # factor, so the pair only comes back round every sixty frames — which is the difference
 # between something that moves and something that ticks.
 animation:
-  # selection-frames: "▀█▄█"
-  selection-frames: ""
+  selection-frames: "▀█▄█"
   selection-jiggle: "000000111111100"
   interval-ms: 320
 
