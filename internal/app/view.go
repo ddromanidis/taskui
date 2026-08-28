@@ -261,7 +261,7 @@ func (a *App) scrollPane(lines []line, width, height int, offset *int) []string 
 	for i := *offset; i < len(lines) && len(out) < height; i++ {
 		// renderRow, not render: the blank rail column keeps these panes flush with the
 		// rows on every other screen.
-		out = append(out, lines[i].renderRow(width, false, a.Theme, a.Phase))
+		out = append(out, lines[i].renderRow(width, false, a.Theme, a.Phase, 0, 1))
 	}
 	return out
 }
@@ -484,7 +484,7 @@ func (a *App) drawHistory(width, height int) []string {
 			}
 			l = append(l, styled(fmt.Sprintf("   %d hit%s", n, suffix), fg(t.Colors.Search)))
 		}
-		out = append(out, l.renderRow(width, i == a.HistoryCursor, t, a.Phase))
+		out = append(out, l.renderRow(width, i == a.HistoryCursor, t, a.Phase, 0, 1))
 	}
 	return out
 }
@@ -1252,11 +1252,13 @@ func (a *App) composeColumns(
 		at := 0
 		for i, item := range items {
 			selected := b[0]+i == cursor
-			for _, l := range item {
+			for li, l := range item {
 				if at >= height {
 					break
 				}
-				text := l.renderRow(colWidth, selected, a.Theme, a.Phase)
+				// len(item), not 1: this is the one place a row can be more than a line
+				// tall, and the rail has to know so it does not animate itself into pieces.
+				text := l.renderRow(colWidth, selected, a.Theme, a.Phase, li, len(item))
 				if pad := widths[c] - colWidth; pad > 0 {
 					if selected {
 						text += selectionOf(

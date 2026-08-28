@@ -221,6 +221,7 @@ type Colors struct {
 	Selection      Color
 	SelectionLight Color
 	SelectionShade Color
+	SelectionBlink Color
 
 	Mode   Color
 	Alias  Color
@@ -286,6 +287,11 @@ var colorFields = []colorField{
 		"The shaded edge down its right. With a `selection-shade` glyph set, the two together read as an extruded bar rather than a highlighted line.",
 		func(t *Colors) *Color { return &t.SelectionShade },
 	},
+	{
+		"selection-blink",
+		"What the highlighted row turns on the dark frames of an `animation.selection-blink`. Left `default` the bar drops out instead, which is a flash; give it a colour and the bar pulses between the two rather than going away.",
+		func(t *Colors) *Color { return &t.SelectionBlink },
+	},
 
 	{"mode", "The active pivot in the picker header.", func(t *Colors) *Color { return &t.Mode }},
 	{"alias", "Task aliases.", func(t *Colors) *Color { return &t.Alias }},
@@ -337,6 +343,9 @@ func DefaultColors() Colors {
 		// before it had a role of its own.
 		SelectionLight: Cyan,
 		SelectionShade: DarkGray,
+		// No second colour, so a theme that blinks flashes the bar off rather than
+		// alternating. Naming one opts into the pulse.
+		SelectionBlink: Default,
 
 		Mode:   Yellow,
 		Alias:  Blue,

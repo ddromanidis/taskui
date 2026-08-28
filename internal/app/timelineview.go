@@ -125,7 +125,7 @@ func (a *App) drawTimeline(width, height int) []string {
 			l = append(l, styled(padRight(shortCommit(p.Commit), 10), style))
 		}
 		l = append(l, styled(p.Command(), fg(theme.Default)))
-		out = append(out, l.renderRow(width, i == a.TimelineCursor, t, a.Phase))
+		out = append(out, l.renderRow(width, i == a.TimelineCursor, t, a.Phase, 0, 1))
 	}
 	return out
 }
@@ -226,7 +226,7 @@ func (a *App) drawDiff(width, height int) []string {
 				plain(strings.Repeat(" ", pad*2+1)),
 				styled(t.Glyphs.DiffGap+" ", fg(t.Colors.Faint)),
 			}
-			out = append(out, l.renderRow(width, selected, t, a.Phase))
+			out = append(out, l.renderRow(width, selected, t, a.Phase, 0, 1))
 			continue
 		}
 
@@ -248,7 +248,7 @@ func (a *App) drawDiff(width, height int) []string {
 			styled(marker+" ", style),
 		}
 		l = append(l, a.textWithLocations(clip(row.Text, room), style)...)
-		out = append(out, l.renderRow(width, selected, t, a.Phase))
+		out = append(out, l.renderRow(width, selected, t, a.Phase, 0, 1))
 	}
 	return out
 }
@@ -368,7 +368,7 @@ func (a *App) drawProfile(width, height int) []string {
 		if c.Children > 0 {
 			l = append(l, styled(fmt.Sprintf("   %s inc.", duration(c.Duration)), fg(t.Colors.Faint)))
 		}
-		out = append(out, l.renderRow(width, i == a.ProfileCursor, t, a.Phase))
+		out = append(out, l.renderRow(width, i == a.ProfileCursor, t, a.Phase, 0, 1))
 	}
 	return out
 }

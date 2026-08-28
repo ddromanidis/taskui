@@ -808,11 +808,14 @@ which is how a theme extending `synthwave` stops it moving without losing the re
 
 The jiggle is one digit per frame saying how many columns right the row sits: `0` is home,
 `1` and `2` lean. The blink is the same shape: `1` lit, `0` dark. Every sequence runs off
-the one clock, so **the length is the speed** — `"01"` wobbles every frame, and the fifteen
-digits above spend about two and a half seconds on each side at 320ms. That is how you ask
-for something slow without a second timer racing the first. Four, fifteen and thirteen share
-no factor between them, so the three only come back round together every four minutes, which
-is the difference between something that moves and something that ticks.
+the one clock, so **the length is the speed** — write more frames to slow something down,
+rather than reaching for a second timer to race the first.
+
+**Write them the same length and they become one movement.** Stack the three above and the
+shape is legible: six frames still and lit while the chrome edge slides down its column,
+then three where it dips — edge at the bottom, text leaned a column right, bar dark — then
+back. Lengths that differ never line up, which sounds like richness and reads like three
+unrelated things twitching at a row you are trying to read.
 
 The blink is taskui's own, not the terminal's `SGR 5`. Terminals do have a blink attribute
 and each one blinks it at whatever rate it likes — plenty of people switch it off entirely —

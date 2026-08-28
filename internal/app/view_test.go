@@ -1040,3 +1040,98 @@ func TestABlinkingRowStillLeans(t *testing.T) {
 		t.Errorf("the lean lost content while dark:\n  %q\n  %q", home, away)
 	}
 }
+
+// Naming a second colour turns the blink from a flash into a pulse: the bar stays on the
+// row the whole time and changes colour instead of going away.
+func TestABlinkColourPulsesRatherThanDropsTheBar(t *testing.T) {
+	restore := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(restore) })
+
+	a := blinking(t, []bool{true, false})
+	a.Theme.Colors.SelectionBlink = theme.Color{Kind: theme.KindRGB, R: 0x43, G: 0x48, B: 0xd6}
+
+	row := func(phase int) string {
+		a.Phase = phase
+		return strings.Split(a.RenderFrame(70, 12), "\n")[2]
+	}
+	lit, pulsed := row(0), row(1)
+
+	if !strings.Contains(lit, "48;2;") || !strings.Contains(pulsed, "48;2;") {
+		t.Fatalf("the bar should be drawn on both frames:\n  %q\n  %q", lit, pulsed)
+	}
+	if lit == pulsed {
+		t.Error("the bar should have changed colour")
+	}
+
+	// …and with no second colour named, the same sequence drops the bar instead. Both
+	// behaviours matter: the flash is what a theme gets for free.
+	a.Theme.Colors.SelectionBlink = theme.Color{}
+	if dark := row(1); strings.Contains(dark, "48;2;") {
+		t.Errorf("without a blink colour the bar should go out:\n  %q", dark)
+	}
+}
+
+// A row that wrapped is two or three cells tall, and the edge frames describe a mark moving
+// inside one cell. Drawing the same half block on every line turned the rail into a stack of
+// squares with gaps between them; the mark is spread across the row instead, so the lit part
+// is one contiguous run that sloshes from one end to the other.
+func TestATallRowsRailIsOneBarThatStillMoves(t *testing.T) {
+	a := viewSample(t)
+	a.Theme.Glyphs.Rail = "|"
+	a.Theme.Animation = theme.Animation{
+		Frames: []string{"▀", "▄"}, Interval: theme.DefaultInterval,
+	}
+	row := line{plain("wrapped")}
+
+	railAt := func(phase, at, lines int) rune {
+		return []rune(row.renderRow(20, true, a.Theme, phase, at, lines))[0]
+	}
+
+	// Two lines, and the half block marks the boundary of the lit part while the cell behind
+	// it fills solid. `▀` lights from the top, so the solid cell is above it and the half
+	// block is the bottom edge; `▄` is the mirror. Either way the lit run is contiguous.
+	for _, want := range []struct {
+		phase       int
+		top, bottom rune
+	}{
+		{0, '█', '▀'}, // lit from the top, down through one and a half cells
+		{1, '▄', '█'}, // and from the bottom on the next beat
+	} {
+		if got := railAt(want.phase, 0, 2); got != want.top {
+			t.Errorf("phase %d line 0: %q, want %q", want.phase, string(got), string(want.top))
+		}
+		if got := railAt(want.phase, 1, 2); got != want.bottom {
+			t.Errorf("phase %d line 1: %q, want %q", want.phase, string(got), string(want.bottom))
+		}
+	}
+
+	// The two frames must differ, or it is a bar that does not bounce — which is the thing
+	// this replaced.
+	if railAt(0, 0, 2) == railAt(1, 0, 2) && railAt(0, 1, 2) == railAt(1, 1, 2) {
+		t.Error("a tall row's rail stopped moving")
+	}
+
+	// A one-line row is untouched, which is nearly all of them.
+	for _, phase := range []int{0, 1} {
+		want := []rune(a.Theme.Animation.Frame(phase, "|"))[0]
+		if got := railAt(phase, 0, 1); got != want {
+			t.Errorf("phase %d: single-line row drew %q, want %q", phase, string(got), string(want))
+		}
+	}
+
+	// A glyph nothing knows the shape of cannot be spread, so it is drawn as it comes rather
+	// than guessed at.
+	a.Theme.Animation.Frames = []string{"|", "+"}
+	for at := range 2 {
+		if got := railAt(1, at, 2); got != '+' {
+			t.Errorf("line %d: %q, want the theme's own glyph unspread", at, string(got))
+		}
+	}
+
+	// The lean is a property of the row rather than of a cell, so a tall row still leans.
+	a.Theme.Animation.Jiggle = []int{0, 1}
+	if row.renderRow(20, true, a.Theme, 0, 0, 2) == row.renderRow(20, true, a.Theme, 1, 0, 2) {
+		t.Error("a tall row should still lean")
+	}
+}

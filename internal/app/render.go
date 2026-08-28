@@ -98,7 +98,9 @@ func selectionOf(st lipgloss.Style, sel theme.Color) lipgloss.Style {
 //
 // renderRow draws a row framed by those two columns. Neither is selection-styled: they are
 // the frame, not the thing framed.
-func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) string {
+// `at` is which line of its row this is and `lines` is how many the row occupies — 0 and 1
+// for most of them, more when a description or a line of output wrapped.
+func (l line) renderRow(width int, selected bool, t theme.Theme, phase, at, lines int) string {
 	if width <= 0 {
 		return ""
 	}
@@ -111,11 +113,24 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 	room := min(t.Animation.MaxLean(), max(0, width-frameWidth-1))
 	lean := 0
 
-	// lit is whether the highlight is drawn this frame. Deliberately not the same thing as
-	// selected: the rail and its shade keep drawing through the dark frames, so the row you
-	// are on is still marked while its bar is out. A cursor that disappears is not a blink,
-	// it is a place you have to find again.
-	lit := selected && t.Animation.Lit(phase)
+	// lit is whether the highlight is drawn this frame, and sel is what colour it is.
+	//
+	// Deliberately not the same thing as selected: the rail and its shade keep drawing
+	// through the dark frames, so the row you are on is still marked while its bar is out. A
+	// cursor that disappears is not a blink, it is a place you have to find again.
+	//
+	// A theme that names a `selection-blink` colour never goes dark at all — the bar pulses
+	// between two colours instead, which keeps the row's shape on screen the whole time.
+	// Flashing off is what you get for free; alternating is what you get for naming the
+	// second colour.
+	lit, sel := selected, t.Colors.Selection
+	if selected && !t.Animation.Lit(phase) {
+		if alt := t.Colors.SelectionBlink; !alt.IsDefault() {
+			sel = alt
+		} else {
+			lit = false
+		}
+	}
 
 	if selected {
 		// Both edges take the same frame, so the marker travels up and down as one rather
@@ -123,8 +138,11 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 		// moving everything under it, and a list that shifted while you read it would be a
 		// worse trade than any amount of charm. Sideways it can move, because the row still
 		// starts and ends exactly where it did.
-		left = t.Animation.Frame(phase, t.Glyphs.Rail)
-		right = t.Animation.Frame(phase, t.Glyphs.SelectionShade)
+		// EdgeAt rather than Frame: on a row that wrapped, the half block marks the boundary
+		// of the lit part and the cells behind it fill solid, so the two lines read as one
+		// bar rather than as two marks with a gap between them.
+		left = t.Animation.EdgeAt(phase, at, lines, t.Glyphs.Rail)
+		right = t.Animation.EdgeAt(phase, at, lines, t.Glyphs.SelectionShade)
 		leftStyle, rightStyle = fgBold(t.Colors.SelectionLight), fg(t.Colors.SelectionShade)
 		lean = min(t.Animation.Lean(phase), room)
 	}
@@ -137,14 +155,14 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 		}
 		spaces := strings.Repeat(" ", n)
 		if lit {
-			return selectionOf(lipgloss.NewStyle(), t.Colors.Selection).Render(spaces)
+			return selectionOf(lipgloss.NewStyle(), sel).Render(spaces)
 		}
 		return spaces
 	}
 
 	return leftStyle.Render(left) +
 		gap(lean) +
-		l.render(width-frameWidth-room, lit, t.Colors.Selection) +
+		l.render(width-frameWidth-room, lit, sel) +
 		gap(room-lean) +
 		rightStyle.Render(right)
 }

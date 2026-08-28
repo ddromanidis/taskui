@@ -24,9 +24,10 @@ import (
 //     rail and the text all stay exactly where they were.
 //
 // All three are sequences read off one clock, one entry per frame, so the length of what a
-// theme writes is the speed of what it gets. Lengths that share no factor never come back
-// round together, which is the difference between something that moves and something that
-// ticks.
+// theme writes is the speed of what it gets — and writing them the same length is what makes
+// them one movement rather than three. Sequences of different lengths never line up, which
+// sounds like richness and reads like three unrelated things twitching at a row somebody is
+// trying to read.
 //
 // Off by default, and off in most of the themes that ship. A theme that animates costs a
 // redraw every Interval for as long as taskui is open, which is cheap but is not nothing,
@@ -93,6 +94,47 @@ func (a Animation) Frame(phase int, fallback string) string {
 		return fallback
 	}
 	return a.Frames[wrapPhase(phase, len(a.Frames))]
+}
+
+// fullBlock is what a cell behind the lit edge is filled with.
+const fullBlock = "█"
+
+// fillsFrom says which end of a cell a half block occupies: 1 for the top, -1 for the
+// bottom. A glyph that is not in here is drawn as it comes, because there is no way to know
+// which part of its cell it lights.
+var fillsFrom = map[string]int{"▀": 1, "▔": 1, "▄": -1, "▁": -1}
+
+// EdgeAt is the glyph a row's edge draws on line `at` of a row `lines` tall.
+//
+// The frames describe a mark inside one cell. A row that wrapped is two or three cells tall,
+// and drawing the same half block on each of them gives a stack of marks with gaps between —
+// which is a dashed line, not a bar. So the mark is spread instead: the half block marks the
+// boundary of the lit part and the cells behind it are filled solid, so a two-line row reads
+// as one bar three-quarters full, sloshing from one end to the other as the phase turns.
+//
+// A one-line row is the same as it ever was, which is most of them.
+func (a Animation) EdgeAt(phase, at, lines int, fallback string) string {
+	g := a.Frame(phase, fallback)
+	if lines <= 1 {
+		return g
+	}
+	switch fillsFrom[g] {
+	case 1:
+		// Lit from the top down, so the half block is the bottom edge of the lit part and
+		// everything above it is solid.
+		if at == lines-1 {
+			return g
+		}
+		return fullBlock
+	case -1:
+		// Lit from the bottom up: the half block is the top edge instead.
+		if at == 0 {
+			return g
+		}
+		return fullBlock
+	default:
+		return g
+	}
 }
 
 // Lean is how far the selected row's text sits to the right on this frame, in columns.

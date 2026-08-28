@@ -286,24 +286,26 @@ func TestOnlyTheThemesThatAskForItAnimate(t *testing.T) {
 		t.Error("the sequence should start lit")
 	}
 
-	// The three lengths share no factor, which is what stops the whole thing settling into a
-	// beat. Asserted rather than trusted to a comment: it is the kind of property that
-	// survives right up until somebody tidies a sequence to a round number.
-	lens := []int{len(y2k.Animation.Frames), len(y2k.Animation.Jiggle), len(y2k.Animation.Blink)}
-	for i, a := range lens {
-		for _, b := range lens[i+1:] {
-			if gcd(a, b) != 1 {
-				t.Errorf("y2k's sequences %d and %d share a factor, so they lock together", a, b)
-			}
+	// One movement, not three. All three sequences are the same length, so they share a
+	// period and dip together; lengths that differ would drift and read as unrelated things
+	// twitching at the same row. Asserted rather than left to a comment, because a sequence
+	// is exactly the kind of thing somebody lengthens by one without noticing what it costs.
+	n := len(y2k.Animation.Frames)
+	if n < 2 {
+		t.Fatalf("y2k should animate its edges: %v", y2k.Animation.Frames)
+	}
+	if len(y2k.Animation.Jiggle) != n || len(y2k.Animation.Blink) != n {
+		t.Errorf("y2k's sequences are %d/%d/%d and must match to stay in step",
+			n, len(y2k.Animation.Jiggle), len(y2k.Animation.Blink))
+	}
+
+	// …and they dip on the same frames: the lean and the dark are one event, not two.
+	for phase := range n {
+		leaning := y2k.Animation.Lean(phase) > 0
+		if dark := !y2k.Animation.Lit(phase); leaning != dark {
+			t.Errorf("phase %d leans=%v dark=%v — the two should move as one", phase, leaning, dark)
 		}
 	}
-}
-
-func gcd(a, b int) int {
-	for b != 0 {
-		a, b = b, a%b
-	}
-	return a
 }
 
 // Frames cycle, and a phase outside the sequence wraps rather than panicking.
@@ -466,7 +468,9 @@ func TestEitherHalfOfTheAnimationCanBeClearedFromConfig(t *testing.T) {
 	if straight.MaxLean() != 0 {
 		t.Errorf("the lean should be gone, and its reserved column with it: %+v", straight)
 	}
-	if len(straight.Frames) != 4 || !straight.Moves() {
+	// However long y2k's sequence happens to be — pinning the count here just makes this
+	// test fail every time somebody retimes the theme.
+	if len(straight.Frames) < 2 || !straight.Moves() {
 		t.Errorf("the bounce should have survived: %+v", straight)
 	}
 }
@@ -514,6 +518,27 @@ func TestABadBlinkIsReported(t *testing.T) {
 		}
 		if !resolved.Animation.Lit(1) {
 			t.Errorf("%s: a refused sequence should leave the highlight on", name)
+		}
+	}
+}
+
+// y2k pulses rather than flashes, and the colour it pulses to has to be its own — inheriting
+// `default` would silently turn the pulse back into the bar dropping out.
+func TestY2kPulsesBetweenTwoColours(t *testing.T) {
+	themesIn(t)
+	y2k, _ := LoadTheme("y2k")
+	if y2k.Colors.SelectionBlink.IsDefault() {
+		t.Fatal("y2k should name a blink colour")
+	}
+	if y2k.Colors.SelectionBlink == y2k.Colors.Selection {
+		t.Error("pulsing to the colour it already is, is not pulsing")
+	}
+	// Every other shipped theme leaves it alone, so a theme that does not blink cannot
+	// acquire a second selection colour by accident.
+	for _, name := range []string{"default", "90s", "charm", "synthwave", "neubrutalism"} {
+		resolved, _ := LoadTheme(name)
+		if !resolved.Colors.SelectionBlink.IsDefault() {
+			t.Errorf("%s should not name a blink colour: %+v", name, resolved.Colors.SelectionBlink)
 		}
 	}
 }

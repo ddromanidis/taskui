@@ -17,10 +17,11 @@
 # same bevel every widget in the era had, which is why it reads as something you could click
 # rather than something that is merely highlighted.
 #
-# And it wobbles. The row's text leans one column right and comes back over fifteen frames,
-# which at 320ms a frame is about two and a half seconds on each side. It is a joke about
-# animated GIF text and it is deliberately too slow to be distracting: at this rate you
-# notice it when you stop to read, and not while you are moving through the list.
+# And it dips. Once every four seconds the whole row does one thing at once: the chrome edge
+# reaches the bottom of its travel, the text leans a column right, and the bar deepens. It
+# is a joke about animated GIF text and it is deliberately slow — at this rate you notice it
+# when you stop to read, and not while you are moving through the list. The timing is in the
+# `animation:` block at the bottom, three lines you can retime or delete.
 extends: default
 
 colors:
@@ -40,6 +41,15 @@ colors:
   selection: "#2e3192"
   selection-light: "#dfe8f5"
   selection-shade: "#161a52"
+  # What the face turns on the blink's dark frames — deeper, not brighter.
+  #
+  # The bar has the row's text on it, and that text was picked to read against the terminal's
+  # background rather than against a bar. Lightening the bar closes the gap on every one of
+  # them at once: a brighter navy took the description from 6.3:1 to 4.0:1 and the accent to
+  # 2.5:1, so the dip cost a frame of legibility three times a cycle. Going the other way
+  # widens the gap instead, and the bar reads as receding toward its own underside rather
+  # than flashing.
+  selection-blink: "#1a1c4a"
 
   alias: "#87ceeb"
   danger: "#ff0090"
@@ -71,24 +81,27 @@ colors:
   confirm-fg: "#161a52"
   confirm-bg: "#ff0090"
 
-# Sparkle either side, a lean that takes its time, and a bar that goes out now and then.
+# The theme that moves — once per cycle, with all of it moving together.
 #
-# This is the theme that moves. The frames run the chrome edge up and down the cursor's two
-# columns; the jiggle runs the row's own text one column right and back; the blink drops the
-# highlight for two frames in thirteen, about two thirds of a second every four seconds,
-# which is a slow enough pulse to read as a thing rather than as a fault.
+# Three sequences, all twelve frames long, so they share a period instead of drifting past
+# each other. Read them stacked and you can see the shape: for the first six frames the row
+# sits still while the chrome edge slides down its column. On frames six to eight it dips —
+# the edge reaches the bottom, the text leans a column right, and the bar deepens to the
+# darker navy of `selection-blink` — and then all three come back. One gesture, just under
+# a second long, every four.
 #
-# Four, fifteen and thirteen share no factor between them, so the three only come back round
-# together every seven hundred and eighty frames — a little over four minutes. Nothing here
-# settles into a beat you could count, which is the whole difference between something that
-# moves and something that ticks.
+# Deliberately not three motions at three speeds. Sequences of different lengths never line
+# up, which sounds like richness and reads like three unrelated things twitching at a row you
+# are trying to read. Matching their lengths is what turns them into one movement.
 #
-# Every one of them is a separate line you can shorten, lengthen or delete. `interval-ms: 0`
-# stops the lot without losing the colours.
+# Every one of them is a separate line you can shorten, lengthen or delete, and the length is
+# the speed — write more frames to slow it down. `interval-ms: 0` stops the lot without
+# losing the colours.
 animation:
-  selection-frames: "▀█▄█"
-  selection-jiggle: "000000111111100"
-  selection-blink: "1111111111100"
+  #                  ↓ the dip
+  selection-frames: "▀▀▀███▄▄▄███"
+  selection-jiggle: "000000111000"
+  selection-blink: "111111000111"
   interval-ms: 320
 
 glyphs:
