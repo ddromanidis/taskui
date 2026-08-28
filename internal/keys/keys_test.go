@@ -97,7 +97,7 @@ func TestRebindingAppliesEverywhereTheActionIsOffered(t *testing.T) {
 	if k.Picker(key) != Help || k.Run(key) != Help || k.History(key) != Help {
 		t.Error("the rebinding did not reach every screen")
 	}
-	if k.Picker('?') != None {
+	if k.Picker(Plain('?')) != None {
 		t.Error("the old key should be free")
 	}
 	// The screens added later have to take the rebinding too, or `?` stops working on
@@ -111,11 +111,11 @@ func TestRebindingAppliesEverywhereTheActionIsOffered(t *testing.T) {
 func TestCloningLeavesTheOriginalAlone(t *testing.T) {
 	original := NewKeymap()
 	clone := original.Clone()
-	clone.Rebind(Pivot, 'z')
-	if original.Picker('z') != None {
+	clone.Rebind(Pivot, Plain('z'))
+	if original.Picker(Plain('z')) != None {
 		t.Error("the clone wrote through to the original")
 	}
-	if clone.Picker('z') != Pivot {
+	if clone.Picker(Plain('z')) != Pivot {
 		t.Error("the clone did not take the rebinding")
 	}
 }
@@ -123,7 +123,7 @@ func TestCloningLeavesTheOriginalAlone(t *testing.T) {
 // The same key meaning two things on one screen is reported, not silently resolved.
 func TestCollidingKeysAreListed(t *testing.T) {
 	k := NewKeymap()
-	k.Rebind(Pivot, 'a')
+	k.Rebind(Pivot, Plain('a'))
 	found := false
 	for _, c := range k.Conflicts() {
 		if strings.Contains(c, "picker") && strings.Contains(c, "both") {
@@ -146,14 +146,66 @@ func TestTheDefaultsDoNotCollide(t *testing.T) {
 //
 // Every screen, so that a key free in the picker but taken in the run view is not mistaken
 // for a free one — which is how each hardcoded choice here rotted in turn.
-func unboundKey(t *testing.T, k *Keymap) rune {
+func unboundKey(t *testing.T, k *Keymap) Chord {
 	t.Helper()
 	for c := '!'; c <= '~'; c++ {
-		if k.Picker(c) == None && k.Run(c) == None && k.History(c) == None &&
-			k.Timeline(c) == None && k.Diff(c) == None && k.Profile(c) == None {
-			return c
+		if chord := Plain(c); k.Picker(chord) == None && k.Run(chord) == None &&
+			k.History(chord) == None && k.Timeline(chord) == None &&
+			k.Diff(chord) == None && k.Profile(chord) == None {
+			return chord
 		}
 	}
 	t.Fatal("every printable character is bound to something")
-	return 0
+	return Chord{}
+}
+
+// The config spelling of a binding. Round-tripping matters because `--dump-config` writes
+// these back out, and a template that cannot be read again is a template that lies.
+func TestChordsParseAndSpellThemselvesBack(t *testing.T) {
+	for _, tc := range []struct {
+		in    string
+		want  Chord
+		spelt string
+	}{
+		{"j", Plain('j'), "j"},
+		{"G", Plain('G'), "G"},
+		{"/", Plain('/'), "/"},
+		// `+` is a key, not a dangling modifier — the split only happens with something on
+		// both sides of it.
+		{"+", Plain('+'), "+"},
+		{"space", Plain(' '), "space"},
+		{"shift+space", Chord{Key: ' ', Mods: ModShift}, "shift+space"},
+		{"ctrl+r", Chord{Key: 'r', Mods: ModCtrl}, "ctrl+r"},
+		{"alt+j", Chord{Key: 'j', Mods: ModAlt}, "alt+j"},
+		// Order in, canonical order out.
+		{"shift+ctrl+r", Chord{Key: 'r', Mods: ModCtrl | ModShift}, "ctrl+shift+r"},
+	} {
+		got, err := ParseChord(tc.in)
+		if err != nil {
+			t.Errorf("%q: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%q parsed as %+v, want %+v", tc.in, got, tc.want)
+		}
+		if got.String() != tc.spelt {
+			t.Errorf("%q spells itself %q, want %q", tc.in, got.String(), tc.spelt)
+		}
+	}
+}
+
+// A binding that could never match is worth refusing at load, not at three in the morning.
+func TestUnmatchableChordsAreRefused(t *testing.T) {
+	for _, in := range []string{
+		"",
+		"pp",
+		// The terminal sends `G`, never shift+`g`, so this would never fire.
+		"shift+g",
+		"hyper+j",
+		"ctrl+ctrl+j",
+	} {
+		if got, err := ParseChord(in); err == nil {
+			t.Errorf("%q was accepted as %+v", in, got)
+		}
+	}
 }

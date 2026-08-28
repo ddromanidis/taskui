@@ -1,0 +1,124 @@
+# y2k — the millennium, as a Taskfile.
+#
+# The reference is the 1999-2003 web and the plastic it was sold on: chrome silver as the
+# structural colour, bubblegum pink and lilac as the accents, electric blue and lime for
+# anything that needs to shout. Where the 90s theme is a DOS box and synthwave is the poster
+# on the wall, this one is the translucent iMac the browser was running on.
+#
+# Chrome is doing the work that grey does in every other theme, which is the whole trick of
+# the look: the era's silver was never neutral, it was a highlight and a shadow pretending to
+# be a colour, and giving it the structural job is what stops the pinks reading as a novelty
+# palette bolted onto something sensible.
+#
+# The two things it does that nothing else does:
+#
+# The selected row is a chrome button. `selection` is the cyber navy of a pressed control,
+# `selection-light` is the polished top edge and `selection-shade` is the underside — the
+# same bevel every widget in the era had, which is why it reads as something you could click
+# rather than something that is merely highlighted.
+#
+# And it wobbles. The row's text leans one column right and comes back over fifteen frames,
+# which at 320ms a frame is about two and a half seconds on each side. It is a joke about
+# animated GIF text and it is deliberately too slow to be distracting: at this rate you
+# notice it when you stop to read, and not while you are moving through the list.
+extends: default
+
+colors:
+  # Bubblegum leads, lilac answers. The two colours every layout of the era put next to
+  # each other on a chrome background.
+  accent: "#ff69b4"
+  mode: "#b8a1ff"
+
+  # The chrome. `dim` is the polished face, `faint` and `rule` the shadow it sits in — a
+  # gradient flattened into the two tones a terminal can actually hold.
+  dim: "#c0c8d8"
+  faint: "#5a6a8a"
+  rule: "#8c9ab5"
+  text: default
+
+  # A pressed button: navy face, a polished top edge, a dark underside.
+  selection: "#2e3192"
+  selection-light: "#dfe8f5"
+  selection-shade: "#161a52"
+
+  alias: "#87ceeb"
+  danger: "#ff0090"
+
+  # Lime for done, cyber yellow for busy, hot magenta for broken. The candy plastics.
+  status-ok: "#60e000"
+  status-running: "#ffd010"
+  status-failed: "#ff0090"
+  status-skipped: "#5a6a8a"
+  status-pending: "#5a6a8a"
+
+  command: "#0060ff"
+
+  search: "#ff69b4"
+  match-fg: "#161a52"
+  match-bg: "#60e000"
+
+  # A location is a link, and a link in 1999 was blue and underlined. It is still underlined.
+  location: "#0060ff"
+
+  diff-added: "#60e000"
+  diff-removed: "#ff0090"
+
+  notice: "#ffd010"
+  stored: "#87ceeb"
+  interactive: "#60e000"
+  warning-fg: "#161a52"
+  warning-bg: "#ffd010"
+  confirm-fg: "#161a52"
+  confirm-bg: "#ff0090"
+
+# Sparkle either side, and a lean that takes its time.
+#
+# The frames run the chrome edge up and down the cursor's two columns; the jiggle runs the
+# row's own text one column right and back. Fifteen digits against four frames share no
+# factor, so the pair only comes back round every sixty frames — which is the difference
+# between something that moves and something that ticks.
+animation:
+  # selection-frames: "▀█▄█"
+  selection-frames: ""
+  selection-jiggle: "000000111111100"
+  interval-ms: 320
+
+glyphs:
+  # Sparkles, because every page had them and half of them were animated.
+  wordmark: "✧･ﾟ TASKUI ･ﾟ✧"
+  separator: "›"
+  dot: "•"
+
+  # Hollow markers: the era's plastic was translucent, and so are its arrows.
+  fold-open: "▽"
+  fold-closed: "▷"
+  fold-peek: "◇"
+
+  # Rounded guides — the one corner radius this look allows itself, and it uses it on
+  # everything.
+  guide-branch: "├"
+  guide-last: "╰"
+  guide-vertical: "│"
+
+  # The two faces of the chrome bevel.
+  rail: "▐"
+  selection-shade: "▌"
+
+  # A rule of dots rather than a line: chrome does not do hairlines, it does dither.
+  rule: "·"
+
+  command: "›"
+  warning: "◆"
+  bar: "▓"
+
+  diff-added: "+"
+  diff-removed: "-"
+  diff-gap: "◦"
+  danger: "◆"
+  cursor: "▓"
+
+  status-ok: "◉"
+  status-failed: "◈"
+  status-running: "▷"
+  status-pending: "◌"
+  status-skipped: "◌"

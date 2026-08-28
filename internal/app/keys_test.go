@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/ddromanidis/taskui/internal/keys"
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
@@ -658,7 +660,7 @@ func TestVGoesBackToTheLiveRun(t *testing.T) {
 // Rebinding has to change what the key actually does, not just what `?` claims.
 func TestAReboundKeyDispatchesToTheNewKey(t *testing.T) {
 	a := appAt(t, "backend:lint")
-	a.Keymap.Rebind(keys.Pivot, 'z')
+	a.Keymap.Rebind(keys.Pivot, keys.Plain('z'))
 	before := a.ModeLabel()
 
 	press(a, Char('p'))
@@ -680,7 +682,7 @@ func TestRebindingAppliesOnEveryScreenThatOffersIt(t *testing.T) {
 	// hardcoded "free" key stops being free as the keymap grows.
 	key := rune(0)
 	for c := '!'; c <= '~'; c++ {
-		if a.Keymap.Picker(c) == keys.None && a.Keymap.Run(c) == keys.None {
+		if a.Keymap.Picker(keys.Plain(c)) == keys.None && a.Keymap.Run(keys.Plain(c)) == keys.None {
 			key = c
 			break
 		}
@@ -688,7 +690,7 @@ func TestRebindingAppliesOnEveryScreenThatOffersIt(t *testing.T) {
 	if key == 0 {
 		t.Fatal("no free key to rebind onto")
 	}
-	a.Keymap.Rebind(keys.Help, key)
+	a.Keymap.Rebind(keys.Help, keys.Plain(key))
 	press(a, Char(key))
 	if a.Screen != ScreenHelp {
 		t.Errorf("screen = %v", a.Screen)
@@ -822,5 +824,89 @@ func TestTwoLongRunningTasksShareTheTool(t *testing.T) {
 	}
 	if a.AnyInFlight() {
 		t.Error("both process groups should have been reaped, not orphaned")
+	}
+}
+
+// --- key translation ----------------------------------------------------------------
+//
+// fromTea is the whole surface Bubble Tea touches, so it is where a version bump goes
+// wrong. These pin the shapes the terminal actually sends, in both the legacy encoding and
+// the disambiguated one — the same keystroke arrives differently depending on which the
+// terminal negotiated, and both have to end up at the same binding.
+
+func TestKeysArriveTheSameFromEitherEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		what string
+		msg  tea.KeyPressMsg
+		want Key
+	}{
+		// Legacy: a plain character is its own byte.
+		{"a", tea.KeyPressMsg{Code: 'a', Text: "a"}, Char('a')},
+		// A capital arrives capitalised, because the terminal applies the shift. Carrying the
+		// modifier as well would make `⇧G` a different binding from `G`.
+		{"G", tea.KeyPressMsg{Code: 'G', Text: "G"}, Char('G')},
+		// The same key under key disambiguation, where the shift is reported separately: the
+		// text is still `G`, so the shift is spent and must not survive into the chord.
+		{"G, disambiguated", tea.KeyPressMsg{Code: 'g', Text: "G", Mod: tea.ModShift}, Char('G')},
+		// Caps lock is a state the terminal has already applied, not a modifier to bind to.
+		{"caps-locked G", tea.KeyPressMsg{Code: 'g', Text: "G", Mod: tea.ModCapsLock}, Char('G')},
+		{"space", tea.KeyPressMsg{Code: ' ', Text: " "}, Char(' ')},
+		{"enter", tea.KeyPressMsg{Code: tea.KeyEnter}, Enter()},
+		{"esc", tea.KeyPressMsg{Code: tea.KeyEscape}, Esc()},
+		{"tab", tea.KeyPressMsg{Code: tea.KeyTab}, Tab()},
+		// v2 has no shift+⇥ code of its own; it is ⇥ with shift held.
+		{"shift+tab", tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}, Key{kind: keyBackTab}},
+		{"backspace", tea.KeyPressMsg{Code: tea.KeyBackspace}, Key{kind: keyBackspace}},
+		{"up", tea.KeyPressMsg{Code: tea.KeyUp}, Key{kind: keyUp}},
+		// ⌃c is the letter plus the modifier — the control code is not a key of its own.
+		{"ctrl+c", tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}, Key{kind: keyChar, ch: 'c', mods: keys.ModCtrl}},
+		// Nothing the dispatch table has a use for.
+		{"f1", tea.KeyPressMsg{Code: tea.KeyF1}, Key{kind: keyOther}},
+	} {
+		if got := fromTea(tc.msg); got != tc.want {
+			t.Errorf("%s: got %+v, want %+v", tc.what, got, tc.want)
+		}
+	}
+}
+
+// The point of the upgrade: ⇧␣ is a keystroke of its own, distinguishable from ␣.
+func TestShiftSpaceIsNotSpace(t *testing.T) {
+	plain := fromTea(tea.KeyPressMsg{Code: ' ', Text: " "})
+	shifted := fromTea(tea.KeyPressMsg{Code: ' ', Text: " ", Mod: tea.ModShift})
+	if plain == shifted {
+		t.Fatal("⇧␣ and ␣ still arrive as the same key")
+	}
+	// And the literal `case` for space must not swallow it on the way to the keymap, or a
+	// binding onto ⇧␣ would never be consulted.
+	if shifted.isChar(' ') {
+		t.Error("⇧␣ matched the bare-space case")
+	}
+	if !plain.isChar(' ') {
+		t.Error("␣ stopped matching the bare-space case")
+	}
+}
+
+// A modified key is not text: ⌃z used to reach a running task as a `z`.
+func TestModifiedKeysAreNotTypedAtTheChild(t *testing.T) {
+	if fromTea(tea.KeyPressMsg{Code: 'z', Mod: tea.ModCtrl}).typed() {
+		t.Error("⌃z counted as typing")
+	}
+	if !fromTea(tea.KeyPressMsg{Code: 'Z', Text: "Z"}).typed() {
+		t.Error("a capital is typing")
+	}
+}
+
+// A modifier can now carry a binding, which is what the upgrade was for.
+func TestAnActionCanBeBoundToAModifiedKey(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	a.Keymap.Rebind(keys.Help, keys.Chord{Key: ' ', Mods: keys.ModShift})
+
+	press(a, fromTea(tea.KeyPressMsg{Code: ' ', Text: " "}))
+	if a.Screen == ScreenHelp {
+		t.Fatal("plain space should still fold, not open help")
+	}
+	press(a, fromTea(tea.KeyPressMsg{Code: ' ', Text: " ", Mod: tea.ModShift}))
+	if a.Screen != ScreenHelp {
+		t.Errorf("screen = %v — ⇧␣ did not reach its binding", a.Screen)
 	}
 }

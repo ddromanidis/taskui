@@ -581,7 +581,7 @@ func stringsField(fields map[string]any, key string) []string {
 	}
 }
 
-// applyKeys points actions at different keys. Unknown names and multi-character values are
+// applyKeys points actions at different keys. Unknown names and unreadable values are
 // reported rather than ignored — a rebinding that silently does nothing is worse than one
 // that says why.
 func applyKeys(keymap *keys.Keymap, table map[string]string) []string {
@@ -598,12 +598,12 @@ func applyKeys(keymap *keys.Keymap, table map[string]string) []string {
 			problems = append(problems, fmt.Sprintf("keys: `%s` is not an action", name))
 			continue
 		}
-		runes := []rune(value)
-		if len(runes) != 1 {
-			problems = append(problems, fmt.Sprintf("keys: %s must be a single character, not %q", name, value))
+		chord, err := keys.ParseChord(value)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("keys: %s: %s", name, err))
 			continue
 		}
-		keymap.Rebind(action, runes[0])
+		keymap.Rebind(action, chord)
 	}
 	return problems
 }
@@ -730,15 +730,17 @@ func DumpConfig() string {
 	b.WriteString("# Ring the terminal when a run finishes while you are looking at something else.\n")
 	b.WriteString("# `on`, `off`, or `failed` for only the ones that broke.\n")
 	b.WriteString("bell: on\n\n")
-	b.WriteString("# Rebind any action to a different single character.\n")
+	b.WriteString("# Rebind any action to a different key: a character, or `ctrl+`, `alt+` and\n")
+	b.WriteString("# `shift+` in front of one — `shift+space`, `ctrl+r`. `space` names the space bar.\n")
+	b.WriteString("# Modified keys need a terminal that reports them; without one they never arrive.\n")
 	b.WriteString("# The same action keeps its meaning on every screen that offers it.\n")
 	b.WriteString("keys:\n")
 	for _, a := range keys.All() {
-		quoted := string(a.Key)
-		if !isAlphanumeric(a.Key) {
-			quoted = fmt.Sprintf("%q", string(a.Key))
+		spelling := a.Key.String()
+		if len([]rune(spelling)) == 1 && !isAlphanumeric(a.Key.Key) {
+			spelling = fmt.Sprintf("%q", spelling)
 		}
-		fmt.Fprintf(&b, "  %s: %s\n", a.Name, quoted)
+		fmt.Fprintf(&b, "  %s: %s\n", a.Name, spelling)
 	}
 	b.WriteString("\n")
 	b.WriteString("# How many lines a task shows when its output is folded to a peek.\n")

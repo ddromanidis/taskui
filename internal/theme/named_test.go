@@ -185,7 +185,7 @@ func TestAnUnknownGlyphIsReported(t *testing.T) {
 // point that lies about where it starts.
 func TestADumpedThemeRoundTrips(t *testing.T) {
 	dir := themesIn(t)
-	for _, name := range []string{"default", "90s", "charm", "synthwave"} {
+	for _, name := range []string{"default", "90s", "charm", "synthwave", "y2k", "neubrutalism"} {
 		text, problems := DumpTheme(name)
 		if len(problems) != 0 {
 			t.Fatalf("%s: %v", name, problems)
@@ -232,14 +232,17 @@ func TestConfigOverridesLandOnTopOfTheChosenTheme(t *testing.T) {
 
 // --- animation --------------------------------------------------------------------
 
-// Three of the four shipped themes do not move, and that has to stay true by default: a
-// theme that animates costs a redraw for as long as taskui is open.
-func TestOnlyTheThemeThatAsksForItAnimates(t *testing.T) {
+// Most of the shipped themes do not move, and that has to stay true by default: a theme
+// that animates costs a redraw for as long as taskui is open.
+func TestOnlyTheThemesThatAskForItAnimate(t *testing.T) {
 	themesIn(t)
-	for _, name := range []string{"default", "90s", "charm"} {
+	for _, name := range []string{"default", "90s", "charm", "neubrutalism"} {
 		resolved, _ := LoadTheme(name)
 		if resolved.Animation.Moves() {
 			t.Errorf("%s animates and should not", name)
+		}
+		if resolved.Animation.MaxLean() != 0 {
+			t.Errorf("%s reserves room for a jiggle it does not have", name)
 		}
 	}
 	synth, _ := LoadTheme("synthwave")
@@ -248,6 +251,15 @@ func TestOnlyTheThemeThatAsksForItAnimates(t *testing.T) {
 	}
 	if len(synth.Animation.Frames) != 4 {
 		t.Errorf("frames = %v", synth.Animation.Frames)
+	}
+	// synthwave moves its edges and nothing else. y2k is the one that also leans, and it
+	// leans by exactly one column — two would be a lurch.
+	if synth.Animation.MaxLean() != 0 {
+		t.Errorf("synthwave should not jiggle: %v", synth.Animation.Jiggle)
+	}
+	y2k, _ := LoadTheme("y2k")
+	if y2k.Animation.MaxLean() != 1 {
+		t.Errorf("y2k should lean one column: %v", y2k.Animation.Jiggle)
 	}
 }
 
@@ -337,5 +349,81 @@ func TestAnUnknownAnimationKeyIsReported(t *testing.T) {
 	_, problems := LoadTheme("typo")
 	if len(problems) != 1 || !strings.Contains(problems[0], "selection-frame") {
 		t.Errorf("problems = %v", problems)
+	}
+}
+
+// The lean is read off the same clock as the frames, so a theme sets its speed by writing
+// a longer sequence rather than by asking for a second timer.
+func TestTheJiggleCyclesOnItsOwnLength(t *testing.T) {
+	a := Animation{Jiggle: []int{0, 0, 1, 1}, Interval: DefaultInterval}
+	for phase, want := range map[int]int{0: 0, 1: 0, 2: 1, 3: 1, 4: 0, 6: 1, -1: 1} {
+		if got := a.Lean(phase); got != want {
+			t.Errorf("Lean(%d) = %d, want %d", phase, got, want)
+		}
+	}
+	if a.MaxLean() != 1 {
+		t.Errorf("MaxLean = %d", a.MaxLean())
+	}
+	// A theme with a jiggle and no frames still moves, and still draws the glyph it was
+	// given for the edges it is not animating.
+	if !a.Moves() {
+		t.Error("a jiggle on its own is movement")
+	}
+	if got := a.Frame(3, "▌"); got != "▌" {
+		t.Errorf("Frame = %q", got)
+	}
+}
+
+// Turning the animation off has to take the lean with it, or a still theme would go on
+// reserving a column for a wobble that never comes.
+func TestZeroIntervalStopsTheLeanToo(t *testing.T) {
+	a := Animation{Jiggle: []int{0, 1}}
+	if a.Moves() || a.Lean(1) != 0 || a.MaxLean() != 0 {
+		t.Errorf("a zero interval should leave it still: %+v", a)
+	}
+}
+
+// One digit per frame, and nothing else.
+func TestABadJiggleIsReported(t *testing.T) {
+	dir := themesIn(t)
+	write(t, dir, "loud", "extends: default\nanimation:\n  selection-jiggle: \"0019\"\n")
+	write(t, dir, "prose", "extends: default\nanimation:\n  selection-jiggle: \"wobble\"\n")
+	write(t, dir, "short", "extends: default\nanimation:\n  selection-jiggle: \"1\"\n")
+
+	for name, want := range map[string]string{
+		// 9 columns is a margin, not a wobble.
+		"loud":  "one digit",
+		"prose": "one digit",
+		"short": "at least two",
+	} {
+		resolved, problems := LoadTheme(name)
+		if len(problems) != 1 || !strings.Contains(problems[0], want) {
+			t.Errorf("%s: problems = %v", name, problems)
+		}
+		if resolved.Animation.MaxLean() != 0 {
+			t.Errorf("%s: a refused jiggle should leave the theme still", name)
+		}
+	}
+}
+
+// The two halves come apart, and they come apart from your own config rather than only from
+// a theme file — keeping the lean and dropping the bounce should not be a fork of y2k.
+func TestEitherHalfOfTheAnimationCanBeClearedFromConfig(t *testing.T) {
+	themesIn(t)
+
+	still := loadStr(t, "theme: y2k\nanimation:\n  selection-frames: \"\"\n").Theme.Animation
+	if len(still.Frames) != 0 {
+		t.Errorf("the bounce should be gone: %v", still.Frames)
+	}
+	if still.MaxLean() != 1 || !still.Moves() {
+		t.Errorf("the jiggle should have survived: %+v", still)
+	}
+
+	straight := loadStr(t, "theme: y2k\nanimation:\n  selection-jiggle: \"\"\n").Theme.Animation
+	if straight.MaxLean() != 0 {
+		t.Errorf("the lean should be gone, and its reserved column with it: %+v", straight)
+	}
+	if len(straight.Frames) != 4 || !straight.Moves() {
+		t.Errorf("the bounce should have survived: %+v", straight)
 	}
 }

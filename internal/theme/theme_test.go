@@ -134,13 +134,13 @@ func TestKeysCanBeRebound(t *testing.T) {
 	if len(c.Problems) != 0 {
 		t.Fatalf("problems = %v", c.Problems)
 	}
-	if c.Keymap.Picker('P') != keys.Pivot {
+	if c.Keymap.Picker(keys.Plain('P')) != keys.Pivot {
 		t.Error("the new key does not pivot")
 	}
-	if c.Keymap.Picker('p') != keys.None {
+	if c.Keymap.Picker(keys.Plain('p')) != keys.None {
 		t.Error("the old key should be free")
 	}
-	if c.Keymap.Run('z') != keys.FilterMatches {
+	if c.Keymap.Run(keys.Plain('z')) != keys.FilterMatches {
 		t.Error("filter-matches did not move")
 	}
 }
@@ -152,7 +152,7 @@ func TestBadKeySettingsAreReported(t *testing.T) {
 		t.Fatalf("problems = %v", c.Problems)
 	}
 	joined := strings.Join(c.Problems, "\n")
-	if !strings.Contains(joined, "nonsense") || !strings.Contains(joined, "single character") {
+	if !strings.Contains(joined, "nonsense") || !strings.Contains(joined, "single key") {
 		t.Errorf("problems = %v", c.Problems)
 	}
 }

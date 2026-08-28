@@ -5,8 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"unicode"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/ddromanidis/taskui/internal/keys"
 )
@@ -62,7 +63,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.noteFinished()
 		return a, tea.Batch(a.tick(), a.ringBell())
 
-	case tea.KeyMsg:
+	// Presses only. v2 can also report releases and repeats, but only if a frame asks for
+	// them, and nothing here wants a key twice.
+	case tea.KeyPressMsg:
 		if a.handleKey(fromTea(msg)) {
 			a.shutdown()
 			return a, tea.Quit
@@ -202,55 +205,89 @@ const (
 type Key struct {
 	kind keyKind
 	ch   rune
-	ctrl bool
+	mods keys.Mods
 }
 
-func fromTea(msg tea.KeyMsg) Key {
-	switch msg.Type {
-	case tea.KeyRunes:
-		if len(msg.Runes) > 0 {
-			return Key{kind: keyChar, ch: msg.Runes[0]}
-		}
-		return Key{kind: keyOther}
-	case tea.KeySpace:
-		return Key{kind: keyChar, ch: ' '}
+// fromTea flattens one of Bubble Tea's key events.
+//
+// The special keys come first because several of them are also control codes — ⇥ is 0x09
+// and ⏎ is 0x0d — so asking "is this printable" before asking "is this ⇥" would answer
+// wrong. Space is deliberately not among them: it has always arrived here as a character,
+// and the handlers match it as one.
+func fromTea(msg tea.KeyPressMsg) Key {
+	k := tea.Key(msg)
+	// Caps lock and num lock are states rather than things you hold, and the terminal has
+	// already applied them to the character. Carrying them would make a binding stop working
+	// with caps lock on.
+	mod := k.Mod &^ (tea.ModCapsLock | tea.ModNumLock)
+
+	special := func(kind keyKind) Key { return Key{kind: kind, mods: modsOf(mod)} }
+	switch k.Code {
 	case tea.KeyEnter:
-		return Key{kind: keyEnter}
-	case tea.KeyEsc:
-		return Key{kind: keyEsc}
+		return special(keyEnter)
+	case tea.KeyEscape:
+		return special(keyEsc)
 	case tea.KeyTab:
-		return Key{kind: keyTab}
-	case tea.KeyShiftTab:
-		return Key{kind: keyBackTab}
+		// v2 has no separate shift+⇥ code: it reports ⇥ with shift held, which is the same
+		// event either way.
+		if mod.Contains(tea.ModShift) {
+			return Key{kind: keyBackTab, mods: modsOf(mod &^ tea.ModShift)}
+		}
+		return special(keyTab)
 	case tea.KeyBackspace:
-		return Key{kind: keyBackspace}
+		return special(keyBackspace)
 	case tea.KeyDelete:
-		return Key{kind: keyDelete}
+		return special(keyDelete)
 	case tea.KeyUp:
-		return Key{kind: keyUp}
+		return special(keyUp)
 	case tea.KeyDown:
-		return Key{kind: keyDown}
+		return special(keyDown)
 	case tea.KeyLeft:
-		return Key{kind: keyLeft}
+		return special(keyLeft)
 	case tea.KeyRight:
-		return Key{kind: keyRight}
+		return special(keyRight)
 	case tea.KeyHome:
-		return Key{kind: keyHome}
+		return special(keyHome)
 	case tea.KeyEnd:
-		return Key{kind: keyEnd}
+		return special(keyEnd)
 	case tea.KeyPgUp:
-		return Key{kind: keyPageUp}
+		return special(keyPageUp)
 	case tea.KeyPgDown:
-		return Key{kind: keyPageDown}
-	case tea.KeyCtrlC:
-		return Key{kind: keyChar, ch: 'c', ctrl: true}
-	case tea.KeyCtrlD:
-		return Key{kind: keyChar, ch: 'd', ctrl: true}
-	case tea.KeyCtrlU:
-		return Key{kind: keyChar, ch: 'u', ctrl: true}
-	default:
+		return special(keyPageDown)
+	}
+
+	// Anything with text is a character, and so is anything printable — a control code
+	// arrives as the letter that made it, with ctrl set, and that letter is printable.
+	if k.Text == "" && !unicode.IsPrint(k.Code) {
 		return Key{kind: keyOther}
 	}
+	ch := k.Code
+	if text := []rune(k.Text); len(text) > 0 {
+		// The terminal applies shift itself whenever it changes the character, so `G` arrives
+		// as `G`. Keeping the shift as well would make `G` and `⇧g` two different bindings for
+		// one keystroke — so it is dropped, and survives only on keys shift cannot change.
+		if text[0] != k.Code {
+			mod &^= tea.ModShift
+		}
+		ch = text[0]
+	}
+	return Key{kind: keyChar, ch: ch, mods: modsOf(mod)}
+}
+
+// modsOf keeps the three modifiers that can be bound and discards the rest. Meta, hyper and
+// super are not on every keyboard and not in the config's vocabulary.
+func modsOf(mod tea.KeyMod) keys.Mods {
+	var out keys.Mods
+	if mod.Contains(tea.ModCtrl) {
+		out |= keys.ModCtrl
+	}
+	if mod.Contains(tea.ModAlt) {
+		out |= keys.ModAlt
+	}
+	if mod.Contains(tea.ModShift) {
+		out |= keys.ModShift
+	}
+	return out
 }
 
 // Char builds a plain character keypress, for tests and for `--keys`.
@@ -265,9 +302,20 @@ func Esc() Key { return Key{kind: keyEsc} }
 // Tab is the ⇥ key.
 func Tab() Key { return Key{kind: keyTab} }
 
-func (k Key) isChar(c rune) bool { return k.kind == keyChar && k.ch == c && !k.ctrl }
+// isChar matches one unmodified character. Modified or not is the whole distinction a
+// binding like `shift+space` rests on: if this let ⇧␣ through as ␣, the literal `case`
+// above the keymap would swallow it before the binding was ever consulted.
+func (k Key) isChar(c rune) bool { return k.kind == keyChar && k.ch == c && k.mods == 0 }
 
-func (k Key) isCtrl(c rune) bool { return k.kind == keyChar && k.ch == c && k.ctrl }
+func (k Key) isCtrl(c rune) bool {
+	return k.kind == keyChar && k.ch == c && k.mods == keys.ModCtrl
+}
+
+// typed is a character meant as text: the prompts take shift, because it is already in the
+// character, but not ctrl or alt, which are how you get out of one.
+func (k Key) typed() bool {
+	return k.kind == keyChar && k.mods&(keys.ModCtrl|keys.ModAlt) == 0
+}
 
 // action says which action, if any, this key means on screen.
 //
@@ -275,22 +323,23 @@ func (k Key) isCtrl(c rune) bool { return k.kind == keyChar && k.ch == c && k.ct
 // `keys:` block in `config.yaml` work: the map is consulted here, and the handlers below
 // only ever see actions.
 func (a *App) action(k Key, screen Screen) keys.Action {
-	if k.kind != keyChar || k.ctrl {
+	if k.kind != keyChar {
 		return keys.None
 	}
+	c := keys.Chord{Key: k.ch, Mods: k.mods}
 	switch screen {
 	case ScreenPicker:
-		return a.Keymap.Picker(k.ch)
+		return a.Keymap.Picker(c)
 	case ScreenRun:
-		return a.Keymap.Run(k.ch)
+		return a.Keymap.Run(c)
 	case ScreenHistory:
-		return a.Keymap.History(k.ch)
+		return a.Keymap.History(c)
 	case ScreenTimeline:
-		return a.Keymap.Timeline(k.ch)
+		return a.Keymap.Timeline(c)
 	case ScreenDiff:
-		return a.Keymap.Diff(k.ch)
+		return a.Keymap.Diff(c)
 	case ScreenProfile:
-		return a.Keymap.Profile(k.ch)
+		return a.Keymap.Profile(c)
 	default:
 		return keys.None
 	}
@@ -472,7 +521,7 @@ func (a *App) handleArgsKey(k Key) {
 		a.ArgsHome()
 	case k.kind == keyEnd:
 		a.ArgsEnd()
-	case k.kind == keyChar && !k.ctrl:
+	case k.typed():
 		a.ArgsInsert(k.ch)
 	}
 }
@@ -489,7 +538,7 @@ func (a *App) handleJumpKey(k Key) {
 		a.JumpStep(1)
 	case k.kind == keyUp, k.kind == keyBackTab:
 		a.JumpStep(-1)
-	case k.kind == keyChar && !k.ctrl:
+	case k.typed():
 		a.PushJump(k.ch)
 	}
 }
@@ -510,7 +559,7 @@ func (a *App) handleFilterKey(k Key) bool {
 		return true
 	case k.kind == keyDown, k.kind == keyUp:
 		return false
-	case k.kind == keyChar && !k.ctrl:
+	case k.typed():
 		a.PushQuery(k.ch)
 		return true
 	default:
@@ -676,7 +725,7 @@ func (a *App) handleHistoryKey(k Key) bool {
 			a.HistoryMoveCursor(1)
 		case k.kind == keyUp:
 			a.HistoryMoveCursor(-1)
-		case k.kind == keyChar && !k.ctrl:
+		case k.typed():
 			a.PushHistorySearch(k.ch)
 		}
 		return false
@@ -748,7 +797,9 @@ func (a *App) handleRunKey(k Key) bool {
 			a.SendInput([]byte{0x03})
 		case k.isCtrl('d'):
 			a.SendInput([]byte{0x04})
-		case k.kind == keyChar:
+		// What was typed, not what was held: a modified key used to arrive here
+		// indistinguishable from its bare letter, so ⌃z sent the child a `z`.
+		case k.typed():
 			a.SendInput([]byte(string(k.ch)))
 		}
 		return false
@@ -777,7 +828,7 @@ func (a *App) handleRunKey(k Key) bool {
 		case k.kind == keyUp:
 			a.SearchStep(-1)
 			return false
-		case k.kind == keyChar && !k.ctrl:
+		case k.typed():
 			a.PushSearch(k.ch)
 			return false
 		}
@@ -935,7 +986,7 @@ func (a *App) handleRunKey(k Key) bool {
 
 	// Jump straight to a slot, as the bar numbers them. Last, so that rebinding an action
 	// onto a digit still wins — the keymap is the thing users can change.
-	case k.kind == keyChar && k.ch >= '1' && k.ch <= '9' && !k.ctrl:
+	case k.typed() && k.ch >= '1' && k.ch <= '9':
 		a.FocusSlotNumber(int(k.ch - '0'))
 	}
 	return false

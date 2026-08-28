@@ -718,7 +718,7 @@ the status bar rather than swallowed — a setting that silently does nothing is
 one that says why:
 
 ```
-config: colors: `acccent` is not a colour setting; keys: pivot must be a single character
+config: colors: `acccent` is not a colour setting; keys: pivot: `pp` is not a single key
 ```
 
 Scalars can also come from the environment, prefixed and upper-cased:
@@ -735,10 +735,12 @@ taskui --list-themes
   90s          ░▒▓ TASKUI ▓▒░
   charm        taskui
   default      taskui
+  neubrutalism [ TASKUI ]
   synthwave    ▄▀▄ TASKUI ▄▀▄
+  y2k          ✧･ﾟ TASKUI ･ﾟ✧
 ```
 
-Four ship inside the binary. `default` uses ANSI names throughout, so it follows your
+Six ship inside the binary. `default` uses ANSI names throughout, so it follows your
 terminal's own colourscheme rather than arguing with it. `90s` does the opposite on
 purpose — pinned magenta and cyan, double-ruled boxes, blocky arrows — because a vaporwave
 palette that politely deferred to your Solarized scheme would not be one. `charm` is after
@@ -746,6 +748,15 @@ palette that politely deferred to your Solarized scheme would not be one. `charm
 pink, mint, and restraint everywhere else. `synthwave` is the loud one: the genre's five
 colours, half blocks instead of hairlines, and a selected row that is raised rather than
 highlighted.
+
+`y2k` is the millennium: chrome silver doing the structural work, bubblegum and lilac on
+top of it, and a selected row bevelled like a button you could press. It is also the only
+one that wobbles — see below. `neubrutalism` is the opposite temperament: the heaviest
+guides and rules the box-drawing set has, six flat colours each meaning exactly one thing,
+and a selected row that is a black block with a thick yellow border and a hard offset
+shadow. A terminal has no canvas to paint off-white and no corner radius to set to zero, so
+that theme carries the parts of the style that survive the translation — the border, the
+zero-blur shadow, the categorical colour — rather than pretending to the ones that do not.
 
 #### Raised rows
 
@@ -773,15 +784,16 @@ layout.
 #### Making it move
 
 A terminal cannot move a row without moving everything under it, so nothing animates
-position — a list that shifted while you were reading it would be a bad trade for any
-amount of charm. What can move is the cursor's own two columns: give them a sequence of
-half blocks and the marker climbs to the top of its cell, fills it, drops to the bottom and
-comes back.
+vertical position — a list that shifted while you were reading it would be a bad trade for
+any amount of charm. Two things can move. The cursor's own two columns: give them a
+sequence of half blocks and the marker climbs to the top of its cell, fills it, drops to
+the bottom and comes back. And the selected row's text, sideways, which is the jiggle.
 
 ```yaml
 animation:
   selection-frames: "▀█▄█"
-  interval-ms: 280
+  selection-jiggle: "000000111111100"
+  interval-ms: 320
 ```
 
 Frames are one string rather than a list, because that is what a sequence looks like. Each
@@ -789,11 +801,37 @@ is one column, same rule as the glyphs. Anything from 40ms to 2s is accepted —
 it is a strobe, above it it stops reading as motion — and `interval-ms: 0` turns it off,
 which is how a theme extending `synthwave` stops it moving without losing the rest.
 
-Off unless a theme asks for it, and only `synthwave` does. A theme that animates costs a
-redraw every interval for as long as taskui is open — cheap, but not nothing, and not a
-decision to make on somebody else's behalf. `taskui --theme synthwave --screenshot 92x20
---phase 2 --colour .` renders one frame of it if you want to look at the sequence a step at
-a time.
+The jiggle is one digit per frame saying how many columns right the row sits: `0` is home,
+`1` and `2` lean. Both sequences run off the same clock, so **the length is the speed** —
+`"01"` wobbles every frame, and the fifteen digits above spend about two and a half seconds
+on each side at 320ms. That is how you ask for something slow without a second timer racing
+the first. Fifteen against four frames also share no factor, so the pair only comes back
+round every sixty frames, which is the difference between something that moves and
+something that ticks.
+
+The two halves are independent, and `animation:` works in your own `config.yaml` as well as
+in a theme file — so keeping one and dropping the other is a line, not a fork:
+
+```yaml
+theme: y2k
+animation:
+  selection-frames: ""    # the bounce off, the jiggle kept
+  # selection-jiggle: "" — the other way round, and the reserved column goes back to the row
+  # interval-ms: 0       — both off, nothing redraws at all
+```
+
+Sideways is safe in a way that up and down is not: the row keeps its line, so nothing under
+it moves. The room it leans into is reserved on *every* row, whether or not that row is the
+one moving — a row that got wider as it leaned would have to take the column out of its own
+right edge, where the counts and the timestamps are, and you would watch a `13` become a
+`1` every time the cursor went past. A theme that wobbles pays one column of width, once,
+in layout.
+
+Off unless a theme asks for it: `synthwave` moves its edges, `y2k` moves its edges and
+leans, and nothing else does either. A theme that animates costs a redraw every interval
+for as long as taskui is open — cheap, but not nothing, and not a decision to make on
+somebody else's behalf. `taskui --theme y2k --screenshot 92x20 --phase 8 --colour .`
+renders one frame of it if you want to look at the sequence a step at a time.
 
 None of them has any special standing. A file in `~/.config/taskui/themes/` shadows a
 built-in of the same name, so nothing that ships is a decision you are stuck with.
@@ -900,7 +938,7 @@ round-trip test read from the same source as the renderer.
 
 ### Keys
 
-Every action can be pointed at a different character. The action keeps its meaning on every
+Every action can be pointed at a different key. The action keeps its meaning on every
 screen that offers it, so rebinding `filter-matches` moves it in the run view and nowhere
 else has to care:
 
@@ -909,10 +947,24 @@ keys:
   pivot: P
   filter-matches: z
   stop-all: Q
+  fold-all: shift+space
+  rerun: ctrl+r
 ```
 
+A key is a character, or `ctrl+`, `alt+` and `shift+` in front of one. `space` names the
+space bar, since a lone space in YAML is not a thing you can write and read back.
+
+`shift+` only works on keys shift cannot change — `space`, and the same key under `ctrl` or
+`alt`. On a letter the shift is already in the character, so `G` is the binding and
+`shift+g` is refused rather than accepted and never fired. Modified keys also need a
+terminal that reports them: Kitty, Ghostty, WezTerm, foot, recent Alacritty and iTerm2 do.
+Somewhere that does not, `ctrl+r` arrives as plain `r` and `shift+space` as plain space, so
+keep anything you need everywhere on a plain character.
+
 `taskui --dump-config` lists every action name. A key bound to two actions on one screen is
-reported rather than silently resolved — a shadowed key looks like a broken one.
+reported rather than silently resolved — a shadowed key looks like a broken one. What `?`
+and the footer print is written by hand, so a rebinding moves the key without moving the
+label.
 
 ### Everything else
 

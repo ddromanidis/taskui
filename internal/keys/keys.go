@@ -9,6 +9,7 @@ package keys
 import (
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -63,6 +64,99 @@ const (
 	Detach
 	RerunFailed
 )
+
+// Mods is what was held down with a key.
+type Mods uint8
+
+const (
+	ModCtrl Mods = 1 << iota
+	ModAlt
+	ModShift
+)
+
+// Chord is a key and its modifiers — what a binding actually is.
+//
+// Shift only ever appears here for keys it cannot change: ␣, and whatever else a terminal
+// reports unshifted. On a letter the shift is already in the rune, so `G` is a chord with no
+// modifiers and `shift+g` is not a way to spell it.
+type Chord struct {
+	Key  rune
+	Mods Mods
+}
+
+// Plain is the chord for one unmodified character, which is what every default is.
+func Plain(key rune) Chord { return Chord{Key: key} }
+
+// String is the config spelling, so what Conflicts reports and what `--dump-config` writes
+// are the same thing you would type back in.
+func (c Chord) String() string {
+	var b strings.Builder
+	for _, m := range []struct {
+		bit  Mods
+		name string
+	}{{ModCtrl, "ctrl"}, {ModAlt, "alt"}, {ModShift, "shift"}} {
+		if c.Mods&m.bit != 0 {
+			b.WriteString(m.name)
+			b.WriteString("+")
+		}
+	}
+	if c.Key == ' ' {
+		b.WriteString("space")
+	} else {
+		b.WriteRune(c.Key)
+	}
+	return b.String()
+}
+
+// modNames is the vocabulary ParseChord accepts, and the only one.
+var modNames = map[string]Mods{"ctrl": ModCtrl, "alt": ModAlt, "shift": ModShift}
+
+// ParseChord reads a binding: a single character, or modifiers and a key joined by `+`.
+//
+// `space` names the one key you cannot write literally in a config and read back later. `+`
+// itself is a character, so a bare `+` parses as that key rather than as an empty modifier —
+// which is why the split only happens when there is something on both sides.
+func ParseChord(s string) (Chord, error) {
+	if s == "" {
+		return Chord{}, fmt.Errorf("empty")
+	}
+	var mods Mods
+	for {
+		i := strings.Index(s, "+")
+		if i <= 0 || i == len(s)-1 {
+			break
+		}
+		name := strings.ToLower(s[:i])
+		bit, ok := modNames[name]
+		if !ok {
+			return Chord{}, fmt.Errorf("`%s` is not a modifier — use ctrl, alt or shift", name)
+		}
+		if mods&bit != 0 {
+			return Chord{}, fmt.Errorf("`%s` twice", name)
+		}
+		mods |= bit
+		s = s[i+1:]
+	}
+
+	key := s
+	if strings.EqualFold(key, "space") {
+		key = " "
+	}
+	runes := []rune(key)
+	if len(runes) != 1 {
+		return Chord{}, fmt.Errorf("`%s` is not a single key", key)
+	}
+	// Shift on a bare letter is the one mistake worth naming: it looks reasonable, and it
+	// would silently never match, because the terminal sends `G` and not shift+`g`. With ctrl
+	// or alt also held the key produces no text, so the shift is reported separately and does
+	// mean something.
+	folded := mods&(ModCtrl|ModAlt) == 0
+	if folded && mods&ModShift != 0 && unicode.ToUpper(runes[0]) != unicode.ToLower(runes[0]) {
+		return Chord{}, fmt.Errorf("shift is already in `%c` — write `%c` instead",
+			runes[0], unicode.ToUpper(runes[0]))
+	}
+	return Chord{Key: runes[0], Mods: mods}, nil
+}
 
 type binding struct {
 	action Action
@@ -214,26 +308,26 @@ func ActionByName(name string) (Action, bool) {
 // All lists every action with its default key and config name, in table order.
 func All() []struct {
 	Action Action
-	Key    rune
+	Key    Chord
 	Name   string
 } {
 	out := make([]struct {
 		Action Action
-		Key    rune
+		Key    Chord
 		Name   string
 	}, 0, len(defaults))
 	for _, d := range defaults {
 		out = append(out, struct {
 			Action Action
-			Key    rune
+			Key    Chord
 			Name   string
-		}{d.action, d.key, d.name})
+		}{d.action, Plain(d.key), d.name})
 	}
 	return out
 }
 
 type bound struct {
-	key    rune
+	chord  Chord
 	action Action
 }
 
@@ -255,7 +349,7 @@ func NewKeymap() *Keymap {
 	build := func(actions []Action) []bound {
 		out := make([]bound, 0, len(actions))
 		for _, a := range actions {
-			out = append(out, bound{defaultKey(a), a})
+			out = append(out, bound{Plain(defaultKey(a)), a})
 		}
 		return out
 	}
@@ -279,28 +373,28 @@ func (k *Keymap) Clone() *Keymap {
 }
 
 // Rebind points an action at a different key, wherever that action is available.
-func (k *Keymap) Rebind(action Action, key rune) {
+func (k *Keymap) Rebind(action Action, chord Chord) {
 	for _, m := range [][]bound{k.picker, k.run, k.history, k.timeline, k.diff, k.profile} {
 		for i := range m {
 			if m[i].action == action {
-				m[i].key = key
+				m[i].chord = chord
 			}
 		}
 	}
 }
 
-func (k *Keymap) Picker(key rune) Action   { return look(k.picker, key) }
-func (k *Keymap) Run(key rune) Action      { return look(k.run, key) }
-func (k *Keymap) History(key rune) Action  { return look(k.history, key) }
-func (k *Keymap) Timeline(key rune) Action { return look(k.timeline, key) }
-func (k *Keymap) Diff(key rune) Action     { return look(k.diff, key) }
-func (k *Keymap) Profile(key rune) Action  { return look(k.profile, key) }
+func (k *Keymap) Picker(c Chord) Action   { return look(k.picker, c) }
+func (k *Keymap) Run(c Chord) Action      { return look(k.run, c) }
+func (k *Keymap) History(c Chord) Action  { return look(k.history, c) }
+func (k *Keymap) Timeline(c Chord) Action { return look(k.timeline, c) }
+func (k *Keymap) Diff(c Chord) Action     { return look(k.diff, c) }
+func (k *Keymap) Profile(c Chord) Action  { return look(k.profile, c) }
 
 // look returns the first match, so a rebinding that collides with another action shadows
 // it rather than doing both.
-func look(m []bound, key rune) Action {
+func look(m []bound, c Chord) Action {
 	for _, b := range m {
-		if b.key == key {
+		if b.chord == c {
 			return b.action
 		}
 	}
@@ -324,9 +418,9 @@ func (k *Keymap) Conflicts() []string {
 	} {
 		for i, b := range screen.m {
 			for _, earlier := range screen.m[:i] {
-				if earlier.key == b.key {
-					out = append(out, fmt.Sprintf("%s: `%c` is both %s and %s",
-						screen.name, b.key, ActionName(earlier.action), ActionName(b.action)))
+				if earlier.chord == b.chord {
+					out = append(out, fmt.Sprintf("%s: `%s` is both %s and %s",
+						screen.name, b.chord, ActionName(earlier.action), ActionName(b.action)))
 					break
 				}
 			}

@@ -15,6 +15,7 @@ import (
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/store"
 	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/ddromanidis/taskui/internal/theme"
 )
 
 func viewSample(t *testing.T) *App {
@@ -871,5 +872,90 @@ func TestEveryDescriptionStartsInOneColumn(t *testing.T) {
 	}
 	if len(columns) != 1 {
 		t.Errorf("descriptions start in %d different columns: %v", len(columns), columns)
+	}
+}
+
+// --- the jiggle -------------------------------------------------------------------
+//
+// A theme is allowed to lean the selected row sideways. What it is not allowed to do is
+// change how much room the row has, because the column it would take is the one holding
+// the count at the right edge — so the room is reserved on every row, and the lean moves
+// content around inside it.
+
+func jiggling(t *testing.T, lean []int) *App {
+	t.Helper()
+	a := viewSample(t)
+	a.Theme.Animation = theme.Animation{Jiggle: lean, Interval: theme.DefaultInterval}
+	return a
+}
+
+func TestALeaningRowIsStillExactlyAsWideAsEveryOtherRow(t *testing.T) {
+	a := jiggling(t, []int{0, 1})
+	const width = 70
+	for _, phase := range []int{0, 1} {
+		a.Phase = phase
+		frame := a.RenderFrame(width, 12)
+		for i, row := range strings.Split(frame, "\n") {
+			if n := lipgloss.Width(row); n != width {
+				t.Errorf("phase %d row %d is %d columns, want %d", phase, i, n, width)
+			}
+		}
+	}
+}
+
+// The point of reserving the room: the same text is on the row whether it is leaning or
+// not, one column further along.
+func TestTheLeanMovesTheRowRatherThanTrimmingIt(t *testing.T) {
+	a := jiggling(t, []int{0, 1})
+
+	a.Phase = 0
+	still := a.RenderHeadless(70, 12)[0+2]
+	a.Phase = 1
+	leaning := a.RenderHeadless(70, 12)[0+2]
+
+	if still == leaning {
+		t.Fatal("the row did not move")
+	}
+	// Past the rail, which is the frame rather than the thing framed and does not move.
+	content := func(row string) string { return strings.TrimSpace(string([]rune(row)[1:])) }
+	if content(leaning) != content(still) {
+		t.Errorf("the lean changed the row's content:\n  %q\n  %q", still, leaning)
+	}
+	// Specifically including the count at the right edge, which is what a lean that took the
+	// column out of the row's own width would have eaten.
+	if !strings.HasSuffix(content(leaning), "2") {
+		t.Errorf("the count did not survive the lean: %q", leaning)
+	}
+}
+
+// Every other row holds the room open too, so the list does not reflow as the cursor goes
+// past — the unselected rows are identical whatever the phase.
+func TestOnlyTheSelectedRowLeans(t *testing.T) {
+	a := jiggling(t, []int{0, 1})
+	a.Phase = 0
+	before := a.RenderHeadless(70, 12)
+	a.Phase = 1
+	after := a.RenderHeadless(70, 12)
+
+	moved := 0
+	for i := range before {
+		if before[i] != after[i] {
+			moved++
+		}
+	}
+	if moved != 1 {
+		t.Errorf("%d rows moved, want just the selected one", moved)
+	}
+}
+
+// A theme that does not jiggle keeps every column it had, or every existing theme quietly
+// lost one.
+func TestAStillThemeReservesNothing(t *testing.T) {
+	still := viewSample(t)
+	if got := still.bodyWidth(70); got != 70-frameWidth {
+		t.Errorf("bodyWidth = %d, want %d", got, 70-frameWidth)
+	}
+	if got := jiggling(t, []int{0, 2}).bodyWidth(70); got != 70-frameWidth-2 {
+		t.Errorf("a jiggling theme should reserve its lean, got %d", got)
 	}
 }

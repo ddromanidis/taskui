@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -20,9 +21,20 @@ import (
 // splits later than the picker.
 const minRunColumn = 60
 
-// View renders one frame. Rendering to a string rather than into a cell buffer is what
+// View is what Bubble Tea asks for: the frame, plus the terminal state the frame wants.
+//
+// The alternate screen is declared here rather than passed to NewProgram because that is
+// where v2 moved it — a frame now carries the modes it needs, so there is one answer to
+// "are we on the alternate screen" instead of a startup flag and a pair of commands.
+func (a *App) View() tea.View {
+	v := tea.NewView(a.frame())
+	v.AltScreen = true
+	return v
+}
+
+// frame renders one frame. Rendering to a string rather than into a cell buffer is what
 // makes `--screenshot` and the render tests the same code path as the live UI.
-func (a *App) View() string {
+func (a *App) frame() string {
 	width, height := a.Width, a.Height
 	if width <= 0 || height <= 0 {
 		return ""
@@ -145,7 +157,7 @@ func (a *App) hairline(width int) string {
 // which is what RenderHeadless returns.
 func (a *App) RenderFrame(w, h int) string {
 	a.Width, a.Height = w, h
-	return a.View()
+	return a.frame()
 }
 
 // RenderHeadless renders one frame to plain text off-screen. It backs both the render
@@ -852,7 +864,7 @@ func (a *App) drawRun(width, height int) []string {
 	// measured once to decide and again to lay out.
 	single := 0
 	for _, r := range a.RunRows {
-		single += a.runRowHeight(r, width-frameWidth)
+		single += a.runRowHeight(r, a.bodyWidth(width))
 	}
 	columns := 1
 	if single > height {
@@ -866,7 +878,7 @@ func (a *App) drawRun(width, height int) []string {
 
 	heights := make([]int, len(a.RunRows))
 	for i, r := range a.RunRows {
-		heights[i] = a.runRowHeight(r, colWidth-frameWidth)
+		heights[i] = a.runRowHeight(r, a.bodyWidth(colWidth))
 	}
 
 	a.RunCursor = min(a.RunCursor, max(0, len(a.RunRows)-1))
@@ -876,7 +888,7 @@ func (a *App) drawRun(width, height int) []string {
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.runRowLines(a.RunRows[i], colWidth-frameWidth))
+			out = append(out, a.runRowLines(a.RunRows[i], a.bodyWidth(colWidth)))
 		}
 		return out
 	}
@@ -1000,6 +1012,17 @@ const countWidth = 4
 // Both are reserved whatever the theme does with them, so a row is the same width in every
 // look. Geometry that changed with the colours would be a theme that could break a layout.
 const frameWidth = 2
+
+// bodyWidth is how much of a row is content: everything the cursor's frame does not take,
+// less whatever room the theme's jiggle needs to lean into.
+//
+// One function rather than the subtraction spelled out at each site, because the number has
+// to be the same on both sides of the render: this is what decides where text wraps, and
+// renderRow does the same arithmetic to decide where to draw it. The two disagreeing by one
+// column is a row that wraps a word it then has space for.
+func (a *App) bodyWidth(width int) int {
+	return width - frameWidth - a.Theme.Animation.MaxLean()
+}
 
 // lastOfParent reports whether the row at i is the final child of whatever contains it, so
 // the guide can be a corner rather than a tee. Without it every branch looks like it has a
@@ -1186,7 +1209,7 @@ func (a *App) drawTree(width, height int) []string {
 
 	heights := make([]int, len(a.Rows))
 	for i := range a.Rows {
-		heights[i] = len(a.treeItem(a.Rows[i], a.lastOfParent(i), colWidth-frameWidth))
+		heights[i] = len(a.treeItem(a.Rows[i], a.lastOfParent(i), a.bodyWidth(colWidth)))
 	}
 
 	a.Cursor = min(a.Cursor, max(0, len(a.Rows)-1))
@@ -1196,7 +1219,7 @@ func (a *App) drawTree(width, height int) []string {
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.treeItem(a.Rows[i], a.lastOfParent(i), colWidth-frameWidth))
+			out = append(out, a.treeItem(a.Rows[i], a.lastOfParent(i), a.bodyWidth(colWidth)))
 		}
 		return out
 	}

@@ -214,7 +214,7 @@ func (a *App) drawDiff(width, height int) []string {
 	// Two numbers, a space between them, the marker, and a space: the fixed left edge every
 	// row shares.
 	prefix := pad*2 + 3
-	room := max(8, width-frameWidth-prefix-1)
+	room := max(8, a.bodyWidth(width)-prefix-1)
 
 	out := make([]string, 0, height)
 	for i := a.DiffOffset; i < len(a.DiffRows) && len(out) < height; i++ {

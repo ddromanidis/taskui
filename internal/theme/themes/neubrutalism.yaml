@@ -1,0 +1,114 @@
+# neubrutalism — hard edges, flat colour, one very obvious shadow.
+#
+# The style is defined by three things: a border thick enough to be the object rather than
+# its outline, a drop shadow with no blur at all, and two or three saturated colours used
+# categorically — this colour means this thing — against a black-and-off-white base.
+#
+# A terminal gives you none of the canvas. There is no background to paint off-white, no
+# corner radius to set to zero, no 4px anything. So this theme carries the parts that
+# survive the translation and drops the ones that do not:
+#
+#   the border      → the heaviest guides and rules the box-drawing set has
+#   the shadow      → `selection-shade` as a full block, which is a hard offset shadow with
+#                     zero blur, because a terminal cell cannot blur even if it wanted to
+#   the colour      → six flat fills, each meaning exactly one thing, never blended
+#
+# What it will not do is pretend. Black-on-off-white is the canonical neubrutalist canvas
+# and this is off-white-on-whatever-your-terminal-is, which is the same structure lit from
+# the other side. The alternative was writing a theme that is invisible on a dark terminal
+# out of loyalty to a background it cannot set.
+#
+# Nothing moves. The style is a still one — it is about objects that sit exactly where they
+# were put, with an edge you could cut yourself on — and a wobble would be arguing with it.
+extends: default
+
+colors:
+  # Yellow is the load-bearing colour, violet answers it. The pairing is the visual
+  # backbone of the style and it is doing the same job here it does on a page.
+  accent: "#ffd23f"
+  mode: "#b8a9fa"
+
+  # No greys, because there is no such thing as an ambient colour here. The structure is
+  # off-white and the thing behind the structure is a flat dimmer off-white.
+  dim: "#fffdf5"
+  faint: "#8a8578"
+  rule: "#fffdf5"
+  text: default
+
+  # The object: a black block, a thick yellow border down its left, and its own shadow
+  # down its right. The shadow is the same black as the block — offset, not blurred, not
+  # tinted, which is the entire rule.
+  selection: "#000000"
+  selection-light: "#ffd23f"
+  selection-shade: "#000000"
+
+  alias: "#74b9ff"
+  danger: "#ff6b6b"
+
+  # Categorical, not ambient: each of these means one thing and is never mixed with the
+  # one beside it.
+  status-ok: "#88d498"
+  status-running: "#ffd23f"
+  status-failed: "#ff6b6b"
+  status-skipped: "#8a8578"
+  status-pending: "#8a8578"
+
+  command: "#74b9ff"
+
+  search: "#b8a9fa"
+  match-fg: "#000000"
+  match-bg: "#ffd23f"
+
+  location: "#74b9ff"
+
+  diff-added: "#88d498"
+  diff-removed: "#ff6b6b"
+
+  notice: "#ffa552"
+  stored: "#b8a9fa"
+  interactive: "#88d498"
+  warning-fg: "#000000"
+  warning-bg: "#ffa552"
+  confirm-fg: "#000000"
+  confirm-bg: "#ff6b6b"
+
+glyphs:
+  # The name in a box, because everything in this style is in a box.
+  wordmark: "[ TASKUI ]"
+  separator: "▪"
+  dot: "▪"
+
+  # Squares, not triangles. A triangle is a soft shape.
+  fold-open: "▼"
+  fold-closed: "▶"
+  fold-peek: "◧"
+
+  # Heavy guides — the thickest the box-drawing set offers, which is as close as a terminal
+  # gets to a 4px border.
+  guide-branch: "┣"
+  guide-last: "┗"
+  guide-vertical: "┃"
+
+  # The border and the shadow. Full blocks both: a half block would be a bevel, and a bevel
+  # implies a light source this style does not have.
+  rail: "█"
+  selection-shade: "█"
+
+  # A rule you could not miss.
+  rule: "━"
+
+  command: "▶"
+  warning: "■"
+  bar: "█"
+
+  diff-added: "+"
+  diff-removed: "-"
+  diff-gap: "▪"
+  danger: "■"
+  cursor: "█"
+
+  status-ok: "■"
+  status-failed: "✖"
+  status-running: "▶"
+  status-pending: "□"
+  status-skipped: "▫"

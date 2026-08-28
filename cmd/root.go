@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
@@ -304,7 +304,8 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	// New because it shells out, and only the interactive path has a use for the answer.
 	a.StartEnrichment()
 
-	program := tea.NewProgram(a, tea.WithAltScreen())
+	// No options: the alternate screen is a property of the frame now, and App.View sets it.
+	program := tea.NewProgram(a)
 	_, err = program.Run()
 	return err
 }

@@ -104,17 +104,42 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 	}
 	left, leftStyle := " ", lipgloss.NewStyle()
 	right, rightStyle := " ", lipgloss.NewStyle()
+
+	// The room the jiggle needs, held open on every row whether or not this one is the one
+	// moving. See Animation.MaxLean: a row that widened as it leaned would take the column
+	// off its own right edge, which is where the counts are.
+	room := min(t.Animation.MaxLean(), max(0, width-frameWidth-1))
+	lean := 0
+
 	if selected {
 		// Both edges take the same frame, so the marker travels up and down as one rather
-		// than tilting. The row itself never moves — a terminal cannot move one row without
+		// than tilting. The row keeps its line — a terminal cannot move one row without
 		// moving everything under it, and a list that shifted while you read it would be a
-		// worse trade than any amount of charm.
+		// worse trade than any amount of charm. Sideways it can move, because the row still
+		// starts and ends exactly where it did.
 		left = t.Animation.Frame(phase, t.Glyphs.Rail)
 		right = t.Animation.Frame(phase, t.Glyphs.SelectionShade)
 		leftStyle, rightStyle = fgBold(t.Colors.SelectionLight), fg(t.Colors.SelectionShade)
+		lean = min(t.Animation.Lean(phase), room)
 	}
+
+	// Both sides of the lean are part of the row, so on a selected row they carry the
+	// selection with them — otherwise the highlight would develop a gap that moved.
+	gap := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		spaces := strings.Repeat(" ", n)
+		if selected {
+			return selectionOf(lipgloss.NewStyle(), t.Colors.Selection).Render(spaces)
+		}
+		return spaces
+	}
+
 	return leftStyle.Render(left) +
-		l.render(width-frameWidth, selected, t.Colors.Selection) +
+		gap(lean) +
+		l.render(width-frameWidth-room, selected, t.Colors.Selection) +
+		gap(room-lean) +
 		rightStyle.Render(right)
 }
 
