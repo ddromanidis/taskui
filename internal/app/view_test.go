@@ -1135,3 +1135,63 @@ func TestATallRowsRailIsOneBarThatStillMoves(t *testing.T) {
 		t.Error("a tall row should still lean")
 	}
 }
+
+// --- the wordmark -------------------------------------------------------------------
+
+// `{project}` is what lets the header name what you are looking at rather than the tool you
+// are looking at it with, without the theme giving up its decoration to do it.
+func TestTheWordmarkCanNameTheProject(t *testing.T) {
+	a := viewSample(t) // rooted at /tmp/atlas
+	a.Theme.Glyphs.Wordmark = "✧ {project} ✧"
+
+	head := a.RenderHeadless(70, 12)[0]
+	if !strings.Contains(head, "✧ atlas ✧") {
+		t.Errorf("header = %q", head)
+	}
+	// …and having named it, it does not name it again.
+	if strings.Count(head, "atlas") != 1 {
+		t.Errorf("the project is in the header twice: %q", head)
+	}
+}
+
+// `{frame}` is where the wordmark's own sequence goes.
+func TestTheWordmarkCanTwinkle(t *testing.T) {
+	a := viewSample(t)
+	a.Theme.Glyphs.Wordmark = "{frame} TASKUI {frame}"
+	a.Theme.Animation = theme.Animation{
+		WordmarkFrames: []string{"✧", "✦"}, Interval: theme.DefaultInterval,
+	}
+
+	a.Phase = 0
+	first := a.RenderHeadless(70, 12)[0]
+	a.Phase = 1
+	second := a.RenderHeadless(70, 12)[0]
+
+	if !strings.Contains(first, "✧ TASKUI ✧") || !strings.Contains(second, "✦ TASKUI ✦") {
+		t.Errorf("the wordmark did not cycle:\n  %q\n  %q", first, second)
+	}
+	// A theme that leaves `{frame}` in but switches the animation off closes the gap rather
+	// than printing the placeholder at somebody.
+	a.Theme.Animation.Interval = 0
+	if got := a.RenderHeadless(70, 12)[0]; strings.Contains(got, "{frame}") {
+		t.Errorf("the placeholder leaked into the header: %q", got)
+	}
+}
+
+// The header used to print the name twice for any theme whose decoration was not on a
+// hardcoded list — which is what happened the moment two themes were added.
+func TestEveryShippedWordmarkStripsToItsName(t *testing.T) {
+	for mark, want := range map[string]string{
+		"taskui":         "taskui",
+		"░▒▓ TASKUI ▓▒░": "TASKUI",
+		"▄▀▄ TASKUI ▄▀▄": "TASKUI",
+		"✧･ﾟ TASKUI ･ﾟ✧": "TASKUI",
+		"[ TASKUI ]":     "TASKUI",
+		"»» my-repo ««":  "my-repo",
+		"★ project 2 ★":  "project 2",
+	} {
+		if got := plainWordmark(mark); got != want {
+			t.Errorf("plainWordmark(%q) = %q, want %q", mark, got, want)
+		}
+	}
+}

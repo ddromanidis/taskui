@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -185,12 +186,18 @@ func (a *App) RenderHeadless(w, h int) []string {
 // in the same place, so the eye knows where to look for "how many tasks" or "did it fail"
 // without reading the left-hand side first.
 func (a *App) header(subject string, state []span) line {
-	g := a.Theme.Glyphs
-	l := line{plain(" "), styled(g.Wordmark, fgBold(a.Theme.Colors.Accent))}
+	mark := a.wordmark()
+	l := line{plain(" "), styled(mark, fgBold(a.Theme.Colors.Accent))}
 	// `taskui · taskui` — the wordmark, then a directory that happens to share its name —
 	// reads as a bug, and spends the most valuable row on the screen saying it twice.
-	if subject != "" && !strings.EqualFold(subject, plainWordmark(g.Wordmark)) {
-		l = append(l, styled(" "+g.Separator+" ", fg(a.Theme.Colors.Faint)), styled(subject, bold()))
+	//
+	// Compared against the wordmark as drawn rather than as written, so a theme that put
+	// `{project}` in it is caught by the same rule that catches one whose name happens to
+	// match.
+	if subject != "" && !strings.EqualFold(subject, plainWordmark(mark)) {
+		l = append(l,
+			styled(" "+a.Theme.Glyphs.Separator+" ", fg(a.Theme.Colors.Faint)),
+			styled(subject, bold()))
 	}
 	used := 0
 	for _, s := range l {
@@ -232,10 +239,47 @@ func statusGlyph(status run.Status, t theme.Theme) string {
 	}
 }
 
+// projectPlaceholder is what a wordmark writes to mean "whatever this project is called",
+// and framePlaceholder is where the wordmark's animation goes.
+const (
+	projectPlaceholder = "{project}"
+	framePlaceholder   = "{frame}"
+)
+
+// wordmark is the theme's wordmark with its placeholders filled in.
+//
+// `{project}` is what makes the header able to name the thing you are looking at rather
+// than the tool you are looking at it with, without a theme having to give up its own
+// decoration to do it: `"✧･ﾟ {project} ･ﾟ✧"` keeps the sparkles and changes the middle.
+func (a *App) wordmark() string {
+	mark := a.Theme.Glyphs.Wordmark
+	if strings.Contains(mark, projectPlaceholder) {
+		name := baseName(a.Root)
+		if name == "" {
+			name = a.Root
+		}
+		mark = strings.ReplaceAll(mark, projectPlaceholder, name)
+	}
+	return strings.ReplaceAll(mark, framePlaceholder, a.Theme.Animation.WordmarkFrame(a.Phase))
+}
+
 // plainWordmark is the wordmark with any decoration stripped, so a themed one still
 // recognises the project it is named after.
+//
+// Trims from both ends anything that is not a letter or a digit, rather than a list of the
+// decoration characters seen so far — that list rotted the moment two themes were added
+// whose flourishes were not on it, and the header started printing the name twice. Modifier
+// letters go too: `ﾟ` is one, and it is punctuation everywhere this is used.
+//
+// A cosmetic comparison, so the odd script that builds words out of modifier letters losing
+// a character here costs nothing but a repeated word in a header.
 func plainWordmark(text string) string {
-	return strings.Trim(text, " ░▒▓█▄▀=-*·»«")
+	return strings.TrimFunc(text, func(r rune) bool {
+		if unicode.IsDigit(r) {
+			return false
+		}
+		return !unicode.IsLetter(r) || unicode.Is(unicode.Lm, r)
+	})
 }
 
 func statusStyle(status run.Status, t theme.Theme) theme.Color {

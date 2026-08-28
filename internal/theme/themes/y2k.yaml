@@ -102,11 +102,16 @@ animation:
   selection-frames: "▀▀▀███▄▄▄███"
   selection-jiggle: "000000111000"
   selection-blink: "111111000111"
+  # Twelve again, so the twinkle is part of the same gesture rather than a fourth thing
+  # keeping its own time. It brightens as the row dips.
+  wordmark-frames: "✧✧✧✧✧✧✦✦✦✧✧✧"
   interval-ms: 320
 
 glyphs:
-  # Sparkles, because every page had them and half of them were animated.
-  wordmark: "✧･ﾟ TASKUI ･ﾟ✧"
+  # Sparkles, because every page had them and half of them were animated. `{frame}` is where
+  # the wordmark's own sequence goes, so these ones actually are. Swap `TASKUI` for
+  # `{project}` and the header names the directory you opened instead, decoration and all.
+  wordmark: "{frame}･ﾟ TASKUI ･ﾟ{frame}"
   separator: "›"
   dot: "•"
 

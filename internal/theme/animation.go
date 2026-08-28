@@ -50,6 +50,12 @@ type Animation struct {
 	// the whole animation block is built on the idea that the sequence's length is the speed,
 	// and a blink nobody can time is not a setting.
 	Blink []bool
+	// WordmarkFrames are the glyphs the wordmark's `{frame}` placeholder cycles through.
+	//
+	// The one animation that is not about the cursor. A wordmark is a label rather than a
+	// row, so nothing here has to line up with a column or survive being repeated down one —
+	// it is a character in a string, and the sequence says which.
+	WordmarkFrames []string
 	// Interval is how long each frame lasts.
 	Interval time.Duration
 }
@@ -76,7 +82,8 @@ const maxLean = 2
 
 // Moves reports whether this theme has anything to animate.
 func (a Animation) Moves() bool {
-	return a.Interval > 0 && (len(a.Frames) > 1 || len(a.Jiggle) > 1 || len(a.Blink) > 1)
+	return a.Interval > 0 &&
+		(len(a.Frames) > 1 || len(a.Jiggle) > 1 || len(a.Blink) > 1 || len(a.WordmarkFrames) > 1)
 }
 
 // Lit is whether the selected row's highlight is drawn on this frame. A theme that does not
@@ -94,6 +101,16 @@ func (a Animation) Frame(phase int, fallback string) string {
 		return fallback
 	}
 	return a.Frames[wrapPhase(phase, len(a.Frames))]
+}
+
+// WordmarkFrame is what the wordmark's `{frame}` placeholder holds on this phase. A theme
+// that gives no sequence gets nothing, so a `{frame}` left in a wordmark whose animation was
+// switched off closes up rather than printing a literal.
+func (a Animation) WordmarkFrame(phase int) string {
+	if len(a.WordmarkFrames) == 0 || a.Interval == 0 {
+		return ""
+	}
+	return a.WordmarkFrames[wrapPhase(phase, len(a.WordmarkFrames))]
 }
 
 // fullBlock is what a cell behind the lit edge is filled with.
@@ -205,6 +222,19 @@ func applyAnimation(a *Animation, block map[string]string) []string {
 		}
 	}
 
+	if text, ok := block["wordmark-frames"]; ok {
+		used["wordmark-frames"] = true
+		frames, problem := parseFrames(text)
+		if problem != "" {
+			bad = append(bad, strings.Replace(problem, "selection-frames", "wordmark-frames", 1))
+		} else {
+			a.WordmarkFrames = frames
+			if a.Interval == 0 {
+				a.Interval = DefaultInterval
+			}
+		}
+	}
+
 	if text, ok := block["selection-blink"]; ok {
 		used["selection-blink"] = true
 		blink, problem := parseBlink(text)
@@ -310,6 +340,8 @@ func (a Animation) ToYAML() string {
 	b.WriteString("  # The rail keeps drawing through the dark frames — a cursor you cannot see is not\n")
 	b.WriteString("  # a blink, it is a loss.\n")
 	fmt.Fprintf(&b, "  selection-blink: %q\n", blinkText(a.Blink))
+	b.WriteString("  # What the wordmark's `{frame}` placeholder cycles through, one column each.\n")
+	fmt.Fprintf(&b, "  wordmark-frames: %q\n", strings.Join(a.WordmarkFrames, ""))
 	b.WriteString("  # How long each frame lasts. 0 turns the animation off.\n")
 	fmt.Fprintf(&b, "  interval-ms: %d\n", a.Interval.Milliseconds())
 	return b.String()

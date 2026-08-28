@@ -294,9 +294,19 @@ func TestOnlyTheThemesThatAskForItAnimate(t *testing.T) {
 	if n < 2 {
 		t.Fatalf("y2k should animate its edges: %v", y2k.Animation.Frames)
 	}
-	if len(y2k.Animation.Jiggle) != n || len(y2k.Animation.Blink) != n {
-		t.Errorf("y2k's sequences are %d/%d/%d and must match to stay in step",
-			n, len(y2k.Animation.Jiggle), len(y2k.Animation.Blink))
+	if len(y2k.Animation.Jiggle) != n || len(y2k.Animation.Blink) != n ||
+		len(y2k.Animation.WordmarkFrames) != n {
+		t.Errorf("y2k's sequences are %d/%d/%d/%d and must match to stay in step",
+			n, len(y2k.Animation.Jiggle), len(y2k.Animation.Blink), len(y2k.Animation.WordmarkFrames))
+	}
+	// The wordmark twinkles on the same frames the row dips, so the header and the cursor are
+	// one gesture rather than two things that happen to be moving.
+	for phase := range n {
+		twinkling := y2k.Animation.WordmarkFrame(phase) != y2k.Animation.WordmarkFrame(0)
+		if dark := !y2k.Animation.Lit(phase); twinkling != dark {
+			t.Errorf("phase %d twinkles=%v dips=%v — they should be the same beat",
+				phase, twinkling, dark)
+		}
 	}
 
 	// …and they dip on the same frames: the lean and the dark are one event, not two.
@@ -540,5 +550,43 @@ func TestY2kPulsesBetweenTwoColours(t *testing.T) {
 		if !resolved.Colors.SelectionBlink.IsDefault() {
 			t.Errorf("%s should not name a blink colour: %+v", name, resolved.Colors.SelectionBlink)
 		}
+	}
+}
+
+// The wordmark's sequence is a label's, not a row's, so it has none of the column rules —
+// but it still runs off the one clock and still stops when the animation does.
+func TestTheWordmarkFrameCyclesAndStops(t *testing.T) {
+	a := Animation{WordmarkFrames: []string{"✧", "✦"}, Interval: DefaultInterval}
+	for phase, want := range map[int]string{0: "✧", 1: "✦", 2: "✧", -1: "✦"} {
+		if got := a.WordmarkFrame(phase); got != want {
+			t.Errorf("WordmarkFrame(%d) = %q, want %q", phase, got, want)
+		}
+	}
+	if !a.Moves() {
+		t.Error("a twinkling wordmark is movement, and the poll loop has to know")
+	}
+	// Switched off, the placeholder resolves to nothing rather than to a leftover glyph.
+	off := Animation{WordmarkFrames: []string{"✧", "✦"}}
+	if got := off.WordmarkFrame(1); got != "" {
+		t.Errorf("a zero interval should leave nothing behind, got %q", got)
+	}
+	// A theme with no sequence at all is the same case.
+	if got := (Animation{Interval: DefaultInterval}).WordmarkFrame(0); got != "" {
+		t.Errorf("got %q", got)
+	}
+}
+
+// Same one-column rule as everything else drawn from a sequence: a wordmark that changed
+// width every frame would shove the whole header about.
+func TestWordmarkFramesMustBeOneColumn(t *testing.T) {
+	dir := themesIn(t)
+	write(t, dir, "wide", "extends: default\nanimation:\n  wordmark-frames: \"✧🙂✦\"\n")
+
+	resolved, problems := LoadTheme("wide")
+	if len(problems) != 1 || !strings.Contains(problems[0], "one column") {
+		t.Fatalf("problems = %v", problems)
+	}
+	if resolved.Animation.WordmarkFrame(0) != "" {
+		t.Error("a refused sequence should leave the wordmark alone")
 	}
 }

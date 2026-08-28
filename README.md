@@ -781,6 +781,36 @@ layout already left there; both columns are reserved either way, so a row is the
 in every theme. Geometry that changed with the colours would be a theme that could break a
 layout.
 
+#### The wordmark
+
+The header's wordmark is an ordinary string, so it can say anything. Two placeholders make
+it say something that changes:
+
+```yaml
+glyphs:
+  wordmark: "{frame}･ﾟ {project} ･ﾟ{frame}"
+animation:
+  wordmark-frames: "✧✧✧✦✦✦"
+```
+
+`{project}` is the directory you opened, so the header names what you are looking at rather
+than the tool you are looking at it with — and the theme keeps its own decoration around it
+instead of trading it away:
+
+```
+ ✧･ﾟ atlas ･ﾟ✧                        domain·verb  122 tasks
+```
+
+Having named the project, the header does not name it again — the ` › atlas` that usually
+follows the wordmark is dropped, because a row that says the same thing twice is a row
+wasted. That also applies to a literal wordmark that happens to match: open taskui on
+taskui and you get one `taskui`, not two.
+
+`{frame}` is where `wordmark-frames` goes. One column per frame, same rule as the glyphs —
+a wordmark that changed width every frame would shove the whole header about. Leave the
+frames out, or set `interval-ms: 0`, and the placeholder closes up rather than printing
+itself at you.
+
 #### Making it move
 
 A terminal cannot move a row without moving everything under it, so nothing animates
@@ -792,6 +822,7 @@ any amount of charm. Three things can move, all of them on the cursor's own row:
 | `selection-frames` | the two columns framing the row, cycling through half blocks — the marker climbs to the top of its cell, fills it, drops to the bottom and comes back |
 | `selection-jiggle` | the row's own text, leaning a column or two right and back |
 | `selection-blink`  | the row's highlight, going out for a frame or two — the bar drops, the row and rail stay |
+| `wordmark-frames`  | whatever the wordmark's `{frame}` placeholder holds, so the header can twinkle |
 
 ```yaml
 animation:
@@ -842,8 +873,10 @@ right edge, where the counts and the timestamps are, and you would watch a `13` 
 `1` every time the cursor went past. A theme that wobbles pays one column of width, once,
 in layout.
 
-Off unless a theme asks for it. `y2k` is the one that fidgets — it does all three, and it
-is meant to be the only one that does. `synthwave` moves its edges and nothing else, and
+Off unless a theme asks for it. `y2k` is the one that fidgets — it does all four, and it
+is meant to be the only one that does: its wordmark brightens on the same three frames the
+row dips, so the header and the cursor are one gesture rather than two things that happen
+to be moving. `synthwave` moves its edges and nothing else, and
 `default`, `charm`, `90s` and `neubrutalism` sit still. A theme that animates costs a redraw every interval
 for as long as taskui is open — cheap, but not nothing, and not a decision to make on
 somebody else's behalf. `taskui --theme y2k --screenshot 92x20 --phase 8 --colour .`
