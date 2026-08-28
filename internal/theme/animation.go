@@ -13,12 +13,20 @@ import (
 // Animation is the only moving part a theme is allowed.
 //
 // A terminal cannot move a row without moving everything under it, so nothing here animates
-// vertical position. What it animates is the cursor's own row: the two columns that frame it
-// cycle through a sequence of half blocks, so the lit edge climbs to the top of its cell,
-// fills it, drops to the bottom and comes back; and the row's own text can lean a column or
-// two to the right and back, which is the jiggle. Sideways is safe in a way that up and down
-// is not — the row keeps its line, so nothing under it moves, and the only cost is the
-// column or two of content the lean pushes past the right edge.
+// vertical position. Three things it does animate, all of them on the cursor's own row:
+//
+//   - Frames cycle the two columns that frame the row through a sequence of half blocks, so
+//     the lit edge climbs to the top of its cell, fills it, drops to the bottom and comes
+//     back. Sub-row vertical motion, confined to a column narrow enough to spare it.
+//   - Jiggle leans the row's own text a column or two right and back. Sideways is safe in a
+//     way that up and down is not — the row keeps its line, so nothing under it moves.
+//   - Blink drops the row's highlight for a frame or two. The bar goes out; the row, the
+//     rail and the text all stay exactly where they were.
+//
+// All three are sequences read off one clock, one entry per frame, so the length of what a
+// theme writes is the speed of what it gets. Lengths that share no factor never come back
+// round together, which is the difference between something that moves and something that
+// ticks.
 //
 // Off by default, and off in most of the themes that ship. A theme that animates costs a
 // redraw every Interval for as long as taskui is open, which is cheap but is not nothing,
@@ -34,6 +42,13 @@ type Animation struct {
 	// `"0000111100001111"` takes sixteen to get through one lean and back. That is how you
 	// ask for something slow without a second timer racing the first.
 	Jiggle []int
+	// Blink is whether the selected row's highlight is showing, one entry per frame.
+	//
+	// Ours rather than the terminal's. SGR 5 exists and every terminal blinks it at whatever
+	// rate it likes, which is the one thing a theme here is not allowed to be vague about —
+	// the whole animation block is built on the idea that the sequence's length is the speed,
+	// and a blink nobody can time is not a setting.
+	Blink []bool
 	// Interval is how long each frame lasts.
 	Interval time.Duration
 }
@@ -60,7 +75,16 @@ const maxLean = 2
 
 // Moves reports whether this theme has anything to animate.
 func (a Animation) Moves() bool {
-	return a.Interval > 0 && (len(a.Frames) > 1 || len(a.Jiggle) > 1)
+	return a.Interval > 0 && (len(a.Frames) > 1 || len(a.Jiggle) > 1 || len(a.Blink) > 1)
+}
+
+// Lit is whether the selected row's highlight is drawn on this frame. A theme that does not
+// blink is lit on every one of them.
+func (a Animation) Lit(phase int) bool {
+	if len(a.Blink) < 2 || a.Interval == 0 {
+		return true
+	}
+	return a.Blink[wrapPhase(phase, len(a.Blink))]
 }
 
 // Frame is the glyph for a phase, or fallback when the theme does not animate its edges.
@@ -133,6 +157,19 @@ func applyAnimation(a *Animation, block map[string]string) []string {
 			bad = append(bad, problem)
 		} else {
 			a.Jiggle = lean
+			if a.Interval == 0 {
+				a.Interval = DefaultInterval
+			}
+		}
+	}
+
+	if text, ok := block["selection-blink"]; ok {
+		used["selection-blink"] = true
+		blink, problem := parseBlink(text)
+		if problem != "" {
+			bad = append(bad, problem)
+		} else {
+			a.Blink = blink
 			if a.Interval == 0 {
 				a.Interval = DefaultInterval
 			}
@@ -227,9 +264,36 @@ func (a Animation) ToYAML() string {
 	fmt.Fprintf(&b, "  # How far the selected row's text leans right, one digit 0-%d per frame.\n", maxLean)
 	b.WriteString("  # The length is the speed: the longer the sequence, the slower the wobble.\n")
 	fmt.Fprintf(&b, "  selection-jiggle: %q\n", jiggleText(a.Jiggle))
+	b.WriteString("  # Whether the selected row's highlight is showing: 1 lit, 0 dark, one per frame.\n")
+	b.WriteString("  # The rail keeps drawing through the dark frames — a cursor you cannot see is not\n")
+	b.WriteString("  # a blink, it is a loss.\n")
+	fmt.Fprintf(&b, "  selection-blink: %q\n", blinkText(a.Blink))
 	b.WriteString("  # How long each frame lasts. 0 turns the animation off.\n")
 	fmt.Fprintf(&b, "  interval-ms: %d\n", a.Interval.Milliseconds())
 	return b.String()
+}
+
+// parseBlink reads the highlight's on/off as one digit per frame — `"11111100"`.
+//
+// Written the same way as the lean underneath it so the two can be read as a pair, and so
+// the same rule applies: how long you write it is how slow it goes. Six frames lit and two
+// dark at 260ms is a bar that goes out for half a second every two seconds.
+func parseBlink(text string) ([]bool, string) {
+	if strings.TrimSpace(text) == "" {
+		return nil, ""
+	}
+	blink := make([]bool, 0, len(text))
+	for _, r := range text {
+		if r != '0' && r != '1' {
+			return nil, fmt.Sprintf(
+				"animation: `selection-blink` is 1 for lit and 0 for dark, and %q is neither", string(r))
+		}
+		blink = append(blink, r == '1')
+	}
+	if len(blink) < 2 {
+		return nil, "animation: `selection-blink` needs at least two frames to blink between"
+	}
+	return blink, ""
 }
 
 // jiggleText writes the lean back out as digits.
@@ -242,6 +306,18 @@ func jiggleText(lean []int) string {
 	var b strings.Builder
 	for _, n := range lean {
 		b.WriteByte(digits[min(max(n, 0), maxLean)])
+	}
+	return b.String()
+}
+
+func blinkText(blink []bool) string {
+	var b strings.Builder
+	for _, lit := range blink {
+		if lit {
+			b.WriteByte('1')
+		} else {
+			b.WriteByte('0')
+		}
 	}
 	return b.String()
 }

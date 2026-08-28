@@ -244,7 +244,16 @@ func TestOnlyTheThemesThatAskForItAnimate(t *testing.T) {
 		if resolved.Animation.MaxLean() != 0 {
 			t.Errorf("%s reserves room for a jiggle it does not have", name)
 		}
+		// A still theme is lit on every frame there is. Getting this wrong would leave the
+		// cursor bar switched off in a theme that never asked to blink at all.
+		for _, phase := range []int{0, 1, 7, 100} {
+			if !resolved.Animation.Lit(phase) {
+				t.Errorf("%s went dark at phase %d without asking to", name, phase)
+			}
+		}
 	}
+	// synthwave moves its edges and nothing else: it is the loud one to look at, not the one
+	// that fidgets.
 	synth, _ := LoadTheme("synthwave")
 	if !synth.Animation.Moves() {
 		t.Error("synthwave should animate")
@@ -252,15 +261,49 @@ func TestOnlyTheThemesThatAskForItAnimate(t *testing.T) {
 	if len(synth.Animation.Frames) != 4 {
 		t.Errorf("frames = %v", synth.Animation.Frames)
 	}
-	// synthwave moves its edges and nothing else. y2k is the one that also leans, and it
-	// leans by exactly one column — two would be a lurch.
-	if synth.Animation.MaxLean() != 0 {
-		t.Errorf("synthwave should not jiggle: %v", synth.Animation.Jiggle)
+	if synth.Animation.MaxLean() != 0 || !synth.Animation.Lit(1) {
+		t.Errorf("synthwave should neither lean nor blink: %+v", synth.Animation)
 	}
+
+	// y2k is the one that does everything, and it is meant to be the only one. It leans by
+	// exactly one column — two would be a lurch — and it blinks slowly enough that you notice
+	// the bar has gone rather than watching it flicker.
 	y2k, _ := LoadTheme("y2k")
 	if y2k.Animation.MaxLean() != 1 {
 		t.Errorf("y2k should lean one column: %v", y2k.Animation.Jiggle)
 	}
+	dark := 0
+	for _, lit := range y2k.Animation.Blink {
+		if !lit {
+			dark++
+		}
+	}
+	if dark == 0 || dark*4 > len(y2k.Animation.Blink) {
+		t.Errorf("y2k should blink, and be lit for most of it: %v", y2k.Animation.Blink)
+	}
+	// Phase 0 stays lit, or every screenshot and every render test starts on a dark frame.
+	if !y2k.Animation.Lit(0) {
+		t.Error("the sequence should start lit")
+	}
+
+	// The three lengths share no factor, which is what stops the whole thing settling into a
+	// beat. Asserted rather than trusted to a comment: it is the kind of property that
+	// survives right up until somebody tidies a sequence to a round number.
+	lens := []int{len(y2k.Animation.Frames), len(y2k.Animation.Jiggle), len(y2k.Animation.Blink)}
+	for i, a := range lens {
+		for _, b := range lens[i+1:] {
+			if gcd(a, b) != 1 {
+				t.Errorf("y2k's sequences %d and %d share a factor, so they lock together", a, b)
+			}
+		}
+	}
+}
+
+func gcd(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	return a
 }
 
 // Frames cycle, and a phase outside the sequence wraps rather than panicking.
@@ -425,5 +468,52 @@ func TestEitherHalfOfTheAnimationCanBeClearedFromConfig(t *testing.T) {
 	}
 	if len(straight.Frames) != 4 || !straight.Moves() {
 		t.Errorf("the bounce should have survived: %+v", straight)
+	}
+}
+
+// The blink is ours, not the terminal's, so it obeys the same rule as the rest of the
+// block: the sequence's length is the speed.
+func TestTheBlinkRunsOnTheSameClockAsEverythingElse(t *testing.T) {
+	a := Animation{Blink: []bool{true, true, false}, Interval: DefaultInterval}
+	for phase, want := range map[int]bool{0: true, 1: true, 2: false, 3: true, 5: false, -1: false} {
+		if got := a.Lit(phase); got != want {
+			t.Errorf("Lit(%d) = %v, want %v", phase, got, want)
+		}
+	}
+	if !a.Moves() {
+		t.Error("a blink on its own is movement")
+	}
+	// It costs no columns and no rows — it is the same row, drawn without its highlight.
+	if a.MaxLean() != 0 {
+		t.Errorf("the blink should reserve nothing: %d", a.MaxLean())
+	}
+
+	// A theme that does not blink is lit on every frame, or every existing theme just went
+	// dark half the time.
+	for _, still := range []Animation{{}, {Frames: []string{"▀", "▄"}, Interval: DefaultInterval}} {
+		if !still.Lit(0) || !still.Lit(7) {
+			t.Errorf("a theme with no blink is always lit: %+v", still)
+		}
+	}
+	// …and so is one whose animation was switched off.
+	off := Animation{Blink: []bool{true, false}}
+	if !off.Lit(1) {
+		t.Error("a zero interval should leave the highlight on, not stuck off")
+	}
+}
+
+func TestABadBlinkIsReported(t *testing.T) {
+	dir := themesIn(t)
+	write(t, dir, "morse", "extends: default\nanimation:\n  selection-blink: \"1102\"\n")
+	write(t, dir, "solid", "extends: default\nanimation:\n  selection-blink: \"1\"\n")
+
+	for name, want := range map[string]string{"morse": "1 for lit", "solid": "at least two"} {
+		resolved, problems := LoadTheme(name)
+		if len(problems) != 1 || !strings.Contains(problems[0], want) {
+			t.Errorf("%s: problems = %v", name, problems)
+		}
+		if !resolved.Animation.Lit(1) {
+			t.Errorf("%s: a refused sequence should leave the highlight on", name)
+		}
 	}
 }

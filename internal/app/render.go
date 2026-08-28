@@ -111,6 +111,12 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 	room := min(t.Animation.MaxLean(), max(0, width-frameWidth-1))
 	lean := 0
 
+	// lit is whether the highlight is drawn this frame. Deliberately not the same thing as
+	// selected: the rail and its shade keep drawing through the dark frames, so the row you
+	// are on is still marked while its bar is out. A cursor that disappears is not a blink,
+	// it is a place you have to find again.
+	lit := selected && t.Animation.Lit(phase)
+
 	if selected {
 		// Both edges take the same frame, so the marker travels up and down as one rather
 		// than tilting. The row keeps its line — a terminal cannot move one row without
@@ -130,7 +136,7 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 			return ""
 		}
 		spaces := strings.Repeat(" ", n)
-		if selected {
+		if lit {
 			return selectionOf(lipgloss.NewStyle(), t.Colors.Selection).Render(spaces)
 		}
 		return spaces
@@ -138,7 +144,7 @@ func (l line) renderRow(width int, selected bool, t theme.Theme, phase int) stri
 
 	return leftStyle.Render(left) +
 		gap(lean) +
-		l.render(width-frameWidth-room, selected, t.Colors.Selection) +
+		l.render(width-frameWidth-room, lit, t.Colors.Selection) +
 		gap(room-lean) +
 		rightStyle.Render(right)
 }

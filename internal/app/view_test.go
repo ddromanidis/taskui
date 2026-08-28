@@ -2,12 +2,14 @@ package app
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/keys"
@@ -957,5 +959,84 @@ func TestAStillThemeReservesNothing(t *testing.T) {
 	}
 	if got := jiggling(t, []int{0, 2}).bodyWidth(70); got != 70-frameWidth-2 {
 		t.Errorf("a jiggling theme should reserve its lean, got %d", got)
+	}
+}
+
+// --- the blink ----------------------------------------------------------------------
+
+func blinking(t *testing.T, blink []bool) *App {
+	t.Helper()
+	a := viewSample(t)
+	a.Theme.Animation = theme.Animation{Blink: blink, Interval: theme.DefaultInterval}
+	a.Theme.Colors.Selection = theme.Color{Kind: theme.KindRGB, R: 0x2e, G: 0x31, B: 0x92}
+	return a
+}
+
+// The bar goes out; the row does not. Same text, same width, same rail — only the
+// highlight stops being drawn.
+func TestTheBlinkTakesTheBarAndNotTheRow(t *testing.T) {
+	a := blinking(t, []bool{true, false})
+
+	a.Phase = 0
+	lit := a.RenderHeadless(70, 12)
+	a.Phase = 1
+	dark := a.RenderHeadless(70, 12)
+
+	if !reflect.DeepEqual(lit, dark) {
+		t.Errorf("the blink changed what the rows say:\n  %q\n  %q", lit[2], dark[2])
+	}
+	if a.bodyWidth(70) != 70-frameWidth {
+		t.Error("the blink should reserve nothing")
+	}
+
+	// The selection background is there on the lit frame and gone on the dark one, and the
+	// rail is on both — losing that is losing your place, not blinking.
+	//
+	// Colour on, because with the profile stripped there is no background to look for and
+	// the assertion would pass without ever testing anything.
+	restore := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(restore) })
+
+	a.Phase = 0
+	litFrame := a.RenderFrame(70, 12)
+	a.Phase = 1
+	darkFrame := a.RenderFrame(70, 12)
+
+	litRow := strings.Split(litFrame, "\n")[2]
+	darkRow := strings.Split(darkFrame, "\n")[2]
+	// Any RGB background, not a particular one: lipgloss rounds a hex through a float on the
+	// way out, so `#2e3192` renders as 46;48;146 and pinning the triple pins the rounding.
+	const anyBackground = "48;2;"
+	if !strings.Contains(litRow, anyBackground) {
+		t.Errorf("the lit row should carry the selection background:\n  %q", litRow)
+	}
+	if strings.Contains(darkRow, anyBackground) {
+		t.Errorf("the dark row should not:\n  %q", darkRow)
+	}
+	rail := a.Theme.Glyphs.Rail
+	if !strings.Contains(litRow, rail) || !strings.Contains(darkRow, rail) {
+		t.Errorf("the rail keeps drawing through the dark frames:\n  %q\n  %q", litRow, darkRow)
+	}
+}
+
+// Blinking and leaning are independent, so a theme can have both and the row keeps leaning
+// while its bar is out.
+func TestABlinkingRowStillLeans(t *testing.T) {
+	a := viewSample(t)
+	a.Theme.Animation = theme.Animation{
+		Jiggle: []int{0, 1}, Blink: []bool{true, false}, Interval: theme.DefaultInterval,
+	}
+	a.Phase = 0
+	home := a.RenderHeadless(70, 12)[2]
+	a.Phase = 1
+	away := a.RenderHeadless(70, 12)[2]
+
+	if home == away {
+		t.Fatal("the row stopped leaning once it blinked")
+	}
+	content := func(row string) string { return strings.TrimSpace(string([]rune(row)[1:])) }
+	if content(home) != content(away) {
+		t.Errorf("the lean lost content while dark:\n  %q\n  %q", home, away)
 	}
 }

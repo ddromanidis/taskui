@@ -71,15 +71,24 @@ colors:
   confirm-fg: "#161a52"
   confirm-bg: "#ff0090"
 
-# Sparkle either side, and a lean that takes its time.
+# Sparkle either side, a lean that takes its time, and a bar that goes out now and then.
 #
-# The frames run the chrome edge up and down the cursor's two columns; the jiggle runs the
-# row's own text one column right and back. Fifteen digits against four frames share no
-# factor, so the pair only comes back round every sixty frames — which is the difference
-# between something that moves and something that ticks.
+# This is the theme that moves. The frames run the chrome edge up and down the cursor's two
+# columns; the jiggle runs the row's own text one column right and back; the blink drops the
+# highlight for two frames in thirteen, about two thirds of a second every four seconds,
+# which is a slow enough pulse to read as a thing rather than as a fault.
+#
+# Four, fifteen and thirteen share no factor between them, so the three only come back round
+# together every seven hundred and eighty frames — a little over four minutes. Nothing here
+# settles into a beat you could count, which is the whole difference between something that
+# moves and something that ticks.
+#
+# Every one of them is a separate line you can shorten, lengthen or delete. `interval-ms: 0`
+# stops the lot without losing the colours.
 animation:
   selection-frames: "▀█▄█"
   selection-jiggle: "000000111111100"
+  selection-blink: "1111111111100"
   interval-ms: 320
 
 glyphs:

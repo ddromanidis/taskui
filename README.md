@@ -785,14 +785,19 @@ layout.
 
 A terminal cannot move a row without moving everything under it, so nothing animates
 vertical position — a list that shifted while you were reading it would be a bad trade for
-any amount of charm. Two things can move. The cursor's own two columns: give them a
-sequence of half blocks and the marker climbs to the top of its cell, fills it, drops to
-the bottom and comes back. And the selected row's text, sideways, which is the jiggle.
+any amount of charm. Three things can move, all of them on the cursor's own row:
+
+| | |
+|---|---|
+| `selection-frames` | the two columns framing the row, cycling through half blocks — the marker climbs to the top of its cell, fills it, drops to the bottom and comes back |
+| `selection-jiggle` | the row's own text, leaning a column or two right and back |
+| `selection-blink`  | the row's highlight, going out for a frame or two — the bar drops, the row and rail stay |
 
 ```yaml
 animation:
   selection-frames: "▀█▄█"
   selection-jiggle: "000000111111100"
+  selection-blink:  "1111111111100"
   interval-ms: 320
 ```
 
@@ -802,12 +807,18 @@ it is a strobe, above it it stops reading as motion — and `interval-ms: 0` tur
 which is how a theme extending `synthwave` stops it moving without losing the rest.
 
 The jiggle is one digit per frame saying how many columns right the row sits: `0` is home,
-`1` and `2` lean. Both sequences run off the same clock, so **the length is the speed** —
-`"01"` wobbles every frame, and the fifteen digits above spend about two and a half seconds
-on each side at 320ms. That is how you ask for something slow without a second timer racing
-the first. Fifteen against four frames also share no factor, so the pair only comes back
-round every sixty frames, which is the difference between something that moves and
-something that ticks.
+`1` and `2` lean. The blink is the same shape: `1` lit, `0` dark. Every sequence runs off
+the one clock, so **the length is the speed** — `"01"` wobbles every frame, and the fifteen
+digits above spend about two and a half seconds on each side at 320ms. That is how you ask
+for something slow without a second timer racing the first. Four, fifteen and thirteen share
+no factor between them, so the three only come back round together every four minutes, which
+is the difference between something that moves and something that ticks.
+
+The blink is taskui's own, not the terminal's `SGR 5`. Terminals do have a blink attribute
+and each one blinks it at whatever rate it likes — plenty of people switch it off entirely —
+and a blink you cannot time is not a setting. The rail keeps drawing through the dark
+frames, deliberately: a cursor that vanishes is not a blink, it is a place you have to find
+again.
 
 The two halves are independent, and `animation:` works in your own `config.yaml` as well as
 in a theme file — so keeping one and dropping the other is a line, not a fork:
@@ -815,9 +826,10 @@ in a theme file — so keeping one and dropping the other is a line, not a fork:
 ```yaml
 theme: y2k
 animation:
-  selection-frames: ""    # the bounce off, the jiggle kept
-  # selection-jiggle: "" — the other way round, and the reserved column goes back to the row
-  # interval-ms: 0       — both off, nothing redraws at all
+  selection-frames: ""    # the bounce off, the jiggle and blink kept
+  # selection-jiggle: "" — the lean off, and the reserved column goes back to the row
+  # selection-blink: ""  — the highlight stays on
+  # interval-ms: 0       — all of it off, nothing redraws at all
 ```
 
 Sideways is safe in a way that up and down is not: the row keeps its line, so nothing under
@@ -827,8 +839,9 @@ right edge, where the counts and the timestamps are, and you would watch a `13` 
 `1` every time the cursor went past. A theme that wobbles pays one column of width, once,
 in layout.
 
-Off unless a theme asks for it: `synthwave` moves its edges, `y2k` moves its edges and
-leans, and nothing else does either. A theme that animates costs a redraw every interval
+Off unless a theme asks for it. `y2k` is the one that fidgets — it does all three, and it
+is meant to be the only one that does. `synthwave` moves its edges and nothing else, and
+`default`, `charm`, `90s` and `neubrutalism` sit still. A theme that animates costs a redraw every interval
 for as long as taskui is open — cheap, but not nothing, and not a decision to make on
 somebody else's behalf. `taskui --theme y2k --screenshot 92x20 --phase 8 --colour .`
 renders one frame of it if you want to look at the sequence a step at a time.
