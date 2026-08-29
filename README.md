@@ -866,17 +866,23 @@ taskui --list-themes
   default      taskui
   neubrutalism [ TASKUI ]
   synthwave    ▄▀▄ TASKUI ▄▀▄
+  tokyonight   taskui
   y2k          ✧･ﾟ TASKUI ･ﾟ✧
 ```
 
-Six ship inside the binary. `default` uses ANSI names throughout, so it follows your
+Seven ship inside the binary. `default` uses ANSI names throughout, so it follows your
 terminal's own colourscheme rather than arguing with it. `90s` does the opposite on
 purpose — pinned magenta and cyan, double-ruled boxes, blocky arrows — because a vaporwave
 palette that politely deferred to your Solarized scheme would not be one. `charm` is after
 [charm.land](https://charm.land), whose libraries this front end is built on: indigo,
 pink, mint, and restraint everywhere else. `synthwave` is the loud one: the genre's five
 colours, half blocks instead of hairlines, and a selected row that is raised rather than
-highlighted.
+highlighted. `tokyonight` is the palette from
+[folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim), in its `night` variant:
+blue carrying the structure, magenta the accent, and a selected row the same indigo the
+editor uses for its own visual selection. It is colours only — a palette has no opinion
+about what a fold marker looks like — so it inherits every glyph from `default` and changes
+nothing about the geometry.
 
 `y2k` is the millennium: chrome silver doing the structural work, bubblegum and lilac on
 top of it, and a selected row bevelled like a button you could press. It is also the only
@@ -1151,7 +1157,20 @@ label.
 # test failure's assertion and its file:line, or a compiler error and its note — but
 # "enough" is a property of the tools you run, not of taskui.
 peek-lines: 8
+
+# Ask the terminal for mouse events, so the wheel scrolls taskui.
+mouse: on
 ```
+
+The wheel moves one row a notch on whichever screen you are on — the picker, a run, the
+history list, the timeline, the diff, the profile. It is defined as arrowing rather than as
+scrolling of its own, so everything that hangs off the arrow keys comes with it: scrolling
+away from a running task stops following it, exactly as `k` does.
+
+`mouse: off` gives the mouse back to the terminal. The trade is real in both directions: a
+terminal that is forwarding mouse events to a program is not selecting text with them, so
+drag-to-select over taskui's output needs your terminal's own override — shift in most of
+them, option on macOS — until you turn this off.
 
 A `.taskui-danger` file in the project marks tasks that need a confirmation before they
 run — one pattern per line, `#` comments, `*` supported:
@@ -1214,6 +1233,13 @@ because it is the same program. The plugin's job is to host it and to listen.
 - **A statusline component.** `require("taskui").status()` is `✗ backend:test 7.1s`, fed by
   the events, so it keeps saying so with the terminal closed.
 - **Notifications**, for when the terminal is not the window you are looking at.
+
+**The wheel scrolls taskui**, not the buffer it is drawn into. Neovim forwards mouse events
+to a terminal program when that program asks for them and processes them itself when it does
+not — so before taskui asked, a notch over the picker scrolled the terminal buffer instead,
+through frames taskui had already replaced. It asks now. If you have `set mouse=`, Neovim
+has no mouse to forward and `:checkhealth taskui` says so; `mouse: off` in taskui's own
+config opts back out from the other end.
 
 That is the whole seam: `taskui --events <socket>` writes what its runs are doing as
 newline-delimited JSON, the plugin listens, and nothing else crosses between them.
