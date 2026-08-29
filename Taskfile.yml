@@ -71,11 +71,38 @@ tasks:
             go test ./... {{.CLI_ARGS}}
           '
 
+  test:nvim:
+    desc: "Run the Neovim plugin's integration tests headlessly"
+    deps: [build]
+    cmds:
+      - |
+        if ! command -v nvim >/dev/null; then
+          echo "nvim not installed; skipping"
+          exit 0
+        fi
+        TASKUI_BIN="{{.BIN}}/taskui" nvim --headless -l tests/run.lua
+
   fmt:
     desc: "Format the source (writes changes)"
     cmds:
       - go fmt ./...
       - golangci-lint fmt
+      - |
+        if command -v stylua >/dev/null; then
+          stylua lua plugin tests
+        else
+          echo "stylua not installed; skipping the Lua formatting"
+        fi
+
+  lint:lua:
+    desc: "luacheck over the plugin"
+    cmds:
+      - |
+        if ! command -v luacheck >/dev/null; then
+          echo "luacheck not installed; skipping"
+          exit 0
+        fi
+        luacheck lua plugin tests
 
   lint:
     desc: "golangci-lint, plus a format check"
@@ -95,7 +122,9 @@ tasks:
     cmds:
       - task: fmt
       - task: lint
+      - task: lint:lua
       - task: test
+      - task: test:nvim
       - task: build:release
 
   clean:

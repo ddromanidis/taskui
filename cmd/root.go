@@ -57,6 +57,8 @@ type options struct {
 	timeline   string
 	diffTask   string
 	flaky      bool
+	quickfix   bool
+	asJSON     bool
 	searchTask string
 	since      string
 	keys       string
@@ -142,6 +144,10 @@ func init() {
 	f.StringVar(&opts.searchFor, "search", "", "search stored runs and exit")
 	f.StringVar(&opts.timeline, "timeline", "", "print how one task has gone, run after run")
 	f.StringVar(&opts.diffTask, "diff", "", "print what changed in one task since it last passed")
+	f.BoolVar(&opts.quickfix, "quickfix", false,
+		"print the last run's failures as file:line:col: message, for an editor's error list")
+	f.BoolVar(&opts.asJSON, "json", false,
+		"machine-readable form of --list, --run (newline-delimited events) or --timeline")
 	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
 	f.StringVar(&opts.searchTask, "task", "", "narrow --search to one task's output")
 	f.StringVar(&opts.since, "since", "", "narrow --search to runs newer than this: 90m, 2d, 3w")
@@ -181,6 +187,44 @@ func initConfig() {
 	}
 }
 
+// archiveCommand runs whichever of the archive-reading flags was given, and reports whether
+// one was. They are grouped here rather than inline because they share a shape — read the
+// store, print, exit — and because rootRun is a dispatcher, not a list of every command.
+func archiveCommand(cmd *cobra.Command, root string) (bool, error) {
+	out := cmd.OutOrStdout()
+	switch {
+	case opts.timeline != "" && opts.asJSON:
+		return true, printTimelineJSON(out, root, opts.timeline)
+	case opts.timeline != "":
+		return true, printTimeline(out, root, opts.timeline)
+	case opts.diffTask != "":
+		return true, printDiff(out, root, opts.diffTask)
+	case opts.flaky:
+		return true, printFlaky(out, root)
+	// Not paired with --run: that combination runs the task first, and is handled with the
+	// rest of --run once the Taskfile has been read.
+	case opts.quickfix && opts.runTask == "":
+		return true, printQuickfix(out, root, opts.searchTask)
+	}
+	return false, nil
+}
+
+// jsonFormOK rejects the two ways `--json` can be asked for and mean nothing.
+func jsonFormOK() error {
+	if !opts.asJSON {
+		return nil
+	}
+	switch {
+	case opts.quickfix:
+		return errors.New("--quickfix is already a machine-readable form, and a different " +
+			"one: file:line:col: message, for an editor's error list. Pick one")
+	case !opts.list && opts.runTask == "" && opts.timeline == "":
+		return errors.New("--json is the machine-readable form of --list, --run or " +
+			"--timeline; on its own there is nothing for it to be the form of")
+	}
+	return nil
+}
+
 func rootRun(cmd *cobra.Command, args []string) error {
 	if opts.dumpConfig {
 		fmt.Print(theme.DumpConfig())
@@ -212,6 +256,12 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		root = dir
 	}
 
+	// `--json` is a form the other flags can be printed in, not a command of its own.
+	// Saying so beats launching the TUI at somebody who is piping this into a program.
+	if err := jsonFormOK(); err != nil {
+		return err
+	}
+
 	config := theme.FromViper(v)
 	// The flag beats the config file, so a look can be tried without committing to it.
 	if opts.themeName != "" {
@@ -236,14 +286,8 @@ func rootRun(cmd *cobra.Command, args []string) error {
 
 	// Like --search, these read the archive rather than the project — but unlike it they
 	// are scoped to one project, so they need the root and not a Taskfile.
-	if opts.timeline != "" {
-		return printTimeline(cmd.OutOrStdout(), root, opts.timeline)
-	}
-	if opts.diffTask != "" {
-		return printDiff(cmd.OutOrStdout(), root, opts.diffTask)
-	}
-	if opts.flaky {
-		return printFlaky(cmd.OutOrStdout(), root)
+	if handled, err := archiveCommand(cmd, root); handled {
+		return err
 	}
 
 	tasks, err := task.Discover(root)
@@ -253,6 +297,9 @@ func rootRun(cmd *cobra.Command, args []string) error {
 
 	if opts.list {
 		out := cmd.OutOrStdout()
+		if opts.asJSON {
+			return printTaskList(out, root, tasks)
+		}
 		for _, t := range tasks {
 			// Ignore write errors: piping into `head` closes the pipe on us, and that is
 			// not a failure of ours.
@@ -276,13 +323,20 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		// `--run` alone prints the captured tree; paired with `--screenshot` it renders
 		// the actual run view, which is how the TUI gets verified without a terminal.
 		if opts.screenshot == "" {
-			return runHeadless(root, opts.runTask, task.SplitArgs(opts.args))
+			if opts.asJSON {
+				return streamRun(cmd.OutOrStdout(), root, opts.runTask, task.SplitArgs(opts.args))
+			}
+			return runHeadless(root, opts.runTask, task.SplitArgs(opts.args), opts.quickfix)
 		}
 		a := app.New(tasks, root).WithConfig(config)
 		a.StartEnrichment()
 		if err := a.StartRun(opts.runTask); err != nil {
 			return err
 		}
+		// Starting a run no longer takes the screen — the picker keeps it and shows the
+		// run under the task. This flag is documented as rendering the run view, so it
+		// asks for it.
+		a.ResumeRun()
 		a.AwaitDetails(detailGrace)
 		drive(a, opts.keys)
 		return screenshot(a, opts.screenshot, "")
@@ -592,7 +646,7 @@ func ago(unix int64) string {
 
 // runHeadless runs a task to completion and prints what the capture layer reconstructed:
 // the execution tree, each task's status and duration, and its output indented beneath it.
-func runHeadless(dir, target string, argv []string) error {
+func runHeadless(dir, target string, argv []string, quickfix bool) error {
 	r, err := run.Start(dir, target, argv, false, false)
 	if err != nil {
 		return err
@@ -609,7 +663,7 @@ func runHeadless(dir, target string, argv []string) error {
 	}
 	stack := []frame{{target, 0}}
 	seen := map[string]bool{}
-	for len(stack) > 0 {
+	for len(stack) > 0 && !quickfix {
 		top := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		if seen[top.name] {
@@ -643,19 +697,33 @@ func runHeadless(dir, target string, argv []string) error {
 	if r.HasExit {
 		exit = r.Exit
 	}
-	fmt.Printf("\nexit %d  in %.2fs\n", exit, r.Duration.Seconds())
+	// With --quickfix the output is a list an editor parses, so nothing else may go to
+	// stdout: not the tree, not the exit line, not where it was saved.
+	if !quickfix {
+		fmt.Printf("\nexit %d  in %.2fs\n", exit, r.Duration.Seconds())
+	}
 
 	// Store it just as the TUI would: a run is a run whichever way it was started, and
 	// `--run` output you cannot search later would be a trap.
 	path, err := store.Save(store.StateDir(), dir, r)
-	if err != nil {
+	switch {
+	case err != nil && quickfix:
+		fmt.Fprintf(os.Stderr, "taskui: not saved: %v\n", err)
+	case err != nil:
 		fmt.Printf("not saved: %v\n", err)
 		if exit != 0 {
 			return exitWith(exit)
 		}
 		return nil
+	case !quickfix:
+		fmt.Printf("saved to %s  (%d secrets masked)\n", path, r.RedactedSecrets)
 	}
-	fmt.Printf("saved to %s  (%d secrets masked)\n", path, r.RedactedSecrets)
+
+	if quickfix {
+		// Run and populate in one keystroke: the run just happened here, so its own
+		// directory is what the references resolve against.
+		writeQuickfix(os.Stdout, r, dir, opts.searchTask)
+	}
 	// `--run` means run this and be it. The tree above already ends in the exit line, so
 	// there is nothing left to say — only a status to carry.
 	if exit != 0 {
@@ -707,6 +775,13 @@ func screenshot(a *app.App, size, feed string) error {
 	}
 	for _, c := range feed {
 		a.HandleKey(app.KeyFor(c))
+		// A key can start a run, and `⏎` now leaves you in the picker with that run
+		// unfolded under its task — so the run is part of the frame, and every key after
+		// it is aimed at what it printed. Let it finish before playing the next one, or
+		// the fold key lands on a run with nothing in it yet.
+		if a.RunInFlight() {
+			drive(a, "")
+		}
 	}
 	a.Phase = opts.phase
 	if opts.colour {

@@ -47,22 +47,74 @@ organisation and resorting it by score would destroy the grouping you are lookin
 
 ## Runs
 
-`⏎` starts `task <name>` and switches to the run view: the execution tree, each task's
-status and duration, and **a window on the last few lines it printed**.
+`⏎` starts `task <name>` and stays where you are. The run unfolds **under the row it came
+from**: the tasks it pulled in, the commands each of those ran, and a window on the last few
+lines each of them printed.
+
+```
+ taskui ▸ acme                                domain·verb·file   17 tasks
+ ─────────────────────────────────────────────────────────────────────────
+ ▾ (root)                                                               6
+▌├ all            Everything: format, lint, test, build      ▿ ✗ 2.1s
+ │ ├ ▿ ✓ fmt                                                        208ms
+ │ │   1 ✓ ❯ gofmt -l -w .
+ │ │   2 └   3 files reformatted
+ │ ├ ▿ ✓ lint                                                       502ms
+ │ │   1 ✓ ❯ golangci-lint run
+ │ │   2 └   0 issues.
+ │ └ ▾ ✗ backend:test                                                1.3s
+ │     1 ✗ ❯ go test -race ./...
+ │     2 │   === RUN   TestOrderTotal
+ │     3 │       order_test.go:88: want 1200, got 1180
+```
+
+Taking the screen was the old behaviour, and it was wrong in the way that only shows after a
+week of use: every run cost you your place. Starting a second task meant `esc`, find the row
+again, `⏎` — and watching two at once was impossible even though the slots underneath had
+always held six. The list is what you navigate by, and a run is something that happens *to a
+task in it*, so that is where it is drawn. A batch of three marked tasks is now three blocks
+of live output in one list, which is the one shape the run view cannot show: it has one run
+on screen at a time.
+
+`v` gives a run the whole screen. That is where you read one — the header carries the exit
+code and the total, the columns split when the output is wide enough to want them, and
+nothing else on the screen is competing for rows.
+
+**The block is not a fourth piece of state.** How much of a run the picker is showing is read
+back off the folds the run already has: every task hidden is a hidden block, every task open
+is an open one, anything else is a peek. A separate field would be one the run view could
+contradict — open a task there, come back, and the row would claim to be closed while showing
+you output. For the same reason the folds themselves belong to the *slot* rather than to the
+screen, so a task you unfolded in the list is unfolded when you press `v`.
+
+**`space` is the tree, `o` is the output.** Two fold keys, because with a run under a row
+there are two things a fold key could mean, and a node that is both a group and a task
+(`backend:migrate`) can have both at once. Each falls through to the other where it has
+nothing of its own to fold, which is most rows — a leaf has no group to open and a namespace
+with nothing running has no output — so on the rows where only one meaning exists, either key
+does the obvious thing. Inside a block, the same `o` moves one task rather than the run.
+
+The rows are the run view's own, walked out of the graph by the same function, so the two
+views cannot disagree about what a run contains. They differ in what surrounds the rows.
+
+### The run view
+
+The same tree, with the screen to itself: each task's status and duration, and the same
+window on the last few lines it printed.
 
 ```
  taskui ▸ task all                                  FAILED    12.4s   exit 201
  ─────────────────────────────────────────────────────────────────────────────
    ✗ all                                                              12.40s
-     ✓ lint                                                            3.40s
-   ▿ ✓ api:check                                             29 more     1.10s
-     30   checked 41 files
-     31   no issues found
-     ▸ ✓ app:lint                                           12 lines     0.80s
-▌  ▾ ✗ backend:test                                                    7.10s
-      1 ❯ cargo test --workspace
-      2   --- FAIL: TestOrderTotal (0.00s)
-      3       order_test.go:88: want 1200, got 1180
+   ├   ✓ lint                                                          3.40s
+   ├ ▿ ✓ api:check                                           29 more     1.10s
+   │   30   checked 41 files
+   │   31 └ no issues found
+   ├ ▸ ✓ app:lint                                           12 lines     0.80s
+▌  └ ▾ ✗ backend:test                                                  7.10s
+        1 ✗ ❯ cargo test --workspace
+        2 │   --- FAIL: TestOrderTotal (0.00s)
+        3 └       order_test.go:88: want 1200, got 1180
 ```
 
 Every task carries its own clock, ticking while it runs rather than appearing only once it
@@ -72,6 +124,42 @@ in the header cannot answer it. Durations are formatted to be read at a glance: 
 
 Output lines are rows of the same list as the tasks that produced them, which is what lets
 one fold tree hold both.
+
+### Commands carry their own verdict
+
+go-task announces each command before running it — `task: [test] cargo test --workspace` —
+and says nothing when it returns. That echo is structure rather than output, which is why it
+was already marked as such and drawn with a `❯` rather than left looking like a line the
+command printed.
+
+It now carries how that step went as well: `▶` while it is running, `✓` once the next one
+started, `✗` on the one that took the task down. There is no event for any of that, so the
+verdict is read off the shape of what came after — another echo means this one returned, and
+the last echo shares the task's own status. A failure the Taskfile swallows (`ignore_error:`)
+therefore reads as a success, which from outside is exactly what it is: go-task went on to
+the next command.
+
+Its output hangs off it, on a rail that runs down the marker column and closes at the last
+line before the next command starts — so which lines belong to which step is something you
+see rather than something you count.
+
+That is a **reversal**, and worth saying so. Output used to get no marker at all, on the
+grounds that absence of a marker is itself a marker and a `│` on every line of a build log
+is a column of chrome you stop seeing but keep paying for. That was right while a command
+echo was only a label. It stopped being right the moment the echo became a step with a
+status: once a row says `✗ ❯ go test ./...`, "and which of the next forty lines is that
+one's" is a question the screen has raised and has to answer.
+
+The rail is drawn from the whole buffer rather than from what is on screen, so a peek window
+on the end of a command's output still says the lines belong to something above it. Inside a
+task, the same guide vocabulary continues outward: tasks hang off their parent, and in the
+picker the whole run hangs off the row it was started from, by the same `├ │ └` the task
+tree already draws with.
+
+"Which step is this", "how did that step go" and "what did it print" are the three questions
+a build log gets read with, and the first two used to be answerable only by finding where
+the output stopped. On a task with eight commands that is eight guesses, and the answer
+moves every time something prints.
 
 ### The peek window
 

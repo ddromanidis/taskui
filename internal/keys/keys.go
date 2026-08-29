@@ -462,9 +462,13 @@ var Picker = Section{
 		// No footer label: the picker's footer names the pivot you would switch to, which
 		// is more use than the word "pivot" and would otherwise be printed twice.
 		b("p", "cycle the grouping: by domain, by verb, by file, and any your config added"),
-		f("space o", "fold or unfold a group", "fold"),
-		f("⇧O ⇥", "fold or unfold everything", "all"),
-		f("⏎", "run the task, or every marked one", "run"),
+		f("space", "fold or unfold a group", "fold"),
+		f("o", "how much of the run under a task: hidden, a peek, all of it", "output"),
+		// No footer label: with `space fold` and `o output` both on the line, the footer is
+		// full — and folding the whole tree at once is a thing you go looking for, where
+		// the two single-row keys are things you press without thinking.
+		b("⇧O ⇥", "fold or unfold every group"),
+		f("⏎", "run the task, or every marked one — the run unfolds under its row", "run"),
 		f("m", "mark a task to run alongside others", "mark"),
 		b("⇧M", "clear every mark"),
 		f("a", "run it with arguments", "args"),
@@ -475,7 +479,7 @@ var Picker = Section{
 		f("/", "filter the list down to matching tasks", "filter"),
 		f("t", "jump to a task, leaving the list intact", "jump"),
 		f("s", "what this task is, and what it will run", "detail"),
-		f("v", "go to whatever is running, or the last run", "watch"),
+		f("v", "the whole screen for whatever is running, or the last run", "watch"),
 		b("⇧H", "how this one task has been going, run after run"),
 		b("e", "open this task's own definition in $EDITOR"),
 		f("h", "past runs", "history"),

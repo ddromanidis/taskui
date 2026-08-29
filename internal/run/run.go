@@ -117,6 +117,27 @@ func newLine(raw string, isCommand bool) Line {
 	return Line{Raw: raw, Plain: ansi.Strip(raw), IsCommand: isCommand}
 }
 
+// CommandText is a command echo with go-task's prefix taken off: `task: [test] go test
+// ./...` becomes `go test ./...`.
+//
+// The prefix is an artifact of how the output is captured — `--output prefixed` is what
+// tags every line with the task that printed it — rather than anything the command said.
+// Whoever is showing the line already knows which task it belongs to, so restating it costs
+// fifteen columns of a build log to say nothing.
+//
+// A line that is not a command echo comes back unchanged: there is nothing to strip, and a
+// caller that has to check first is a caller that will forget to.
+func CommandText(l Line) string {
+	if !l.IsCommand {
+		return l.Plain
+	}
+	text := strings.TrimPrefix(l.Plain, "task: ")
+	if _, rest, ok := strings.Cut(text, "] "); ok {
+		return rest
+	}
+	return text
+}
+
 // MaxLines caps the output kept per task.
 //
 // A run used to be a thing that ended, so the buffers could grow as far as they liked. A
@@ -158,6 +179,53 @@ func (t *TaskRun) Elapsed() (time.Duration, bool) {
 		return 0, false
 	}
 	return time.Since(t.started), true
+}
+
+// CommandStatus is how the command echoed on line i went.
+//
+// go-task announces a command before running it and says nothing when it returns, so the
+// verdict is read off the shape of what came after: another echo means this one finished,
+// and the last echo carries the task's own status — a task that failed failed in its final
+// command, and one still going is still inside it.
+//
+// A failure the Taskfile swallows (`ignore_error:`) is reported as a success, which is
+// what it is from outside: go-task went on to the next command.
+func (t *TaskRun) CommandStatus(i int) Status {
+	if i < 0 || i >= len(t.Lines) || !t.Lines[i].IsCommand {
+		return Pending
+	}
+	for _, l := range t.Lines[i+1:] {
+		if l.IsCommand {
+			return Ok
+		}
+	}
+	return t.Status
+}
+
+// UnderCommand says how the line at i sits under the command that produced it: whether
+// there is one above it in this task at all, and whether it is the last line before the next
+// command starts.
+//
+// It is what lets output be drawn as a command's output rather than as loose lines. The
+// answer is positional, like [TaskRun.CommandStatus] and for the same reason: go-task
+// announces a command and never announces its end, so the end is where the next one begins.
+func (t *TaskRun) UnderCommand(i int) (bool, bool) {
+	if i < 0 || i >= len(t.Lines) || t.Lines[i].IsCommand {
+		return false, false
+	}
+	under := false
+	for j := i - 1; j >= 0; j-- {
+		if t.Lines[j].IsCommand {
+			under = true
+			break
+		}
+	}
+	if !under {
+		return false, false
+	}
+	// The last line of the group is the one the next command follows, or the last line
+	// there is.
+	return true, i+1 >= len(t.Lines) || t.Lines[i+1].IsCommand
 }
 
 // Duration is the settled figure only, for the archive.

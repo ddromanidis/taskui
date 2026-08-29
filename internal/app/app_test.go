@@ -51,7 +51,10 @@ func parkOn(t *testing.T, a *App, name string) int {
 	}
 	for i, r := range a.Rows {
 		if a.Tree.Nodes[r.Node].Task == ti {
-			a.Cursor = i
+			// Through the picker list rather than straight at the tree index: with a run
+			// unfolded above it, a task's row and its tree row are no longer the same
+			// number.
+			a.Cursor = a.pickerIndexOfTree(i)
 			return ti
 		}
 	}

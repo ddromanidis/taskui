@@ -57,6 +57,12 @@ Print tasks that both passed and failed at one commit.
 .BI \-\-graph " TASK"
 Print the execution graph reachable from a task and exit.
 .TP
+.BR \-\-help
+Help for taskui.
+.TP
+.BR \-\-json
+Machine\-readable form of \-\-list, \-\-run (newline\-delimited events) or \-\-timeline.
+.TP
 .BI \-\-keys " STRING"
 Keys to play before a \-\-screenshot, as if typed: \et is ⇥, \en is ⏎, everything else is itself.
 .TP
@@ -71,6 +77,9 @@ List every theme, built\-in and yours, and exit.
 .TP
 .BI \-\-phase " INT"
 Which animation frame a \-\-screenshot is taken at, for themes that move.
+.TP
+.BR \-\-quickfix
+Print the last run's failures as file:line:col: message, for an editor's error list.
 .TP
 .BI \-\-run " TASK"
 Run a task headlessly and print the captured tree.
@@ -92,6 +101,9 @@ Look to use — see \-\-list\-themes.
 .TP
 .BI \-\-timeline " TASK"
 Print how one task has gone, run after run.
+.TP
+.BR \-\-version
+Version for taskui.
 .\" END OPTIONS
 .SH COMMANDS
 Everything below the flags is a subcommand. They do not open the UI.
@@ -146,14 +158,17 @@ Move faster.
 .B p
 Cycle the grouping: by domain, by verb, by file, and any your config added.
 .TP
-.B space o
+.B space
 Fold or unfold a group.
 .TP
+.B o
+How much of the run under a task: hidden, a peek, all of it.
+.TP
 .B ⇧O ⇥
-Fold or unfold everything.
+Fold or unfold every group.
 .TP
 .B ⏎
-Run the task, or every marked one.
+Run the task, or every marked one — the run unfolds under its row.
 .TP
 .B m
 Mark a task to run alongside others.
@@ -180,7 +195,7 @@ Jump to a task, leaving the list intact.
 What this task is, and what it will run.
 .TP
 .B v
-Go to whatever is running, or the last run.
+The whole screen for whatever is running, or the last run.
 .TP
 .B ⇧H
 How this one task has been going, run after run.

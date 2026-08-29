@@ -662,12 +662,12 @@ func (a *App) runHeader() line {
 // splitting them would duplicate the indent, marker and highlight arithmetic.
 //
 //nolint:cyclop // a task row and a line row are two shapes with one gutter between them;
-func (a *App) runRowLines(row RunRow, width int) []line {
+func (a *App) runRowLines(r *run.Run, row RunRow, gutter string, width int) []line {
 	t := a.Theme
-	r := a.Run
 	if r == nil {
 		return nil
 	}
+	width = max(0, width-utf8.RuneCountInString(gutter))
 
 	if row.IsTask {
 		tr, hasTask := r.Tasks[row.Name]
@@ -675,8 +675,6 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 		if hasTask {
 			status = tr.Status
 		}
-		indent := strings.Repeat("  ", row.Depth)
-
 		// Only offer a fold glyph where there is something to unfold. Filled means open,
 		// hollow means ajar — the peek is a door left open a crack, and the glyph should
 		// not claim you are looking at all of it.
@@ -705,7 +703,7 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 		}
 
 		l := line{
-			plain(indent),
+			styled(gutter, fg(t.Colors.Faint)),
 			styled(glyph, fg(t.Colors.Faint)),
 			styled(statusGlyph(status, t)+" ", fgBold(statusStyle(status, t))),
 			styled(row.Name, nameStyle),
@@ -760,7 +758,7 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 			for _, sp := range l {
 				used += utf8.RuneCountInString(sp.text)
 			}
-			gap := max(2, width-used-utf8.RuneCountInString(tail.String()))
+			gap := max(2, width+utf8.RuneCountInString(gutter)-used-utf8.RuneCountInString(tail.String()))
 			l = append(l, plain(strings.Repeat(" ", gap)), styled(tail.String(), fg(t.Colors.Dim)))
 		}
 		return []line{l}
@@ -768,35 +766,50 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 
 	text, isCommand := "", false
 	if tr, ok := r.Tasks[row.Task]; ok && row.Index < len(tr.Lines) {
-		text, isCommand = tr.Lines[row.Index].Plain, tr.Lines[row.Index].IsCommand
-	}
-	if isCommand {
-		text = strings.TrimPrefix(text, "task: ")
-		// `[test] ` names the task whose header is a few rows above, on every command it
-		// runs. Fifteen columns of a build log spent restating what the indentation
-		// already says.
-		if _, rest, ok := strings.Cut(text, "] "); ok {
-			text = rest
-		}
+		// Through CommandText, which takes go-task's `[test] ` off the echo: the task's
+		// header is a few rows above, and restating it on every command it runs spends
+		// fifteen columns of a build log saying what the indentation already says.
+		text = run.CommandText(tr.Lines[row.Index])
+		isCommand = tr.Lines[row.Index].IsCommand
 	}
 
-	indent := strings.Repeat("  ", row.Depth)
-	// The marker distinguishes go-task's own command echo from the command's actual
-	// output. Output gets nothing: absence of a marker is a marker, and a `│` on every
-	// line of a build log is a column of chrome you stop seeing but keep paying for.
-	marker := "  "
+	// A command echo is a step, and what follows it is that step's output — so the two are
+	// drawn as one thing. The echo carries its own verdict (▶ while it runs, ✓ once the
+	// next one started, ✗ on the one that took the task down) and its output hangs off it
+	// on a rail that closes at the last line. "Which step is this", "how did it go" and
+	// "what did it print" are the three questions a build log gets read with, and the
+	// first two used to be answerable only by finding where the output stopped.
+	//
+	// This reverses an earlier decision: output used to get no marker at all, on the
+	// grounds that a `│` on every line is a column of chrome you stop seeing but keep
+	// paying for. That was right while a command echo was only a label. It stopped being
+	// right when the echo became a step with a status, because then which lines belong to
+	// which step is a question worth being able to answer at a glance.
+	rail, endsGroup := a.commandRail(r, row)
+	marker := []span{styled(rail, fg(t.Colors.Faint)), plain("  ")}
 	switch {
 	case isCommand:
-		marker = t.Glyphs.Command + " "
+		st := run.Pending
+		if tr, ok := r.Tasks[row.Task]; ok {
+			st = tr.CommandStatus(row.Index)
+		}
+		marker = []span{
+			styled(statusGlyph(st, t)+" ", fgBold(statusStyle(st, t))),
+			styled(t.Glyphs.Command+" ", fg(t.Colors.Faint)),
+		}
 	case isFailure(text):
-		marker = t.Glyphs.Warning + " "
+		marker = []span{
+			styled(rail, fg(t.Colors.Faint)),
+			styled(t.Glyphs.Warning+" ", fg(t.Colors.Faint)),
+		}
 	}
-	// Two cells for the marker, whatever it is made of. `❯` is three bytes and one column,
-	// and measuring it in bytes — as the Rust original did — wrapped output two columns
-	// early and, worse, disagreed with runRowHeight, which always assumed two. A line
-	// measured shorter than it renders is a line that overflows its column.
-	pad := a.gutterFor(row.Task)
-	room := max(8, width-(utf8.RuneCountInString(indent)+pad+3))
+	// The marker column is measured in cells, whatever it is made of. `❯` is three bytes
+	// and one column, and measuring it in bytes — as the Rust original did — wrapped
+	// output two columns early and, worse, disagreed with runRowHeight, which always
+	// assumed two. A line measured shorter than it renders is a line that overflows its
+	// column.
+	pad := gutterFor(r)
+	room := max(8, width-(pad+1+markerCells))
 
 	base := fg(theme.Default)
 	switch {
@@ -818,15 +831,22 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 
 	out := make([]line, 0, len(chunks))
 	for n, chunk := range chunks {
-		l := line{plain(indent)}
+		l := line{styled(gutter, fg(t.Colors.Faint))}
 		if n == 0 {
-			l = append(l,
-				styled(fmt.Sprintf("%*d ", pad, row.Index+1), fg(t.Colors.Faint)),
-				styled(marker, fg(t.Colors.Faint)),
-			)
+			l = append(l, styled(fmt.Sprintf("%*d ", pad, row.Index+1), fg(t.Colors.Faint)))
+			l = append(l, marker...)
 		} else {
-			// Continuation: blank gutter, aligned under the text above.
-			l = append(l, plain(strings.Repeat(" ", pad+3)))
+			// Continuation: no line number, and the rail carries on down the wrapped rows
+			// — except past the line that closed the group, where it has already ended.
+			cont := "  "
+			if rail != blankRail && !endsGroup {
+				cont = t.Glyphs.GuideVertical + " "
+			}
+			l = append(l,
+				plain(strings.Repeat(" ", pad+1)),
+				styled(cont, fg(t.Colors.Faint)),
+				plain("  "),
+			)
 		}
 
 		// Highlight per chunk, so a match survives being wrapped. A search hit wins over a
@@ -847,6 +867,99 @@ func (a *App) runRowLines(row RunRow, width int) []line {
 	return out
 }
 
+// guides builds the tree guide for every row of a run: the column that says which task an
+// output line came from, and which tasks are still to come below it.
+//
+// The geometry is what the plain two-spaces-per-depth indent already produced — the same
+// columns, with a glyph in them — so nothing moves sideways by adopting it. The picker hands
+// the result a prefix of its own, because there a run hangs under a row of the task tree and
+// has to connect back to it.
+func guides(rows []RunRow, g theme.Glyphs, prefix string) []string {
+	// last[i] marks the task rows with no sibling below them: their branch closes, and
+	// nothing under them carries a rail.
+	last := make([]bool, len(rows))
+	for i, row := range rows {
+		if !row.IsTask {
+			continue
+		}
+		last[i] = true
+		for j := i + 1; j < len(rows); j++ {
+			if rows[j].Depth < row.Depth {
+				break
+			}
+			if rows[j].IsTask && rows[j].Depth == row.Depth {
+				last[i] = false
+				break
+			}
+		}
+	}
+
+	// carries[d] says whether the task drawn at depth d has something below it, and so
+	// whether its rail runs on past the rows in between.
+	carries := map[int]bool{}
+	out := make([]string, len(rows))
+	var b strings.Builder
+	for i, row := range rows {
+		if row.IsTask {
+			carries[row.Depth] = !last[i]
+		}
+		b.Reset()
+		b.WriteString(prefix)
+		for d := 1; d < row.Depth; d++ {
+			if carries[d] {
+				b.WriteString(g.GuideVertical + " ")
+			} else {
+				b.WriteString("  ")
+			}
+		}
+		switch {
+		case row.Depth == 0:
+			// The root, which has nothing above it to hang from.
+		case row.IsTask && last[i]:
+			b.WriteString(g.GuideLast + " ")
+		case row.IsTask:
+			b.WriteString(g.GuideBranch + " ")
+		default:
+			// An output line: its own depth column is blank, and the rail it hangs from is
+			// already in the columns above.
+			b.WriteString("  ")
+		}
+		out[i] = b.String()
+	}
+	return out
+}
+
+// markerCells is the width of a row's marker column: a status glyph and a `❯` on a command
+// echo, the rail and a failure mark on everything else. One number rather than one per
+// caller — the text width, the continuation indent and runRowHeight disagreeing is exactly
+// how a line comes to be measured shorter than it renders.
+const markerCells = 4
+
+// blankRail is the rail column of a line no command claimed.
+const blankRail = "  "
+
+// commandRail is the guide tying an output line to the command above it: `│` while more of
+// that command's output follows, `╰` on its last line, and nothing at all in a task whose
+// output no command claimed — go-task's own messages, or a run restored from an archive
+// written before the echo was kept.
+//
+// Read from the whole buffer rather than from what is on screen, so a peek window on the end
+// of a command's output still says the lines belong to something above it.
+func (a *App) commandRail(r *run.Run, row RunRow) (string, bool) {
+	tr, ok := r.Tasks[row.Task]
+	if !ok {
+		return blankRail, false
+	}
+	switch under, last := tr.UnderCommand(row.Index); {
+	case !under:
+		return blankRail, false
+	case last:
+		return a.Theme.Glyphs.GuideLast + " ", true
+	default:
+		return a.Theme.Glyphs.GuideVertical + " ", false
+	}
+}
+
 // tooFastToMatter is the point below which a duration is noise. `duration` already refuses
 // to print `0.00s` for the same reason.
 const tooFastToMatter = 10 * time.Millisecond
@@ -858,10 +971,10 @@ const tooFastToMatter = 10 * time.Millisecond
 // widest task rather than each task's own width, because a gutter that changed between
 // tasks would leave their output ragged against each other — and the column is there to be
 // scanned down.
-func (a *App) gutterFor(string) int {
+func gutterFor(r *run.Run) int {
 	longest := 0
-	if a.Run != nil {
-		for _, tr := range a.Run.Tasks {
+	if r != nil {
+		for _, tr := range r.Tasks {
 			longest = max(longest, len(tr.Lines))
 		}
 	}
@@ -880,7 +993,7 @@ func isFailure(text string) bool {
 }
 
 // runRowHeight is how many terminal rows one run row occupies once wrapped.
-func (a *App) runRowHeight(row RunRow, width int) int {
+func runRowHeight(r *run.Run, row RunRow, gutter string, width int) int {
 	// A peeking line is always exactly one row. That is the whole contract of the window:
 	// its height is known before its content is, so it cannot grow under you as output
 	// arrives.
@@ -888,12 +1001,12 @@ func (a *App) runRowHeight(row RunRow, width int) int {
 		return 1
 	}
 	text := ""
-	if a.Run != nil {
-		if t, ok := a.Run.Tasks[row.Task]; ok && row.Index < len(t.Lines) {
+	if r != nil {
+		if t, ok := r.Tasks[row.Task]; ok && row.Index < len(t.Lines) {
 			text = t.Lines[row.Index].Plain
 		}
 	}
-	prefix := row.Depth*2 + a.gutterFor(row.Task) + 3
+	prefix := utf8.RuneCountInString(gutter) + gutterFor(r) + 1 + markerCells
 	return len(wrap(text, max(8, width-prefix)))
 }
 
@@ -906,9 +1019,10 @@ func (a *App) drawRun(width, height int) []string {
 	// One column at full width unless the output genuinely overflows, in which case use
 	// whatever the width can carry. Heights depend on the column width, so they are
 	// measured once to decide and again to lay out.
+	gutters := guides(a.RunRows, a.Theme.Glyphs, "")
 	single := 0
-	for _, r := range a.RunRows {
-		single += a.runRowHeight(r, a.bodyWidth(width))
+	for i, r := range a.RunRows {
+		single += runRowHeight(a.Run, r, gutters[i], a.bodyWidth(width))
 	}
 	columns := 1
 	if single > height {
@@ -922,7 +1036,7 @@ func (a *App) drawRun(width, height int) []string {
 
 	heights := make([]int, len(a.RunRows))
 	for i, r := range a.RunRows {
-		heights[i] = a.runRowHeight(r, a.bodyWidth(colWidth))
+		heights[i] = runRowHeight(a.Run, r, gutters[i], a.bodyWidth(colWidth))
 	}
 
 	a.RunCursor = min(a.RunCursor, max(0, len(a.RunRows)-1))
@@ -932,7 +1046,7 @@ func (a *App) drawRun(width, height int) []string {
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.runRowLines(a.RunRows[i], a.bodyWidth(colWidth)))
+			out = append(out, a.runRowLines(a.Run, a.RunRows[i], gutters[i], a.bodyWidth(colWidth)))
 		}
 		return out
 	}
@@ -1076,6 +1190,59 @@ func (a *App) lastOfParent(i int) bool {
 }
 
 // treeItem builds one row of the task tree: guide, label, description, signals.
+// slotBadge is how a row reports the run in its slot: `▶` and a ticking clock while it is
+// going, then the verdict and what it took.
+//
+// It outranks the archive's "how it went last time", which is what the column says when no
+// slot holds this task. The run you started a minute ago is the more current answer to the
+// same question — and until it is saved, the archive has never heard of it.
+func (a *App) slotBadge(name string) ([]span, bool) {
+	r := a.slotRun(name)
+	if r == nil {
+		return nil, false
+	}
+	t := a.Theme
+	if !r.Finished() {
+		return []span{
+			styled(t.Glyphs.StatusRunning+" ", fgBold(t.Colors.StatusRunning)),
+			styled(duration(time.Since(r.Started)), fg(t.Colors.Dim)),
+		}, true
+	}
+	status := run.Failed
+	if r.Exit == 0 {
+		status = run.Ok
+	}
+	took := time.Since(r.Started)
+	if r.HasDuration {
+		took = r.Duration
+	}
+	return []span{
+		styled(statusGlyph(status, t)+" ", fgBold(statusStyle(status, t))),
+		styled(duration(took), fg(t.Colors.Dim)),
+	}, true
+}
+
+// inlineFoldBadge is the fold glyph for a run unfolded under a task's row: how you know
+// there is something under it at all, and which of the three states it is in. The
+// vocabulary is the run view's own, so `▿` means a peek in both places.
+func (a *App) inlineFoldBadge(name string) (span, bool) {
+	fold, ok := a.InlineFold(name)
+	if !ok {
+		return span{}, false
+	}
+	g := a.Theme.Glyphs
+	mark := g.FoldClosed
+	switch fold {
+	case FoldHidden:
+		// Folded away; the closed glyph is what says there is something to open.
+	case FoldPeek:
+		mark = g.FoldPeek
+	case FoldFull:
+		mark = g.FoldOpen
+	}
+	return styled(mark+" ", fg(a.Theme.Colors.Faint)), true
+}
+
 func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 	t := a.Theme
 	node := a.Tree.Nodes[row.Node]
@@ -1157,11 +1324,11 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 		//
 		// Failing that, how it went last time. A blank column means never run, which is
 		// information too — it is not the same as having passed.
-		if elapsed, ok := a.RunningFor(task.Name); ok {
-			badges = append(badges,
-				styled(g.StatusRunning+" ", fgBold(t.Colors.StatusRunning)),
-				styled(duration(elapsed), fg(t.Colors.Dim)),
-			)
+		if badge, ok := a.inlineFoldBadge(task.Name); ok {
+			badges = append(badges, badge)
+		}
+		if slot, ok := a.slotBadge(task.Name); ok {
+			badges = append(badges, slot...)
 		} else if o, ok := a.Outcomes[task.Name]; ok {
 			glyph, colour := g.StatusFailed+" ", t.Colors.StatusFailed
 			if o.Ok {
@@ -1251,23 +1418,51 @@ func (a *App) drawTree(width, height int) []string {
 	widths := columnWidths(width, columns)
 	colWidth := widths[0]
 
-	heights := make([]int, len(a.Rows))
-	for i := range a.Rows {
-		heights[i] = len(a.treeItem(a.Rows[i], a.lastOfParent(i), a.bodyWidth(colWidth)))
+	item := func(i int) []line {
+		row := a.PickerRows[i]
+		if !row.IsRun() {
+			return a.treeItem(a.Rows[row.Tree], a.lastOfParent(row.Tree), a.bodyWidth(colWidth))
+		}
+		r := a.slotRun(row.Root)
+		if r == nil {
+			return []line{{plain("")}}
+		}
+		return a.runRowLines(r, row.Run, row.Rail, a.bodyWidth(colWidth))
 	}
 
-	a.Cursor = min(a.Cursor, max(0, len(a.Rows)-1))
+	heights := make([]int, len(a.PickerRows))
+	for i, row := range a.PickerRows {
+		if row.IsRun() {
+			// Measured rather than rendered: a picker with a run unfolded under it is
+			// mostly output rows, and every one of them is measured twice per frame.
+			heights[i] = a.pickerRunHeight(row, a.bodyWidth(colWidth))
+			continue
+		}
+		heights[i] = len(item(i))
+	}
+
+	a.Cursor = min(a.Cursor, max(0, len(a.PickerRows)-1))
 	a.Offset = offsetForCursor(heights, a.Cursor, height, columns)
 	bounds := columnBounds(heights, a.Offset, height, columns)
 
 	build := func(from, to int) [][]line {
 		out := make([][]line, 0, to-from)
 		for i := from; i < to; i++ {
-			out = append(out, a.treeItem(a.Rows[i], a.lastOfParent(i), a.bodyWidth(colWidth)))
+			out = append(out, item(i))
 		}
 		return out
 	}
 	return a.composeColumns(bounds, widths, colWidth, height, a.Cursor, build)
+}
+
+// pickerRunHeight is how many terminal rows one inline run row occupies, indentation
+// included.
+func (a *App) pickerRunHeight(row PickerRow, width int) int {
+	r := a.slotRun(row.Root)
+	if r == nil {
+		return 1
+	}
+	return runRowHeight(r, row.Run, row.Rail, width)
 }
 
 // composeColumns lays items into columns and zips them into terminal rows.

@@ -121,21 +121,50 @@ Your Taskfile uses both go-task conventions:
 
 ## Reading a failed run
 
-`⏎` on `ci`. The view follows the run, and the moment something fails it unfolds that task
-and stops there:
+`⏎` on `ci` starts it and leaves you in the list. The run unfolds under the row it came
+from: the tasks it pulled in, each command with the verdict of the step it announces, and
+the last few lines each task printed.
+
+```
+ taskui ▸ acme                                    domain·verb·file   17 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+ ▾ (root)                                                                   6
+▌├ ci             Everything: build, test, package                ▿ ✗ 2.0s
+ │ ├ ▿ ✓ build                                                29 more   1.2s
+ │ │   3 │   compiling api
+ │ │   4 └   built in 1.2s
+ │ └ ▾ ✗ test                                                          780ms
+ │     1 ✓ ❯ go build ./...
+ │     2 └   running 42 tests
+ │     3 ✗ ❯ go test ./...
+ │     4 │   --- FAIL: TestOrderTotal
+ │     5 └       order_test.go:88: want 1200, got 1180
+```
+
+Each command carries the verdict of the step it announces, and its output hangs off it on a
+rail that closes at the last line — so which of the next forty lines belong to which step is
+something you see rather than count. The whole run hangs off the row it was started from by
+the same guides the task tree draws with.
+
+`o` walks the whole block hidden → peek → full; the same key on a row inside it moves one
+task. `space` stays on the tree, so a namespace still folds where it always did.
+
+`v` gives the run the whole screen, which is where you read one. It follows the run, and the
+moment something fails it unfolds that task and stops there:
 
 ```
  taskui ▸ task ci                                    FAILED    0.2s   exit 201
  ─────────────────────────────────────────────────────────────────────────────
    ✗ ci                                                                 2.0s
-   ▿ ✓ build                                                 29 more     1.2s
-      3   compiling api
-      4   built in 1.2s
-▌  ▾ ✗ test                                                            780ms
-      1 ❯ go test ./...
-      2   running 42 tests
-      3   --- FAIL: TestOrderTotal
-      4       order_test.go:88: want 1200, got 1180
+   ├ ▿ ✓ build                                               29 more     1.2s
+   │    3 │   compiling api
+   │    4 └   built in 1.2s
+▌  └ ▾ ✗ test                                                          780ms
+        1 ✓ ❯ go build ./...
+        2 └   running 42 tests
+        3 ✗ ❯ go test ./...
+        4 │   --- FAIL: TestOrderTotal
+        5 └       order_test.go:88: want 1200, got 1180
 ```
 
 The failure is open in full; `build`, which finished, dropped back to a **peek** — `▿`, the
@@ -412,4 +441,46 @@ driven end to end:
 
 ```
 taskui --run deploy --screenshot 100x20 --keys $'iy\n'
+```
+
+### Feeding an editor
+
+`--quickfix` prints the last run's failures as absolute `file:line:col: message`, which is
+the form every editor already walks:
+
+```vim
+set errorformat=%f:%l:%c:\ %m
+:cexpr system('taskui --quickfix')          " the run you just watched fail
+:cexpr system('taskui --run backend:test --quickfix')   " run it and populate in one go
+```
+
+Absolute, because that is the part nothing else can do: `go test` prints `order_test.go:88`
+relative to the package it ran in, and an editor resolving that against its own working
+directory opens nothing. taskui knows which task printed the line and where that task ran.
+References it could only guess at — a bare name that exists twice in the tree — are left out
+rather than sent as a guess you would follow without looking.
+
+### Feeding a program
+
+`--json` is the machine-readable form of three flags that already existed:
+
+```
+taskui --list --json                   # the tasks, with descriptions and last outcomes
+taskui --timeline backend:test --json  # one task's stored runs
+taskui --run ci --json                 # the run as it happens, one event per line
+```
+
+The run form is newline-delimited JSON, and it is a stream: a `run` object, then `graph`,
+then `task` and `line` events as they happen, then `exit`. A task is announced before its
+output and its verdict comes after it, line indices count from the start of the run, and the
+process exits with the task's own exit code — so a front end elsewhere can draw the same
+tree the TUI draws without reimplementing any of the engine.
+
+```json
+{"type":"run","root":"ci","dir":"/src/acme","started_unix":1787983902}
+{"type":"graph","edges":{"ci":["build","test"],"build":[],"test":[]}}
+{"type":"task","name":"build","status":"Running"}
+{"type":"line","task":"build","index":0,"text":"go build ./...","command":true}
+{"type":"task","name":"build","status":"Ok","duration_ms":314}
+{"type":"exit","code":1,"duration_ms":2100,"saved":"~/.local/state/taskui/runs/…"}
 ```

@@ -236,6 +236,13 @@ func sampleApp() *app.App {
 	return a
 }
 
+// command feeds one of go-task's own command echoes, flagged the way the capture's parser
+// flags it — which is what makes the sample show a command as a step with a verdict rather
+// than as a line of output that happens to start with "task:".
+func command(r *run.Run, task, text string) {
+	r.Apply(run.LineEvent{Task: task, Raw: text, IsCommand: true})
+}
+
 // sampleRun is a `task ci` that failed in the middle, with output worth looking at.
 func sampleRun() *run.Run {
 	r := run.Detached(sampleAll, run.GraphFrom(
@@ -244,11 +251,11 @@ func sampleRun() *run.Run {
 		run.Edge{Parent: sampleLint},
 		run.Edge{Parent: sampleTest},
 	))
-	r.Feed(sampleFmt, "task: [fmt] gofmt -l -w .")
+	command(r, sampleFmt, "gofmt -l -w .")
 	r.Feed(sampleFmt, "3 files reformatted")
-	r.Feed(sampleLint, "task: [lint] golangci-lint run")
+	command(r, sampleLint, "golangci-lint run")
 	r.Feed(sampleLint, "0 issues.")
-	r.Feed(sampleTest, "task: [backend:test] go test -race ./...")
+	command(r, sampleTest, "go test -race ./...")
 	r.Feed(sampleTest, "=== RUN   TestOrderTotal")
 	r.Feed(sampleTest, "    order_test.go:88: want 1200, got 1180")
 	r.Feed(sampleTest, "--- FAIL: TestOrderTotal (0.01s)")
@@ -331,7 +338,7 @@ var examples = []example{{
 		text("Opening a project gives you its shape, not its list. Namespaces are folds, and the " +
 			"number on the right is how many tasks are inside."),
 		frame(draw(11, "", nil)),
-		text("`space` or `o` opens one. `⇧O` or `⇥` opens everything at once, which on a large " +
+		text("`space` opens one. `⇧O` or `⇥` opens everything at once, which on a large " +
 			"Taskfile is how you go from shape to detail and back."),
 		frame(draw(14, "\t", nil)),
 		text("Each row says how that task went last time, in a column you can run your eye down. " +
@@ -354,21 +361,32 @@ var examples = []example{{
 	name:  "run",
 	title: "Running something and reading what happened",
 	parts: []part{
-		text("`⏎` runs the task under the cursor. The view follows the run, and the moment " +
-			"something fails it opens that task and stops there:"),
-		frame(draw(18, "", func(a *app.App) {
+		text("`⏎` runs the task under the cursor and leaves you in the list. The run unfolds " +
+			"under the row it came from: every task it pulled in, every command each of those " +
+			"ran, and the last few lines they printed."),
+		frame(draw(16, "\tj", func(a *app.App) {
 			a.OpenRunForTest(sampleRun())
-			a.Screen = app.ScreenRun
+			a.Follow()
+		})),
+		text("Each command carries the verdict of the step it announces — `✓` once the next one " +
+			"started, `✗` on the one that took the task down, `▶` while it is still going — and " +
+			"its output hangs off it on a rail that closes at the last line, so which lines " +
+			"belong to which step is something you see rather than count."),
+		text("The fold glyph on the task's own row says how much of the run is showing: `o` walks " +
+			"it hidden → peek → full, and the same key on a row inside moves that one task."),
+		text("`v` gives the run the whole screen, which is where you read it:"),
+		frame(draw(18, "v", func(a *app.App) {
+			a.OpenRunForTest(sampleRun())
 			a.Follow()
 		})),
 		text("The failure is open in full. Everything that finished dropped back to a peek — `▿`, " +
 			"the last few lines it printed. That is the resting state, so a run you have not " +
-			"touched still tells you what each step said rather than only how long it took."),
-		text("`o` cycles a task hidden → peek → full, `⇧O` does it to all of them, and " +
-			"`peek-lines:` in your config sets how many lines a peek shows."),
-		text("`esc` leaves without stopping anything; the picker then says what is still going and " +
-			"`v` takes you back. `x` stops a run — from the picker too, on whichever task the " +
-			"cursor is on, so a background run does not have to be opened just to be stopped."),
+			"touched still tells you what each step said rather than only how long it took. " +
+			"`⇧O` moves every task at once, and `peek-lines:` in your config sets how many " +
+			"lines a peek shows."),
+		text("`esc` comes back to the list without stopping anything, and every run keeps going " +
+			"either way. `x` stops one — from the picker too, on whichever task the cursor is " +
+			"on, so a background run does not have to be opened just to be stopped."),
 	},
 }, {
 	name:  "search",

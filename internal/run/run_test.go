@@ -746,3 +746,85 @@ func TestAnOrdinaryLineIsNotASkipNotice(t *testing.T) {
 		}
 	}
 }
+
+// A command echo carries its own verdict, read off what came after it: another echo means
+// this one returned, and the last one shares the task's fate. It is how a build log says
+// which step is running and which step took the task down.
+func TestCommandStatusFollowsWhatCameAfterIt(t *testing.T) {
+	build := func(status Status) *TaskRun {
+		t := &TaskRun{Status: status}
+		t.Lines = []Line{
+			newLine("task: [test] go build ./...", true),
+			newLine("ok", false),
+			newLine("task: [test] go test ./...", true),
+			newLine("--- FAIL: TestOrderTotal", false),
+		}
+		return t
+	}
+
+	for _, tt := range []struct {
+		name       string
+		task       Status
+		first, cur Status
+	}{
+		{"still going", Running, Ok, Running},
+		{"failed", Failed, Ok, Failed},
+		{"passed", Ok, Ok, Ok},
+		{"never reached", Skipped, Ok, Skipped},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tr := build(tt.task)
+			if got := tr.CommandStatus(0); got != tt.first {
+				t.Errorf("the command that returned = %v, want %v", got, tt.first)
+			}
+			if got := tr.CommandStatus(2); got != tt.cur {
+				t.Errorf("the last command = %v, want %v", got, tt.cur)
+			}
+		})
+	}
+
+	// Output is not a command, and neither is a line that is not there.
+	tr := build(Ok)
+	if got := tr.CommandStatus(1); got != Pending {
+		t.Errorf("an output line reported %v", got)
+	}
+	if got := tr.CommandStatus(99); got != Pending {
+		t.Errorf("a line past the end reported %v", got)
+	}
+}
+
+// An output line belongs to the command above it, and the last line of that command's
+// output is the one the next command follows — or the last line there is. It is what lets
+// the views draw output hanging off its command rather than as loose lines.
+func TestUnderCommandTiesOutputToItsCommand(t *testing.T) {
+	tr := &TaskRun{Lines: []Line{
+		newLine("go build ./...", true),
+		newLine("ok", false),
+		newLine("go test ./...", true),
+		newLine("=== RUN TestOrderTotal", false),
+		newLine("--- FAIL: TestOrderTotal", false),
+	}}
+
+	for _, tt := range []struct {
+		at          int
+		under, last bool
+	}{
+		{0, false, false}, // the command itself
+		{1, true, true},   // its only output line, and the next line is another command
+		{2, false, false},
+		{3, true, false}, // more of this command's output follows
+		{4, true, true},  // the end of the buffer closes the group
+		{9, false, false},
+	} {
+		under, last := tr.UnderCommand(tt.at)
+		if under != tt.under || last != tt.last {
+			t.Errorf("line %d: under=%v last=%v, want %v/%v", tt.at, under, last, tt.under, tt.last)
+		}
+	}
+
+	// Output printed before any command — go-task's own messages — hangs off nothing.
+	loose := &TaskRun{Lines: []Line{newLine("task: up to date", false)}}
+	if under, _ := loose.UnderCommand(0); under {
+		t.Error("a line with no command above it claimed one")
+	}
+}

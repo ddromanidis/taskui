@@ -218,10 +218,14 @@ type App struct {
 	// plus `file`, plus whatever the config added.
 	Pivots []pivot.Pivot
 	// Pivot indexes Pivots.
-	Pivot  int
-	Tree   *pivot.Tree
-	Rows   []pivot.Row
-	Cursor int
+	Pivot int
+	Tree  *pivot.Tree
+	Rows  []pivot.Row
+	// PickerRows is the tree and every open run laid out as one list: what the cursor
+	// indexes and the viewport scrolls. Rows stays the tree on its own, because that is
+	// what the pivot builds and what filtering and jumping work over.
+	PickerRows []PickerRow
+	Cursor     int
 	// Offset is the viewport offset, kept here so scrolling survives rebuilds.
 	Offset int
 
@@ -696,7 +700,16 @@ func (a *App) ResumeRun() bool {
 // second copy would have nowhere to live even if it were wanted.
 func (a *App) RequestRun(name string, args []string) {
 	if a.liveSlot(name) {
+		// Focus it, so `v` goes to the right one — but stay where you are. From the
+		// picker the run is already on screen, under the row the cursor is on.
+		screen := a.Screen
 		a.focusTask(name)
+		a.Screen = screen
+		if screen == ScreenPicker {
+			a.Status = "`" + name + "` is already running — `v` for the whole screen"
+			a.RebuildPickerRows()
+			return
+		}
 		a.ResumeRun()
 		return
 	}
@@ -773,7 +786,6 @@ func (a *App) StartRunWith(name string, args []string) error {
 	a.retire(a.Run)
 	a.Run = r
 	a.FocusSeq = seq
-	a.Screen = ScreenRun
 	a.RunCursor = 0
 	a.RunOffset = 0
 	a.runFolds = map[string]Fold{}
@@ -784,6 +796,13 @@ func (a *App) StartRunWith(name string, args []string) error {
 	a.ClearSearch()
 	a.SavedTo = ""
 	a.RebuildRunRows()
+	// Starting a run no longer takes the screen. The list stays where it was and the run
+	// grows under the row it came from — which is what makes starting a second one, and a
+	// third, something you can do without losing sight of the first.
+	if a.Screen == ScreenPicker {
+		a.Status = "running `" + name + "` — `v` for the whole screen"
+	}
+	a.RebuildPickerRows()
 	return nil
 }
 
@@ -1215,7 +1234,7 @@ func (a *App) CancelJump() {
 	a.Jumping = false
 	a.JumpQuery = ""
 	a.JumpMatches = nil
-	a.Cursor = min(a.jumpOrigin, max(0, len(a.Rows)-1))
+	a.Cursor = min(a.jumpOrigin, max(0, len(a.PickerRows)-1))
 }
 
 func (a *App) JumpStep(delta int) {
@@ -1230,7 +1249,7 @@ func (a *App) JumpStep(delta int) {
 func (a *App) applyJump() {
 	if a.JumpQuery == "" {
 		a.JumpMatches = nil
-		a.Cursor = min(a.jumpOrigin, max(0, len(a.Rows)-1))
+		a.Cursor = min(a.jumpOrigin, max(0, len(a.PickerRows)-1))
 		return
 	}
 	a.JumpMatches = a.matchingTasks(a.JumpQuery)
@@ -1444,7 +1463,7 @@ func (a *App) GotoTop() {
 func (a *App) GotoBottom() {
 	switch a.Screen {
 	case ScreenPicker:
-		a.Cursor = max(0, len(a.Rows)-1)
+		a.Cursor = max(0, len(a.PickerRows)-1)
 	case ScreenRun:
 		a.RunCursor = max(0, len(a.RunRows)-1)
 		// Jumping to the end of a live run is the same intent as following it.
@@ -1709,14 +1728,22 @@ func (a *App) PollRun() bool {
 	}
 
 	if a.Run == nil {
+		if moved {
+			// A parked run said something, and the picker is showing it under its task.
+			a.RebuildPickerRows()
+		}
 		return moved
 	}
 	if !a.Run.Poll() {
+		if moved {
+			a.RebuildPickerRows()
+		}
 		return moved
 	}
 	a.follow()
 	a.refreshSearch()
 	a.RebuildRunRows()
+	a.RebuildPickerRows()
 	a.saveIfFinished()
 	return true
 }
@@ -1983,6 +2010,90 @@ type lineKey struct {
 	index int
 }
 
+// rowFilter is the run view's filter mode: the tasks and lines a search left standing.
+// Nil means everything, which is what the picker's inline runs use — a search filters the
+// run you are reading, not the list you are browsing.
+type rowFilter struct {
+	tasks map[string]bool
+	lines map[lineKey]bool
+}
+
+// runRowsFor walks a run's execution graph into rows: every task, then whatever of its
+// output the fold state calls for, then its children.
+//
+// A function over a run rather than a method on the app, because the picker draws runs the
+// app is not focused on — every open slot at once — and a walk that reached for a.Run would
+// draw the wrong one under every task but the last. The two views therefore cannot disagree
+// about what a run contains; they differ in what surrounds the rows, not in the rows.
+func runRowsFor(r *run.Run, foldOf func(string) Fold, peek int, filter *rowFilter) []RunRow {
+	var rows []RunRow
+	seen := map[string]bool{}
+	type frame struct {
+		name  string
+		depth int
+	}
+	// Pushed in reverse so siblings come out in invocation order.
+	stack := []frame{{r.Root, 0}}
+
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		// A diamond — `app:css` reached from both `check` and `build` — is shown at its
+		// first position rather than duplicated.
+		if seen[top.name] {
+			continue
+		}
+		seen[top.name] = true
+
+		children := r.Graph.Children(top.name)
+
+		if filter != nil && !filter.tasks[top.name] {
+			// Skip the row but keep walking: a parent with no hits of its own may still
+			// contain a child that has them.
+			for _, c := range slices.Backward(children) {
+				stack = append(stack, frame{c, top.depth})
+			}
+			continue
+		}
+
+		// Filtering answers the question the fold state usually answers — you asked for
+		// these lines by searching for them — so it opens everything it keeps.
+		fold := foldOf(top.name)
+		if filter != nil {
+			fold = FoldFull
+		}
+		rows = append(rows, RunRow{IsTask: true, Name: top.name, Depth: top.depth, Fold: fold})
+
+		if fold != FoldHidden {
+			if t, ok := r.Tasks[top.name]; ok {
+				// A peek is a window on the end of the buffer, not the start: a task that
+				// is still going has its news at the bottom, and one that failed put the
+				// reason there.
+				from := 0
+				if fold == FoldPeek {
+					from = max(0, len(t.Lines)-peek)
+				}
+				for i := from; i < len(t.Lines); i++ {
+					if filter != nil && !filter.lines[lineKey{top.name, i}] {
+						continue
+					}
+					rows = append(rows, RunRow{
+						Task:  top.name,
+						Index: i,
+						Depth: top.depth + 1,
+						Peek:  fold == FoldPeek,
+					})
+				}
+			}
+		}
+		for _, c := range slices.Backward(children) {
+			stack = append(stack, frame{c, top.depth + 1})
+		}
+	}
+	return rows
+}
+
 func (a *App) RebuildRunRows() {
 	if a.Run == nil {
 		a.RunRows = nil
@@ -2022,12 +2133,11 @@ func (a *App) RebuildRunRows() {
 
 	// In filter mode the whole run collapses to matching lines under the tasks that
 	// produced them: a hit is not useful if you cannot see which task said it.
-	filtering := a.FilterMatches && a.Search != nil
-	// Each hit drags its neighbours in with it: `--- FAIL: TestOrderTotal` on its own
-	// hides `order_test.go:88: want 1200, got 1180`, which is the useful half.
-	hitLines := map[lineKey]bool{}
-	hitTasks := map[string]bool{}
-	if filtering {
+	var filter *rowFilter
+	if a.FilterMatches && a.Search != nil {
+		// Each hit drags its neighbours in with it: `--- FAIL: TestOrderTotal` on its own
+		// hides `order_test.go:88: want 1200, got 1180`, which is the useful half.
+		filter = &rowFilter{lines: map[lineKey]bool{}, tasks: map[string]bool{}}
 		for _, h := range a.SearchHits {
 			n := 0
 			if t, ok := r.Tasks[h.Task]; ok {
@@ -2036,79 +2146,13 @@ func (a *App) RebuildRunRows() {
 			lo := max(0, h.Index-a.FilterContext)
 			hi := min(h.Index+a.FilterContext+1, n)
 			for i := lo; i < hi; i++ {
-				hitLines[lineKey{h.Task, i}] = true
-				hitTasks[h.Task] = true
+				filter.lines[lineKey{h.Task, i}] = true
+				filter.tasks[h.Task] = true
 			}
 		}
 	}
 
-	var rows []RunRow
-	seen := map[string]bool{}
-	type frame struct {
-		name  string
-		depth int
-	}
-	// Pushed in reverse so siblings come out in invocation order.
-	stack := []frame{{r.Root, 0}}
-
-	for len(stack) > 0 {
-		top := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-
-		// A diamond — `app:css` reached from both `check` and `build` — is shown at its
-		// first position rather than duplicated.
-		if seen[top.name] {
-			continue
-		}
-		seen[top.name] = true
-
-		children := r.Graph.Children(top.name)
-
-		if filtering && !hitTasks[top.name] {
-			// Skip the row but keep walking: a parent with no hits of its own may still
-			// contain a child that has them.
-			for _, c := range slices.Backward(children) {
-				stack = append(stack, frame{c, top.depth})
-			}
-			continue
-		}
-
-		// Filtering answers the question the fold state usually answers — you asked for
-		// these lines by searching for them — so it opens everything it keeps.
-		fold := a.FoldOf(top.name)
-		if filtering {
-			fold = FoldFull
-		}
-		rows = append(rows, RunRow{IsTask: true, Name: top.name, Depth: top.depth, Fold: fold})
-
-		if fold != FoldHidden {
-			if t, ok := r.Tasks[top.name]; ok {
-				// A peek is a window on the end of the buffer, not the start: a task that
-				// is still going has its news at the bottom, and one that failed put the
-				// reason there.
-				from := 0
-				if fold == FoldPeek {
-					from = max(0, len(t.Lines)-a.PeekLines)
-				}
-				for i := from; i < len(t.Lines); i++ {
-					if filtering && !hitLines[lineKey{top.name, i}] {
-						continue
-					}
-					rows = append(rows, RunRow{
-						Task:  top.name,
-						Index: i,
-						Depth: top.depth + 1,
-						Peek:  fold == FoldPeek,
-					})
-				}
-			}
-		}
-		for _, c := range slices.Backward(children) {
-			stack = append(stack, frame{c, top.depth + 1})
-		}
-	}
-
-	a.RunRows = rows
+	a.RunRows = runRowsFor(r, a.FoldOf, a.PeekLines, filter)
 	switch {
 	case anchored:
 		a.RunCursor = a.locate(anchorTask, anchorLine, anchorOffset)
@@ -2194,6 +2238,7 @@ func (a *App) OpenRunForTest(r *run.Run) {
 	a.runFolds = map[string]Fold{}
 	a.RunCursor = 0
 	a.RebuildRunRows()
+	a.RebuildPickerRows()
 }
 
 // RunSetFold forces a task's fold state, for tests.
@@ -2589,31 +2634,43 @@ func (a *App) Rebuild(keep int) {
 	// not find.
 	a.Rows = a.Tree.Flatten(func(key string) bool { return filtering || set[key] })
 
+	tree := -1
 	if keep >= 0 {
 		for i, r := range a.Rows {
 			if a.Tree.Nodes[r.Node].Task == keep {
-				a.Cursor = i
-				return
+				tree = i
+				break
 			}
 		}
 	}
-	a.Cursor = min(a.Cursor, max(0, len(a.Rows)-1))
+	a.RebuildPickerRows()
+	if tree >= 0 {
+		a.Cursor = a.pickerIndexOfTree(tree)
+		return
+	}
+	a.Cursor = min(a.Cursor, max(0, len(a.PickerRows)-1))
 }
 
 // SelectedTask is the task under the cursor, or pivot.NoTask.
+//
+// From a row inside an inline run it is the task the block hangs under, so every key that
+// acts on "the task under the cursor" keeps working while you are reading its output —
+// which is the same rule the run view's `r` follows.
 func (a *App) SelectedTask() int {
-	if a.Cursor >= len(a.Rows) {
+	node := a.SelectedNode()
+	if node == nil {
 		return pivot.NoTask
 	}
-	return a.Tree.Nodes[a.Rows[a.Cursor].Node].Task
+	return node.Task
 }
 
 // SelectedNode is the tree node under the cursor.
 func (a *App) SelectedNode() *pivot.Node {
-	if a.Cursor >= len(a.Rows) {
+	tree := a.cursorTreeRow()
+	if tree < 0 || tree >= len(a.Rows) {
 		return nil
 	}
-	return &a.Tree.Nodes[a.Rows[a.Cursor].Node]
+	return &a.Tree.Nodes[a.Rows[tree].Node]
 }
 
 // ToggleMode advances to the next pivot, wrapping.
@@ -2648,7 +2705,7 @@ func (a *App) ToggleFold() {
 	// wherever the row that used to be at this index ended up.
 	for i, r := range a.Rows {
 		if a.Tree.Nodes[r.Node].Key == key {
-			a.Cursor = i
+			a.Cursor = a.pickerIndexOfTree(i)
 			return
 		}
 	}
@@ -2702,10 +2759,10 @@ func (a *App) SetFoldAll(open bool) {
 }
 
 func (a *App) MoveCursor(delta int) {
-	if len(a.Rows) == 0 {
+	if len(a.PickerRows) == 0 {
 		return
 	}
-	a.Cursor = clamp(a.Cursor+delta, 0, len(a.Rows)-1)
+	a.Cursor = clamp(a.Cursor+delta, 0, len(a.PickerRows)-1)
 }
 
 func (a *App) PushQuery(c rune) {

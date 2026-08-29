@@ -27,10 +27,16 @@ is a path, not a name. It pivots: by domain (`backend` › `migrate` › `down`)
 the first. Each row says how the task went last time, or how long it has been running right
 now, in a slot you may not be looking at.
 
-**The run view** is the execution tree with the output folded into it. Every task rests on
-a *peek* — a window on its last few lines — so a glance tells you what each step is saying
-without opening any of them. It follows what is running, and the moment something fails it
-stops there and opens it.
+**Runs unfold in the list.** `⏎` starts the task and leaves you where you were: the
+execution tree grows under the row it came from — every task the run pulled in, every
+command each of those ran with the verdict of that command beside it, and the last few
+lines they printed. `o` walks the block through hidden, a peek, and all of it. With
+several slots open, several tasks are showing their output at once.
+
+**The run view** is the same tree with the whole screen to itself, which is where you read
+one. `v` goes there. Every task rests on a *peek* — a window on its last few lines — so a
+glance tells you what each step is saying without opening any of them. It follows what is
+running, and the moment something fails it stops there and opens it.
 
 **Slots** let runs outlive your attention. Start `docker compose up`, leave it, run
 something else; the first one keeps going in a slot you can switch back to, with its scroll
@@ -58,6 +64,10 @@ at the top of every profile saying nothing.
 And `e` opens the file. A `file:line` anywhere in captured output is underlined, and `e`
 launches `$EDITOR` on it at that line. In the picker there is no error to follow, so `e`
 opens the task's own definition in the Taskfile instead.
+
+**In Neovim** it is the same tool without the terminal: a plugin over the binary's `--json`
+and `--quickfix` forms, with the same tree, the same runs-in-the-list model, and a quickfix
+list that lands on the failing line. See [In Neovim](#in-neovim).
 
 ## Why
 
@@ -186,6 +196,9 @@ taskui --search 'FAIL|error'  # grep every stored run (works from any directory)
 taskui --search FAIL --task backend:test --since 2d
 taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
+taskui --quickfix             # the last run's failures as file:line:col: message
+taskui --list --json          # the same listings, for a program rather than a person
+taskui --run ci --json        # the run as newline-delimited events, as it happens
 taskui --flaky                # tasks that went both ways at one commit
 taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'p' or '/lint')
@@ -214,9 +227,10 @@ In the picker:
 | key | |
 |---|---|
 | `j` `k` `↑` `↓` | move |
-| `space` `o` `←` `→` | fold / unfold |
-| `⇧O` `⇥` | fold or unfold everything |
-| `⏎` | run — or every marked task, each in its own slot |
+| `space` `←` `→` | fold / unfold a group |
+| `o` | how much of the run under a task: hidden, a peek, all of it |
+| `⇧O` `⇥` | fold or unfold every group |
+| `⏎` | run — or every marked task, each in its own slot — and stay here |
 | `p` | toggle the pivot |
 | `a` | run with arguments |
 | `i` | arm interactive mode for the next run |
@@ -225,7 +239,7 @@ In the picker:
 | `s` | what this task is, and what it will run |
 | `m` `⇧M` | mark a task to run alongside others / clear the marks |
 | `e` | open this task's definition in `$EDITOR` |
-| `v` | go to whatever is running, or the last run |
+| `v` | the whole screen for whatever is running, or the last run |
 | `h` | past runs, across the project |
 | `⇧H` | past runs of *this* task |
 | `x` | stop this task's run, wherever it is |
@@ -300,10 +314,10 @@ captured output and `e` opens the one under the cursor:
 
 ```
  ▾ ✗ test
-   1 ❯ go test ./...
-   2   === RUN   TestWrap
-   3       view_test.go:88: want 3, got 4      ← underlined; e opens it
-   4   --- FAIL: TestWrap (0.00s)
+   1 ✗ ❯ go test ./...
+   2 │   === RUN   TestWrap
+   3 │       view_test.go:88: want 3, got 4    ← underlined; e opens it
+   4 └   --- FAIL: TestWrap (0.00s)
 ```
 
 The hard part is not the parsing, it is the resolving. `go test` prints a bare basename
@@ -389,6 +403,23 @@ taskui --timeline test   # one run per line, tab-separated
 taskui --diff test       # unified-ish, with the line numbers on the rows
 ```
 
+### `--quickfix` — hand the failures to your editor
+
+The same resolving, addressed to a program. `--quickfix` prints the last run's failures as
+absolute `file:line:col: message`, which is the one form every editor already walks:
+
+```vim
+set errorformat=%f:%l:%c:\ %m
+:cexpr system('taskui --quickfix')
+:cexpr system('taskui --run backend:test --quickfix')   " run it and populate in one go
+```
+
+Absolute is the point. `go test` prints `order_test.go:88` relative to the package it ran
+in; an editor resolves that against its own working directory and the jump opens nothing.
+taskui knows which task printed the line and where that task ran, so it can answer properly
+— and a reference it could only guess at is left out rather than sent as a guess you would
+follow without looking. `--task` narrows it to one task, whether or not that task failed.
+
 ## Knowing what a run will do, and what it did
 
 ### Why a task did not run
@@ -467,6 +498,10 @@ A batch with anything on the danger list asks once for the whole set rather than
 prompt between each pair of starts. More marks than free slots starts what it can and says
 what it left — a batch that quietly did less than you asked is worse than one that refuses.
 
+Since a run unfolds under the row it came from, a batch of three is three blocks of live
+output in one list, each with its own tasks, commands and peek window. That is the shape
+the run view cannot show: it has one run on screen at a time.
+
 ### Letting a run outlive taskui
 
 `⇧A` detaches the run in the focused slot. Quitting stops being responsible for it; `x` still
@@ -525,6 +560,38 @@ taskui --search 'FAIL' --task backend:test --since 2d
 
 `--since` takes Go durations plus the units an archive actually gets asked about — `2d`,
 `3w`.
+
+### Talking to something other than a terminal
+
+`--json` is the machine-readable form of three flags that already existed — a front end
+somewhere else gets the engine without reimplementing any of it:
+
+```
+taskui --list --json                   # the tasks: descriptions, danger flags, where each
+                                       # is written, and how the archive says it went
+taskui --timeline backend:test --json  # one task's stored runs
+taskui --run ci --json                 # the run as it happens, one event per line
+```
+
+The run form is a stream of newline-delimited JSON: a `run` object, then `graph`, then
+`task` and `line` events as they arrive, then `exit`. A task is announced before its output
+and its verdict after it, so a consumer never sees `Ok` followed by more of that task's
+lines; line indices count from the start of the run rather than the start of the buffer, so
+a long-lived task dropping its oldest lines does not renumber what you have already stored.
+The run is archived like any other, and the process exits with the task's own code.
+
+```json
+{"type":"run","root":"ci","dir":"/src/acme","started_unix":1787983902}
+{"type":"graph","edges":{"ci":["build","test"],"build":[],"test":[]}}
+{"type":"task","name":"build","status":"Running"}
+{"type":"line","task":"build","index":0,"text":"go build ./...","command":true}
+{"type":"task","name":"build","status":"Ok","duration_ms":314}
+{"type":"exit","code":1,"duration_ms":2100,"saved":"~/.local/state/taskui/runs/…"}
+```
+
+One process per run rather than a daemon: the archive on disk is already the shared state,
+so separate processes see each other's history for free, and a caller that wants three runs
+at once has a process table to multiplex them with.
 
 ## Pivots
 
@@ -1036,6 +1103,87 @@ backend:migrate:prod
 Its presence switches off the description heuristic entirely. A guess and a declaration
 disagreeing about which tasks are dangerous is worse than either alone; once you have
 written the list down, that list is the answer.
+
+## In Neovim
+
+The same tool, without leaving the editor. `taskui` ships a Neovim plugin in this
+repository: it is a front end over the binary's `--json` and `--quickfix` forms, not a
+second implementation of anything.
+
+```lua
+-- lazy.nvim
+{ "ddromanidis/taskui", opts = {} }
+
+-- packer / paq / manually: the plugin directory is on the runtimepath, then
+require("taskui").setup({})
+```
+
+It needs Neovim 0.10 or newer, the `taskui` binary on your `PATH`, and go-task — which is
+what `:checkhealth taskui` checks, in that order.
+
+```
+:TaskUI                    open the panel (again to close it)
+:TaskUI backend:test       run one, with completion over the task names
+:TaskUI edit backend:test  open the task's own definition in the Taskfile
+:TaskUI quickfix           the last run's failures, in the quickfix list
+```
+
+The panel is the task tree, and a run unfolds under the row it was started from — the same
+model the terminal UI settled on, for the same reason. Two runs at once are two blocks of
+live output in one list.
+
+```
+  ▾ backend                                                    3
+  ├   lint    Lint both tag sets                          ✓
+  ├   test    Run the suite                        ▿ ✗ 1.3s
+  │ ├ ▿ ✓ deps                                        208ms
+  │ │    1 ✓ ❯ go mod download
+  │ └ ▾ ✗ backend:test                                 1.3s
+  │      1 ✗ ❯ go test -race ./...
+  │      2 │   === RUN   TestOrderTotal
+  │      3 └       order_test.go:88: want 1200, got 1180
+```
+
+| key | |
+|---|---|
+| `⏎` | run the task · fold a namespace · open the `file:line` under the cursor |
+| `space` | fold or unfold a namespace |
+| `o` | how much of the run: hidden, a peek, all of it — one task inside a block |
+| `⇧O` | fold or unfold every namespace |
+| `r` `x` | re-run · stop the run this row belongs to |
+| `c` | put its failures in the quickfix list and open it |
+| `e` | open the task's own definition |
+| `R` `?` `q` | refresh · the keymap · close the panel (runs carry on) |
+
+**The quickfix list is the point.** A failed run fills it automatically, resolved by the
+binary, so `]q` walks you onto the failing assertions of a `go test` whose paths are
+relative to a directory Neovim knows nothing about. `quickfix = "always" | "never"` if you
+would rather it did not.
+
+Everything is optional and defaults are shown:
+
+```lua
+require("taskui").setup({
+  binary = "taskui",       -- or an absolute path
+  project = nil,           -- nil means Neovim's cwd
+  peek = 5,                -- lines a peeking task shows, as `peek-lines:` does
+  position = "left",       -- left | right | top | bottom
+  width = 62,              -- for a left or right panel
+  height = 18,             -- for a top or bottom one
+  quickfix = "on_failure", -- on_failure | always | never
+  open_quickfix = false,   -- open the quickfix window when a run fills it
+  notify = true,           -- say how a run went, for when the panel is closed
+  keys = { run = "<CR>", fold_tree = "<Space>", fold_output = "o" },
+})
+```
+
+`require("taskui").status()` is a statusline component — `✗ backend:test 7.1s` — for
+watching a run while you edit the thing that broke it.
+
+The panel is one buffer that is rendered into rather than edited, and a run outlives it:
+closing the panel is not stopping anything, `x` is. Stopping does reap the whole process
+group, because the headless stream takes its child down with it — the same guarantee the
+terminal UI gives.
 
 ## Development
 

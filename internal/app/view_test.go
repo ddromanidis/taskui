@@ -1195,3 +1195,60 @@ func TestEveryShippedWordmarkStripsToItsName(t *testing.T) {
 		}
 	}
 }
+
+// A command echo is drawn with the verdict of the command it announces, so a build log
+// says which step is running and which one took the task down without being read end to
+// end. Output lines keep their bare gutter — a marker on every row is chrome.
+func TestCommandRowsCarryTheirStatus(t *testing.T) {
+	a := appWithRun(t, "test")
+	// Through LineEvent rather than Feed: the command flag is what the capture's parser
+	// sets when it recognises go-task's own echo, and this test is about what is done
+	// with it.
+	a.Run.Apply(run.LineEvent{Task: "test", Raw: "go build ./...", IsCommand: true})
+	a.Run.Feed("test", "ok")
+	a.Run.Apply(run.LineEvent{Task: "test", Raw: "go test ./...", IsCommand: true})
+	a.Run.Feed("test", "--- FAIL: TestOrderTotal")
+	a.RunExpand("test")
+	a.Run.ApplyFailed("test")
+	a.Run.Finish(1)
+	a.RebuildRunRows()
+
+	frame := strings.Join(a.RenderHeadless(80, 14), "\n")
+	g := a.Theme.Glyphs
+	for _, want := range []string{
+		g.StatusOk + " " + g.Command + " go build ./...",
+		g.StatusFailed + " " + g.Command + " go test ./...",
+	} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("want %q in:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, g.StatusOk+" "+g.Command+" ok") {
+		t.Errorf("plain output should carry no command marker:\n%s", frame)
+	}
+}
+
+// Output hangs off the command that printed it on a rail that closes at the last line, so
+// which lines belong to which step is a thing you can see rather than infer.
+func TestOutputHangsOffItsCommand(t *testing.T) {
+	a := appWithRun(t, "test")
+	a.Run.Apply(run.LineEvent{Task: "test", Raw: "go test ./...", IsCommand: true})
+	a.Run.Feed("test", "=== RUN TestOrderTotal")
+	a.Run.Feed("test", "--- FAIL: TestOrderTotal")
+	a.Run.Apply(run.LineEvent{Task: "test", Raw: "go vet ./...", IsCommand: true})
+	a.Run.Feed("test", "clean")
+	a.RunExpand("test")
+	a.RebuildRunRows()
+
+	frame := strings.Join(a.RenderHeadless(80, 14), "\n")
+	g := a.Theme.Glyphs
+	for _, want := range []string{
+		g.GuideVertical + "   === RUN TestOrderTotal", // more of this command's output below
+		g.GuideLast + "   --- FAIL: TestOrderTotal",   // the last of it
+		g.GuideLast + "   clean",                      // and the next command's only line
+	} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("want %q in:\n%s", want, frame)
+		}
+	}
+}

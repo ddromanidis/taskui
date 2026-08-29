@@ -612,8 +612,17 @@ func (a *App) handlePickerKey(k Key) bool {
 	// Space folds, enter runs — kept strictly separate. A node that is both a group and a
 	// task (`backend:migrate`) is then runnable from its own header, so its subtree never
 	// has to relist it just to make it reachable.
+	//
+	// With a run unfolded under a task there are two things a fold key could mean, so
+	// there are two keys: `space` is the tree and `o` is the output. Each falls through to
+	// the other where it has nothing of its own to fold, which is most rows — a leaf task
+	// has no group to open, and a namespace with nothing running has no output.
 	case k.isChar(' '):
-		a.ToggleFold()
+		if n := a.SelectedNode(); n != nil && n.IsGroup() && !a.CursorInRun() {
+			a.ToggleFold()
+		} else {
+			a.CycleOutputFold()
+		}
 	case k.kind == keyEnter:
 		// Marks first: having chosen a set, `⏎` means run the set. Running whatever the
 		// cursor happens to be on instead would quietly discard the choice.
@@ -636,8 +645,10 @@ func (a *App) handlePickerKey(k Key) bool {
 	case k.kind == keyTab, act() == keys.FoldAll:
 		a.ToggleFoldAll()
 	case act() == keys.Fold:
-		if n := a.SelectedNode(); n != nil && n.IsGroup() {
-			a.ToggleFold()
+		if !a.CycleOutputFold() {
+			if n := a.SelectedNode(); n != nil && n.IsGroup() {
+				a.ToggleFold()
+			}
 		}
 
 	case act() == keys.Filter:

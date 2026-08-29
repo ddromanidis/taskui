@@ -27,6 +27,7 @@ const (
 	flagTimeline = "timeline"
 	flagDiff     = "diff"
 	flagDump     = "dump"
+	flagTask     = "task"
 )
 
 // registerCompletions is called from root.go's init rather than being one of its own.

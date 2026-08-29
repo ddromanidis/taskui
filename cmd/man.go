@@ -89,6 +89,12 @@ func RegenerateMan(current string) (string, error) {
 	// output depended on whether anything had run first, and the page gained or lost a
 	// subcommand according to test ordering. Idempotent, so asking again costs nothing.
 	rootCmd.InitDefaultCompletionCmd()
+	// `--help` and `--version` arrive the same way and had the same problem: absent from a
+	// page generated before anything ran, present in the flag set of a process that had run
+	// something. A man page that does not document `--help` is missing the one flag every
+	// reader already knows to look for.
+	rootCmd.InitDefaultHelpFlag()
+	rootCmd.InitDefaultVersionFlag()
 
 	for _, section := range []struct {
 		begin, end, body string
@@ -153,7 +159,7 @@ func generic(usage string) string {
 // placeholder is what to call a flag's value in the synopsis.
 func placeholder(f *pflag.Flag) string {
 	switch f.Name {
-	case flagRun, flagGraph, flagTimeline, flagDiff, "task":
+	case flagRun, flagGraph, flagTimeline, flagDiff, flagTask:
 		return "task"
 	case flagDump:
 		return "pivot"

@@ -68,8 +68,8 @@ func TestEnterRunsAGroupThatIsAlsoATaskWithoutFolding(t *testing.T) {
 	if len(a.Rows) != before {
 		t.Errorf("enter should leave the picker's folds alone: %d -> %d", before, len(a.Rows))
 	}
-	if a.Screen != ScreenRun {
-		t.Errorf("screen = %v", a.Screen)
+	if a.Screen != ScreenPicker {
+		t.Errorf("running should not take the screen: %v", a.Screen)
 	}
 	if rootOf(a) != "backend:migrate" {
 		t.Errorf("the group header should have run itself: %q", rootOf(a))
@@ -95,12 +95,18 @@ func TestEnterOnAPureGroupExplainsItself(t *testing.T) {
 	}
 }
 
+// Enter runs the leaf and leaves you in the list, with the run unfolded under the row it
+// came from. Taking the screen was the old behaviour and the reason starting a second task
+// meant going back for it.
 func TestEnterRunsAPlainLeaf(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Enter())
 	defer a.KillAll()
-	if a.Screen != ScreenRun || rootOf(a) != "backend:lint" {
+	if a.Screen != ScreenPicker || rootOf(a) != "backend:lint" {
 		t.Errorf("screen = %v root = %q", a.Screen, rootOf(a))
+	}
+	if !strings.Contains(a.Status, "v") {
+		t.Errorf("the status should say where the whole screen is: %q", a.Status)
 	}
 }
 
@@ -112,23 +118,36 @@ func appWithLiveRun(t *testing.T, name string) *App {
 	return a
 }
 
-// Selecting the task that is already running means "show me it". Starting a second one
-// would take down the first — on a half-finished deploy that is the worst thing this tool
-// could do.
-func TestRunningTheTaskAlreadyRunningGoesBackToIt(t *testing.T) {
+// Selecting the task that is already running means "show me it", never "start another":
+// a second run would take down the first, and on a half-finished deploy that is the worst
+// thing this tool could do. From the picker the run is already on screen under the row, so
+// showing it means staying and saying so; from the run view it still means going to it.
+func TestRunningTheTaskAlreadyRunningDoesNotRestartIt(t *testing.T) {
 	a := appWithLiveRun(t, "backend:lint")
 	before := a.Run.Started
 
 	a.RequestRun("backend:lint", nil)
 
-	if a.Screen != ScreenRun {
-		t.Error("it should have shown the run")
+	if a.Screen != ScreenPicker {
+		t.Errorf("the picker should have kept the screen: %v", a.Screen)
+	}
+	if !strings.Contains(a.Status, "already running") {
+		t.Errorf("status = %q", a.Status)
 	}
 	if a.Confirm != nil {
 		t.Error("and should not have asked about anything")
 	}
 	if !a.Run.Started.Equal(before) {
 		t.Error("the same run, not a fresh one")
+	}
+
+	a.Screen = ScreenRun
+	a.RequestRun("backend:lint", nil)
+	if a.Screen != ScreenRun {
+		t.Error("from the run view it should still be the run view")
+	}
+	if !a.Run.Started.Equal(before) {
+		t.Error("still the same run")
 	}
 }
 
@@ -419,7 +438,7 @@ func TestStopAllAsksThenStopsEverySlot(t *testing.T) {
 			t.Errorf("%s was not cancelled", p.Run.Root)
 		}
 	}
-	if a.Screen != ScreenRun {
+	if a.Screen != ScreenPicker {
 		t.Errorf("and we should still be here: %v", a.Screen)
 	}
 }
