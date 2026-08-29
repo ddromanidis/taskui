@@ -2,3 +2,6 @@
 /dist/
 /probe/
 /.task/
+
+# The parked designs are private notes, not project documentation.
+IDEAS.md
