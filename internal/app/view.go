@@ -30,6 +30,16 @@ const minRunColumn = 60
 func (a *App) View() tea.View {
 	v := tea.NewView(a.frame())
 	v.AltScreen = true
+	// Asking for mouse events is what makes the wheel reach this program at all. Without it
+	// the terminal keeps the wheel and scrolls its own scrollback — which in a Neovim
+	// terminal buffer means the wheel scrolls the buffer taskui is drawing into, past
+	// frames it has already thrown away.
+	//
+	// Cell motion rather than all motion: it is the least that carries the wheel, and the
+	// difference is a report on every pixel of movement that nothing here would read.
+	if a.Mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	return v
 }
 

@@ -712,6 +712,61 @@ most of the implementation cost:
 - **Fold state is per-mode.** Bouncing between pivots does not collapse what you opened on
   the other side.
 
+### Ordering
+
+A pivot decides what is inside what. What sits above what is a separate question, and it is
+yours to answer:
+
+```yaml
+sort: file      # default | name | file | recent | failed | size
+groups: last    # or `mixed`
+pin: ["dev", "backend:test"]
+```
+
+| `sort:`   | what leads                                                          |
+| --------- | ------------------------------------------------------------------- |
+| `default` | each grouping's own order — alphabetical in `domain` and `file`, biggest group first in `verb` |
+| `name`    | alphabetical, everywhere                                            |
+| `file`    | the order the tasks are written in the Taskfile                     |
+| `recent`  | the last thing you ran                                              |
+| `failed`  | what is broken, most recent failure first                           |
+| `size`    | the biggest group                                                   |
+
+`file` is the one order somebody chose on purpose: a Taskfile is written in a sequence, and
+alphabetising it throws that sequence away. It needs the locations from the JSON listing,
+which arrive a moment after the first frame — the list settles once, early, and a task whose
+location has not arrived sorts by name rather than claiming line zero.
+
+`recent` and `failed` read the archive, so they are answers about this project's history
+rather than about its Taskfile: a task that has never run sorts last in both, and with no
+stored runs at all they are alphabetical. A group is as recent as its most recent task and
+as broken as its worst one, so a fold tells you whether there is anything in there worth
+opening.
+
+**`groups:`** is where a subgroup sits among the plain tasks of the same namespace. `last`
+keeps a namespace's own verbs together above its subtrees — the default, and the reason
+`docker` sits below `lint` here despite `d` sorting first:
+
+```
+groups: last            groups: mixed
+
+▾ backend  26           ▾ backend  26
+    build                   build
+    fmt                   ▸ docker   2
+    lint                    fmt
+  ▸ docker   2              lint
+```
+
+Worth setting to `mixed` alongside `recent` or `failed`, where the whole point is that the
+interesting row rises to the top — and a group holding it would otherwise still be stuck
+below every task beside it.
+
+**`pin:`** hoists task names to the top of wherever they land, in the order you write them,
+with the same `*` globbing as `.taskui-danger`. It is how you say "these are the ones I
+actually run" without teaching taskui what a daily driver is. A group rises with anything it
+holds, so pinning `backend:test` also lifts `backend` to the top of the list — a pin you
+have to go looking for is not a pin.
+
 ## Arguments
 
 Plenty of tasks need them — `wt:new NAME=backend`, `backend:test -- -p ingest`,
@@ -811,17 +866,23 @@ taskui --list-themes
   default      taskui
   neubrutalism [ TASKUI ]
   synthwave    ▄▀▄ TASKUI ▄▀▄
+  tokyonight   taskui
   y2k          ✧･ﾟ TASKUI ･ﾟ✧
 ```
 
-Six ship inside the binary. `default` uses ANSI names throughout, so it follows your
+Seven ship inside the binary. `default` uses ANSI names throughout, so it follows your
 terminal's own colourscheme rather than arguing with it. `90s` does the opposite on
 purpose — pinned magenta and cyan, double-ruled boxes, blocky arrows — because a vaporwave
 palette that politely deferred to your Solarized scheme would not be one. `charm` is after
 [charm.land](https://charm.land), whose libraries this front end is built on: indigo,
 pink, mint, and restraint everywhere else. `synthwave` is the loud one: the genre's five
 colours, half blocks instead of hairlines, and a selected row that is raised rather than
-highlighted.
+highlighted. `tokyonight` is the palette from
+[folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim), in its `night` variant:
+blue carrying the structure, magenta the accent, and a selected row the same indigo the
+editor uses for its own visual selection. It is colours only — a palette has no opinion
+about what a fold marker looks like — so it inherits every glyph from `default` and changes
+nothing about the geometry.
 
 `y2k` is the millennium: chrome silver doing the structural work, bubblegum and lilac on
 top of it, and a selected row bevelled like a button you could press. It is also the only
@@ -1096,14 +1157,40 @@ label.
 # test failure's assertion and its file:line, or a compiler error and its note — but
 # "enough" is a property of the tools you run, not of taskui.
 peek-lines: 8
+
+# Ask the terminal for mouse events, so the wheel scrolls taskui.
+mouse: on
 ```
+
+The wheel moves one row a notch on whichever screen you are on — the picker, a run, the
+history list, the timeline, the diff, the profile. It is defined as arrowing rather than as
+scrolling of its own, so everything that hangs off the arrow keys comes with it: scrolling
+away from a running task stops following it, exactly as `k` does.
+
+`mouse: off` gives the mouse back to the terminal. The trade is real in both directions: a
+terminal that is forwarding mouse events to a program is not selecting text with them, so
+drag-to-select over taskui's output needs your terminal's own override — shift in most of
+them, option on macOS — until you turn this off.
 
 A `.taskui-danger` file in the project marks tasks that need a confirmation before they
 run — one pattern per line, `#` comments, `*` supported:
 
 ```
+
+# Ask the terminal for mouse events, so the wheel scrolls taskui.
+mouse: on
 deploy:*
 backend:migrate:prod
+The wheel moves one row a notch on whichever screen you are on — the picker, a run, the
+history list, the timeline, the diff, the profile. It is defined as arrowing rather than as
+scrolling of its own, so everything that hangs off the arrow keys comes with it: scrolling
+away from a running task stops following it, exactly as `k` does.
+
+`mouse: off` gives the mouse back to the terminal. The trade is real in both directions: a
+terminal that is forwarding mouse events to a program is not selecting text with them, so
+drag-to-select over taskui's output needs your terminal's own override — shift in most of
+them, option on macOS — until you turn this off.
+
 *:wipe
 ```
 
@@ -1147,12 +1234,26 @@ because it is the same program. The plugin's job is to host it and to listen.
   the events, so it keeps saying so with the terminal closed.
 - **Notifications**, for when the terminal is not the window you are looking at.
 
+**The wheel scrolls taskui**, not the buffer it is drawn into. Neovim forwards mouse events
+to a terminal program when that program asks for them and processes them itself when it does
+not — so before taskui asked, a notch over the picker scrolled the terminal buffer instead,
+through frames taskui had already replaced. It asks now. If you have `set mouse=`, Neovim
+has no mouse to forward and `:checkhealth taskui` says so; `mouse: off` in taskui's own
+config opts back out from the other end.
+
 That is the whole seam: `taskui --events <socket>` writes what its runs are doing as
 newline-delimited JSON, the plugin listens, and nothing else crosses between them.
 
 ```lua
 require("taskui").setup({
   binary = "taskui",       -- or an absolute path
+**The wheel scrolls taskui**, not the buffer it is drawn into. Neovim forwards mouse events
+to a terminal program when that program asks for them and processes them itself when it does
+not — so before taskui asked, a notch over the picker scrolled the terminal buffer instead,
+through frames taskui had already replaced. It asks now. If you have `set mouse=`, Neovim
+has no mouse to forward and `:checkhealth taskui` says so; `mouse: off` in taskui's own
+config opts back out from the other end.
+
   project = nil,           -- nil means Neovim's cwd
   position = "float",      -- float | left | right | top | bottom | tab
   width = 80,              -- for a left or right split

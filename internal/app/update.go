@@ -63,6 +63,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.noteFinished()
 		return a, tea.Batch(a.tick(), a.ringBell())
 
+	case tea.MouseWheelMsg:
+		a.handleWheel(tea.Mouse(msg).Button)
+		return a, nil
+
 	// Presses only. v2 can also report releases and repeats, but only if a frame asks for
 	// them, and nothing here wants a key twice.
 	case tea.KeyPressMsg:
@@ -415,6 +419,47 @@ func (a *App) handleKey(k Key) bool {
 
 // handleConfirmKey: something is waiting on a yes; nothing else gets through until it is
 // answered.
+// wheelStep is how many rows a notch of the wheel moves.
+//
+// One, not the three that terminals and browsers use for scrolling a page. This is not a
+// page: the wheel moves a *selection* through a list of tasks, and a selection that jumps
+// three rows a notch overshoots what you were reaching for and has to be walked back. Three
+// is right when the thing under the wheel is text you are reading past; one is right when it
+// is a cursor you are aiming.
+const wheelStep = 1
+
+// handleWheel turns a notch of the wheel into the movement the arrow keys already do.
+//
+// Not a set of per-screen scroll handlers: every screen in this program already answers up
+// and down — the picker, the run view, the history list, the timeline, the diff, the
+// profile, and the jump and search prompts each in their own way — and a wheel that meant
+// anything else on any one of them would be a second navigation model to keep in step with
+// the first. Scrolling is therefore *defined* as arrowing, and everything that hangs off
+// arrowing comes with it: following stops when you scroll away from what is running,
+// because that is already what `k` does.
+func (a *App) handleWheel(button tea.MouseButton) {
+	// A confirmation reads every key that is not `y` as "no", and a wheel is not an answer
+	// to a question. Scrolling past one leaves it standing.
+	if a.Confirm != nil {
+		return
+	}
+
+	var k Key
+	switch button {
+	case tea.MouseWheelUp:
+		k = Key{kind: keyUp}
+	case tea.MouseWheelDown:
+		k = Key{kind: keyDown}
+	default:
+		// Horizontal wheels and tilting ones exist. Nothing here scrolls sideways.
+		return
+	}
+	for range wheelStep {
+		// The return value is "the app is quitting", which no movement key ever is.
+		a.handleKey(k)
+	}
+}
+
 func (a *App) handleConfirmKey(k Key) bool {
 	// Only ConfirmYes knows what was being asked, and only the quit answer ends the loop —
 	// so the teardown hangs off its return value rather than off the key.

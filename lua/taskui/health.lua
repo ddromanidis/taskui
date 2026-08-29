@@ -61,6 +61,18 @@ function M.check()
     ok(vim.trim(vim.fn.system({ "task", "--version" })))
   end
 
+  -- Neovim forwards mouse events to a terminal program that asks for them, and taskui
+  -- asks. With 'mouse' empty there is nothing to forward, and the wheel scrolls the buffer
+  -- taskui is drawn into instead — which looks like taskui ignoring the mouse.
+  if vim.o.mouse == "" then
+    warn("'mouse' is empty, so the wheel will scroll this buffer rather than taskui", {
+      "set mouse=a",
+      "or scroll with the keyboard, which is unaffected",
+    })
+  else
+    ok(("mouse=%s — the wheel reaches taskui"):format(vim.o.mouse))
+  end
+
   local project = config.project()
   local found = false
   for _, name in ipairs({ "Taskfile.yml", "Taskfile.yaml", "taskfile.yml", "taskfile.yaml" }) do

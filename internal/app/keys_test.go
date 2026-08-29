@@ -929,3 +929,79 @@ func TestAnActionCanBeBoundToAModifiedKey(t *testing.T) {
 		t.Errorf("screen = %v — ⇧␣ did not reach its binding", a.Screen)
 	}
 }
+
+// --- the wheel ----------------------------------------------------------------------
+
+// Scrolling is defined as arrowing, so it works on every screen without any screen
+// knowing about it — and the picker is where you can see it move.
+func TestTheWheelMovesTheCursor(t *testing.T) {
+	a := sample(t)
+	a.SetFoldAll(true)
+	a.Cursor = 0
+
+	a.handleWheel(tea.MouseWheelDown)
+	if a.Cursor != wheelStep {
+		t.Errorf("a notch moved the cursor to %d, want %d", a.Cursor, wheelStep)
+	}
+
+	a.handleWheel(tea.MouseWheelUp)
+	if a.Cursor != 0 {
+		t.Errorf("back up the same distance should be 0, got %d", a.Cursor)
+	}
+
+	// Clamped like every other movement, rather than running off the top.
+	a.handleWheel(tea.MouseWheelUp)
+	if a.Cursor != 0 {
+		t.Errorf("cursor = %d past the top", a.Cursor)
+	}
+
+	// And through Update, which is the path the terminal actually takes.
+	a.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	if a.Cursor != wheelStep {
+		t.Errorf("a wheel message through Update left the cursor at %d", a.Cursor)
+	}
+}
+
+// A confirmation reads every key that is not `y` as "no". A wheel is not an answer, and a
+// question that vanished because the mouse moved would be a question you never answered.
+func TestTheWheelDoesNotAnswerAConfirmation(t *testing.T) {
+	a := sample(t)
+	a.Confirm = &Confirm{Kind: ConfirmRun, Name: "deploy", Reason: TouchesProduction}
+
+	a.handleWheel(tea.MouseWheelDown)
+
+	if a.Confirm == nil {
+		t.Error("scrolling dismissed the confirmation")
+	}
+}
+
+// Sideways wheels exist and nothing here scrolls sideways; the cursor must not move for one.
+func TestASidewaysWheelDoesNothing(t *testing.T) {
+	a := sample(t)
+	a.SetFoldAll(true)
+	a.Cursor = 2
+
+	a.handleWheel(tea.MouseWheelLeft)
+	a.handleWheel(tea.MouseWheelRight)
+
+	if a.Cursor != 2 {
+		t.Errorf("cursor = %d; a horizontal wheel should not move it", a.Cursor)
+	}
+}
+
+// The frame is what asks the terminal for mouse events. Without that ask the wheel never
+// reaches this program at all — the terminal keeps it and scrolls its own scrollback, which
+// inside Neovim means scrolling the buffer taskui is being drawn into.
+func TestTheFrameAsksForTheMouseUnlessTurnedOff(t *testing.T) {
+	a := sample(t)
+	a.Width, a.Height = 80, 24
+
+	if got := a.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Errorf("MouseMode = %v, want cell motion", got)
+	}
+
+	a.Mouse = false
+	if got := a.View().MouseMode; got != tea.MouseModeNone {
+		t.Errorf("`mouse: off` still asked for %v", got)
+	}
+}

@@ -1,0 +1,67 @@
+# tokyonight — the palette from folke/tokyonight.nvim, which is where most people meet it.
+#
+# The `night` variant: the darkest of the three, and the one whose colours are quoted
+# everywhere. Blue carries the structure, magenta the accent, and the storm of muted indigos
+# underneath them does the work that grey does in a theme with less confidence.
+#
+# Colours only. Tokyo Night is a palette rather than a shape — it has no opinion about what a
+# fold marker looks like — so this inherits every glyph from `default` and changes nothing
+# about the geometry. Nothing here moves.
+#
+# The one judgement call is `dim`, which is not the palette's `comment`. Descriptions are
+# drawn dim, and they are drawn dim *on the selected row as well*, where the bar lifts the
+# background from #1a1b26 to #283457 and takes a third of the contrast with it. The palette's
+# comment colour reads at 4.1:1 against the background and 2.9:1 on the bar, so a description
+# under the cursor would be the hardest line on screen to read. `fg_dark` is 8.1:1 and 5.8:1,
+# still visibly quieter than `fg`, and legible in both places.
+extends: default
+
+colors:
+  # Blue leads and magenta answers — the pair the scheme is known for.
+  accent: "#7aa2f7"
+  mode: "#bb9af7"
+
+  # fg_dark, comment, fg_gutter: the three steps down from the foreground.
+  dim: "#a9b1d6"
+  faint: "#565f89"
+  rule: "#3b4261"
+  text: default
+
+  # The editor's own visual selection, so a row picked here looks like a line picked there.
+  selection: "#283457"
+  selection-light: "#7aa2f7"
+  selection-shade: "#16161e"
+
+  alias: "#7dcfff"
+  danger: "#f7768e"
+
+  status-ok: "#9ece6a"
+  status-running: "#e0af68"
+  status-failed: "#f7768e"
+  status-skipped: "#565f89"
+  status-pending: "#565f89"
+
+  command: "#9d7cd8"
+
+  # The search colour and the highlight are the same magenta, so a hit reads as the thing the
+  # prompt promised rather than as a second idea.
+  search: "#bb9af7"
+  match-fg: "#1a1b26"
+  match-bg: "#bb9af7"
+
+  location: "#7dcfff"
+
+  # Orange appears once, here, so a marked task cannot be mistaken for anything else on the
+  # row — not a status, not a link, not the accent.
+  marked: "#ff9e64"
+
+  diff-added: "#9ece6a"
+  diff-removed: "#f7768e"
+
+  notice: "#e0af68"
+  stored: "#9d7cd8"
+  interactive: "#73daca"
+  warning-fg: "#1a1b26"
+  warning-bg: "#e0af68"
+  confirm-fg: "#1a1b26"
+  confirm-bg: "#f7768e"
