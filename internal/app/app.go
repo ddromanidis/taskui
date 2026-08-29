@@ -218,6 +218,13 @@ type App struct {
 	// Pivots is every grouping available, in the order `p` cycles them. The two built-ins
 	// plus `file`, plus whatever the config added.
 	Pivots []pivot.Pivot
+	// Mouse says whether the frame asks the terminal for mouse events, which is what makes
+	// the wheel scroll this program rather than whatever is drawing it.
+	Mouse bool
+	// Order is what sits above what, from the config. The archive lookup it sorts `recent`
+	// and `failed` on is attached at Rebuild time by Ordering, since that answer changes
+	// every time a run finishes and this value does not.
+	Order pivot.Order
 	// Pivot indexes Pivots.
 	Pivot int
 	Tree  *pivot.Tree
@@ -503,6 +510,7 @@ func New(tasks []task.Task, root string) *App {
 		Screen:        ScreenPicker,
 		runFolds:      map[string]Fold{},
 		PeekLines:     theme.DefaultPeekLines,
+		Mouse:         theme.DefaultMouse,
 		Following:     true,
 		Outcomes:      map[string]store.Outcome{},
 		HistoryHits:   map[string]int{},
@@ -692,6 +700,8 @@ func (a *App) WithConfig(config theme.Config) *App {
 	a.Keymap = config.Keymap
 	a.PeekLines = config.PeekLines
 	a.Bell = config.Bell
+	a.Mouse = config.Mouse
+	a.Order = config.Order
 	// Custom groupings go after the built-ins, in the order they were written — `p` cycles
 	// through them, so the order in the file is the order at the keyboard.
 	for _, spec := range config.Pivots {
@@ -705,7 +715,24 @@ func (a *App) WithConfig(config theme.Config) *App {
 	if len(config.Problems) > 0 {
 		a.Status = "config: " + strings.Join(config.Problems, "; ")
 	}
+	// The tree was built by New, before any of this was known. An `order:` that only took
+	// effect after the first keypress would look like it had not been read at all.
+	a.Rebuild(a.SelectedTask())
 	return a
+}
+
+// Ordering is the configured order with the archive attached, which is what `recent` and
+// `failed` are actually sorted on.
+//
+// Attached here rather than stored, because the last outcome of every task changes whenever
+// a run finishes and a closure captured once cannot go stale.
+func (a *App) Ordering() pivot.Order {
+	order := a.Order
+	order.Ran = func(name string) (pivot.Outcome, bool) {
+		outcome, ok := a.Outcomes[name]
+		return pivot.Outcome{Ok: outcome.Ok, WhenUnix: outcome.WhenUnix}, ok
+	}
+	return order
 }
 
 // StartRun kicks off `task <name>` and switches to the run view.
@@ -2693,7 +2720,7 @@ func subsequence(pattern, target string) bool {
 // opened so it is actually on screen afterwards. Pass -1 for none.
 func (a *App) Rebuild(keep int) {
 	visible := a.visible()
-	a.Tree = pivot.Build(a.Mode(), a.Tasks, visible)
+	a.Tree = pivot.Build(a.Mode(), a.Tasks, visible, a.Ordering())
 
 	if keep >= 0 {
 		if ancestors, ok := a.Tree.AncestorsOfTask(keep); ok {

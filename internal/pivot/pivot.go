@@ -44,6 +44,12 @@ type Node struct {
 	Children []int
 	// Count is the number of tasks in this subtree, including Task itself.
 	Count int
+	// Rank pins a row to an end of its parent whatever the ordering says — see the constants
+	// in order.go. Set by the builder, because which rows those are is part of what a pivot
+	// means: `(root)` opens the domain tree, `(other)` closes any tree that has one.
+	Rank int
+	// Facets are what the ordering compares, filled in after the tree is built.
+	Facets Facets
 }
 
 func (n Node) IsGroup() bool { return len(n.Children) > 0 }
@@ -122,11 +128,18 @@ const RootGroup = "(root)"
 // singleton reads worse than not grouping it at all, so they land here, flat.
 const OtherGroup = "other"
 
-func Build(p Pivot, tasks []task.Task, visible []int) *Tree {
-	if p.Build == nil {
-		return buildDomain(tasks, visible)
+// Build makes the tree for a pivot and puts it in order.
+//
+// Two steps, deliberately separate: a builder decides what is inside what, and the Order
+// decides what sits above what. Grouping is the pivot's business and ordering is yours.
+func Build(p Pivot, tasks []task.Task, visible []int, ord Order) *Tree {
+	build := p.Build
+	if build == nil {
+		build = buildDomain
 	}
-	return p.Build(tasks, visible)
+	tree := build(tasks, visible)
+	ord.finish(tree, tasks, p.Natural)
+	return tree
 }
 
 func buildDomain(tasks []task.Task, visible []int) *Tree {
@@ -182,6 +195,10 @@ func buildDomain(tasks []task.Task, visible []int) *Tree {
 		root, ok := index[RootGroup]
 		if !ok {
 			root = tree.push(RootGroup, RootGroup)
+			// Pinned to the top of the tree rather than sorted there: these are the daily
+			// drivers, and `(root)` landing between `infra` and `site` because of where a
+			// bracket sorts would be an accident wearing the clothes of a decision.
+			tree.Nodes[root].Rank = RankFirst
 			tree.Roots = append(tree.Roots, root)
 			index[RootGroup] = root
 		}
@@ -190,34 +207,7 @@ func buildDomain(tasks []task.Task, visible []int) *Tree {
 		tree.Nodes[root].Children = append(tree.Nodes[root].Children, leaf)
 	}
 
-	sortDomain(tree)
-	recount(tree)
 	return tree
-}
-
-// sortDomain orders within a node: plain tasks first, then subgroups, each alphabetical.
-// Keeps the leaf verbs of a namespace (`backend:build`, `backend:fmt`, …) together at the
-// top instead of interleaving them with `backend:migrate`'s subtree.
-func sortDomain(tree *Tree) {
-	for i := range tree.Nodes {
-		kids := tree.Nodes[i].Children
-		sort.SliceStable(kids, func(a, b int) bool {
-			na, nb := tree.Nodes[kids[a]], tree.Nodes[kids[b]]
-			if na.IsGroup() != nb.IsGroup() {
-				return !na.IsGroup()
-			}
-			return na.Label < nb.Label
-		})
-	}
-	roots := tree.Roots
-	sort.SliceStable(roots, func(a, b int) bool {
-		// (root) is pinned first; everything else alphabetical.
-		ka, kb := tree.Nodes[roots[a]].Key, tree.Nodes[roots[b]].Key
-		if (ka != RootGroup) != (kb != RootGroup) {
-			return ka == RootGroup
-		}
-		return ka < kb
-	})
 }
 
 func buildVerb(tasks []task.Task, visible []int) *Tree {
@@ -247,45 +237,32 @@ func buildVerb(tasks []task.Task, visible []int) *Tree {
 		}
 	}
 
-	// Size descending, so the cross-cutting concerns you pivoted to find are on top.
-	sort.SliceStable(groups, func(a, b int) bool {
-		if len(groups[a].members) != len(groups[b].members) {
-			return len(groups[a].members) > len(groups[b].members)
-		}
-		return groups[a].verb < groups[b].verb
-	})
-
+	// Size descending is this pivot's natural order — see Builtins. The cross-cutting
+	// concerns you pivoted in order to find are the ones with the most members in them.
 	tree := &Tree{}
 	for _, g := range groups {
-		// Root aggregate first, then the rest alphabetically. `lint` sits directly above
-		// `app:lint`, `backend:lint`, `infra:lint` — which is exactly what `task lint`
-		// will do, so the verb pivot doubles as a static preview of that run.
-		members := g.members
-		sort.SliceStable(members, func(a, b int) bool {
-			na, nb := tasks[members[a]].Name, tasks[members[b]].Name
-			ca, cb := strings.Contains(na, ":"), strings.Contains(nb, ":")
-			if ca != cb {
-				return !ca
-			}
-			return na < nb
-		})
 		gi := tree.push(g.verb, "verb:"+g.verb)
 		tree.Roots = append(tree.Roots, gi)
-		for _, ti := range members {
+		for _, ti := range g.members {
 			// Leaves show the full colon path: flattening the domain into the label is the
 			// entire point of this pivot, so we must not re-nest it.
 			leaf := tree.push(tasks[ti].Name, fmt.Sprintf("verb:%s/%s", g.verb, tasks[ti].Name))
 			tree.Nodes[leaf].Task = ti
+			// The root aggregate sits directly above its own fan-out: `lint` above
+			// `app:lint`, `backend:lint`, `infra:lint` — which is exactly what `task lint`
+			// will do, so the verb pivot doubles as a static preview of that run. A position
+			// that carries a meaning, so it is a Rank rather than a sort key.
+			if !strings.Contains(tasks[ti].Name, ":") {
+				tree.Nodes[leaf].Rank = RankFirst
+			}
 			tree.Nodes[gi].Children = append(tree.Nodes[gi].Children, leaf)
 		}
 	}
 
 	if len(singles) > 0 {
-		sort.SliceStable(singles, func(a, b int) bool {
-			return tasks[singles[a]].Name < tasks[singles[b]].Name
-		})
 		gi := tree.push(OtherGroup, "verb:"+OtherGroup)
-		tree.Roots = append(tree.Roots, gi) // last
+		tree.Nodes[gi].Rank = RankLast
+		tree.Roots = append(tree.Roots, gi)
 		for _, ti := range singles {
 			leaf := tree.push(tasks[ti].Name, fmt.Sprintf("verb:%s/%s", OtherGroup, tasks[ti].Name))
 			tree.Nodes[leaf].Task = ti
@@ -293,26 +270,7 @@ func buildVerb(tasks []task.Task, visible []int) *Tree {
 		}
 	}
 
-	recount(tree)
 	return tree
-}
-
-func recount(tree *Tree) {
-	for _, r := range tree.Roots {
-		countSubtree(tree, r)
-	}
-}
-
-func countSubtree(tree *Tree, idx int) int {
-	n := 0
-	if tree.Nodes[idx].Task != NoTask {
-		n = 1
-	}
-	for _, c := range tree.Nodes[idx].Children {
-		n += countSubtree(tree, c)
-	}
-	tree.Nodes[idx].Count = n
-	return n
 }
 
 // Fixture builds a task list from bare names, for tests.

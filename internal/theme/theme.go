@@ -451,8 +451,14 @@ type Config struct {
 	PeekLines int
 	// Pivots are extra groupings from the config file, appended after the built-ins.
 	Pivots []pivot.Spec
+	// Order is what sits above what: which key rows are compared on, whether subgroups sink
+	// below the plain tasks beside them, and anything pinned to the top.
+	Order pivot.Order
 	// Bell is when to ring the terminal for a run you are not watching.
 	Bell BellMode
+	// Mouse says whether to ask the terminal for mouse events, which is what makes the wheel
+	// scroll taskui.
+	Mouse bool
 	// Problems lists anything wrong with the file, surfaced in the UI rather than
 	// swallowed — a colour that silently does nothing is worse than one that says why.
 	Problems []string
@@ -464,8 +470,22 @@ func DefaultConfig() Config {
 		Keymap:    keys.NewKeymap(),
 		PeekLines: DefaultPeekLines,
 		Bell:      BellUnwatched,
+		Mouse:     DefaultMouse,
 	}
 }
+
+// DefaultMouse has the wheel scroll taskui.
+//
+// On, because a wheel that scrolls the program you are looking at is what a wheel does
+// everywhere else, and because the alternative is not "the terminal scrolls instead" but
+// "the terminal scrolls something you cannot see": taskui draws on the alternate screen,
+// so the scrollback the wheel reaches for is whatever was on the screen before it started.
+//
+// The cost is real, which is why it is a key rather than a constant. A terminal that is
+// forwarding mouse events to a program is not selecting text with them, so drag-to-select
+// over taskui's output needs the terminal's own override — shift in most of them, option on
+// macOS — until you turn this off.
+const DefaultMouse = true
 
 // BellMode says when a finished run should ring the terminal.
 type BellMode int
@@ -492,19 +512,42 @@ func (b BellMode) String() string {
 	}
 }
 
+// parseOnOff reads the spellings of yes and no.
+//
+// Shared by every switch in this file, so `mouse: yes` and `bell: yes` cannot drift into
+// meaning different things — and so a key added later does not have to guess which of the
+// three spellings the others accepted.
+func parseOnOff(text string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "on", "true", "yes":
+		return true, true
+	case "off", "false", "no":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
 // ParseBell reads the setting. Reported rather than guessed at: a bell that silently never
 // rings is indistinguishable from one that is broken.
 func ParseBell(text string) (BellMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "on", "true", "yes", "unwatched":
+	case "unwatched":
 		return BellUnwatched, true
-	case "off", "false", "no", "never":
+	case "never":
 		return BellNever, true
 	case "failed", "failures":
 		return BellFailed, true
-	default:
-		return BellUnwatched, false
 	}
+	// `on` is the unwatched bell rather than every bell there could be: it is the default,
+	// and what somebody turning the bell on is asking for is the default one.
+	if on, ok := parseOnOff(text); ok {
+		if on {
+			return BellUnwatched, true
+		}
+		return BellNever, true
+	}
+	return BellUnwatched, false
 }
 
 // readPivots reads the `pivots:` block.
@@ -553,6 +596,48 @@ func readPivots(v *viper.Viper) ([]pivot.Spec, []string) {
 		out = append(out, spec)
 	}
 	return out, problems
+}
+
+// readOrder reads the three keys that decide what sits above what.
+//
+// Three keys rather than one nested block, because they are three independent answers and a
+// block would imply you had to give all of them. Each is optional and each is validated —
+// an ordering that silently stayed on the default is indistinguishable from one that does
+// not work.
+func readOrder(v *viper.Viper) (pivot.Order, []string) {
+	var order pivot.Order
+	var problems []string
+
+	if v.IsSet("sort") {
+		if by, ok := pivot.ParseBy(v.GetString("sort")); ok {
+			order.By = by
+		} else {
+			problems = append(problems, fmt.Sprintf("sort: %q is not one of %s",
+				v.GetString("sort"), strings.Join(pivot.OrderNames(), ", ")))
+		}
+	}
+
+	if v.IsSet("groups") {
+		switch value := strings.ToLower(strings.TrimSpace(v.GetString("groups"))); value {
+		case "last":
+			order.Interleave = false
+		case "mixed":
+			order.Interleave = true
+		default:
+			problems = append(problems,
+				fmt.Sprintf("groups: %q is not `last` or `mixed`", v.GetString("groups")))
+		}
+	}
+
+	if v.IsSet("pin") {
+		for _, pattern := range v.GetStringSlice("pin") {
+			if pattern = strings.TrimSpace(pattern); pattern != "" {
+				order.Pins = append(order.Pins, pattern)
+			}
+		}
+	}
+
+	return order, problems
 }
 
 // The built-in pivot names, repeated here so the config validator does not have to
@@ -703,6 +788,19 @@ func FromViper(v *viper.Viper) Config {
 	config.Pivots = pivots
 	config.Problems = append(config.Problems, problems...)
 
+	order, problems := readOrder(v)
+	config.Order = order
+	config.Problems = append(config.Problems, problems...)
+
+	if v.IsSet("mouse") {
+		if on, ok := parseOnOff(v.GetString("mouse")); ok {
+			config.Mouse = on
+		} else {
+			config.Problems = append(config.Problems,
+				fmt.Sprintf("mouse: %q is not on or off", v.GetString("mouse")))
+		}
+	}
+
 	// Zero would make the peek state indistinguishable from hidden, leaving the cycle with
 	// two visible stops and one that lies about which it is.
 	if v.IsSet("peek-lines") {
@@ -754,6 +852,44 @@ func DumpConfig() string {
 	b.WriteString("\n")
 	b.WriteString("# How many lines a task shows when its output is folded to a peek.\n")
 	fmt.Fprintf(&b, "peek-lines: %d\n", DefaultPeekLines)
+	b.WriteString("\n")
+	b.WriteString("# Ask the terminal for mouse events, so the wheel scrolls taskui rather than\n")
+	b.WriteString("# whatever is drawing it — a row a notch, on whichever screen you are on.\n")
+	b.WriteString("# The cost: a terminal forwarding the mouse is not selecting text with it, so\n")
+	b.WriteString("# drag-to-select needs your terminal's override (shift, or option on macOS).\n")
+	b.WriteString("# `off` gives the mouse back.\n")
+	b.WriteString("mouse: on\n")
+	b.WriteString("\n")
+	b.WriteString(orderYAML())
+	return b.String()
+}
+
+// orderYAML documents the ordering keys, which need more explaining than a colour does:
+// what each order is for, and the one interaction between two of them that is not obvious.
+func orderYAML() string {
+	var b strings.Builder
+	b.WriteString("# What sits above what in the task list.\n")
+	b.WriteString("#\n")
+	b.WriteString("#   default  each grouping's own order — alphabetical in `domain` and `file`,\n")
+	b.WriteString("#            biggest group first in `verb`\n")
+	b.WriteString("#   name     alphabetical, everywhere\n")
+	b.WriteString("#   file     the order the tasks are written in the Taskfile\n")
+	b.WriteString("#   recent   most recently run first\n")
+	b.WriteString("#   failed   what is broken first, most recent first within it\n")
+	b.WriteString("#   size     biggest group first\n")
+	fmt.Fprintf(&b, "sort: %s\n", pivot.ByNatural)
+	b.WriteString("\n")
+	b.WriteString("# Where a subgroup sits among the plain tasks of the same namespace.\n")
+	b.WriteString("# `last` keeps a namespace's own verbs together above its subtrees; `mixed`\n")
+	b.WriteString("# sorts groups and tasks as one list. Worth setting to `mixed` alongside\n")
+	b.WriteString("# `sort: recent` or `failed`, where a group holding the row you want to see\n")
+	b.WriteString("# would otherwise still sit below every task beside it.\n")
+	b.WriteString("groups: last\n")
+	b.WriteString("\n")
+	b.WriteString("# Task names hoisted to the top of wherever they land, in the order written.\n")
+	b.WriteString("# `*` globs, as in `.taskui-danger`. A group rises with anything it holds, so\n")
+	b.WriteString("# pinning `backend:test` also lifts `backend` to the top of the list.\n")
+	b.WriteString("pin: []\n")
 	return b.String()
 }
 

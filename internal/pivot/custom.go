@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -24,9 +23,14 @@ type Pivot struct {
 	// Name is what `p` cycles through and what `--dump` takes.
 	Name string
 	// Build makes the tree. The two built-ins have shapes a plain path cannot express —
-	// domain folds a root-level task into its own namespace, verb pools singletons and
-	// sorts by size — so this is a function rather than a key.
+	// domain folds a root-level task into its own namespace, verb pools singletons — so
+	// this is a function rather than a key.
 	Build func(tasks []task.Task, visible []int) *Tree
+	// Natural is the order this grouping is meant to be read in, used when the config has
+	// no opinion. It is a property of the grouping and not of the reader: `verb` is worth
+	// nothing in alphabetical order, because the point of transposing the tree is to find
+	// the concerns you did not already know to look for.
+	Natural By
 }
 
 // Builtins are the pivots that ship.
@@ -36,8 +40,8 @@ type Pivot struct {
 // edit this" is a question every project with `includes:` has.
 func Builtins() []Pivot {
 	return []Pivot{
-		{Name: "domain", Build: buildDomain},
-		{Name: "verb", Build: buildVerb},
+		{Name: "domain", Build: buildDomain, Natural: ByName},
+		{Name: "verb", Build: buildVerb, Natural: BySize},
 		ByPath("file", func(t task.Task) []string {
 			if !t.Where.Ok() {
 				return nil
@@ -87,6 +91,11 @@ func ByPath(name string, path func(task.Task) []string) Pivot {
 		Build: func(tasks []task.Task, visible []int) *Tree {
 			return buildByPath(tasks, visible, name, path)
 		},
+		// Alphabetical rather than the verb pivot's size ordering: a custom grouping is one
+		// the reader defined, so they know what they are looking for and want to find it in
+		// the place they expect. Size ordering earns its keep in `verb`, where the whole
+		// point is surfacing cross-cutting concerns you had not thought of.
+		Natural: ByName,
 	}
 }
 
@@ -133,6 +142,7 @@ func buildByPath(tasks []task.Task, visible []int, name string, path func(task.T
 	// the list silently holds fewer tasks than the header says.
 	if len(homeless) > 0 {
 		gi := tree.push(OtherGroup, name+":"+OtherGroup)
+		tree.Nodes[gi].Rank = RankLast
 		tree.Roots = append(tree.Roots, gi)
 		for _, ti := range homeless {
 			leaf := tree.push(tasks[ti].Name, fmt.Sprintf("%s:%s/%s", name, OtherGroup, tasks[ti].Name))
@@ -141,37 +151,7 @@ func buildByPath(tasks []task.Task, visible []int, name string, path func(task.T
 		}
 	}
 
-	sortByPath(tree, name)
-	recount(tree)
 	return tree
-}
-
-// sortByPath orders alphabetically with `(other)` last.
-//
-// Alphabetical rather than the verb pivot's size-descending: a custom grouping is one the
-// reader defined, so they know what they are looking for and want to find it in the place
-// they expect. Size ordering earns its keep in `verb`, where the whole point is surfacing
-// cross-cutting concerns you had not thought of.
-func sortByPath(tree *Tree, name string) {
-	other := name + ":" + OtherGroup
-	byLabel := func(ids []int) {
-		sort.SliceStable(ids, func(a, b int) bool {
-			na, nb := tree.Nodes[ids[a]], tree.Nodes[ids[b]]
-			if (na.Key == other) != (nb.Key == other) {
-				return nb.Key == other
-			}
-			// Groups after plain tasks, as in the domain pivot — a namespace's own leaves
-			// belong together above its subtrees.
-			if na.IsGroup() != nb.IsGroup() {
-				return !na.IsGroup()
-			}
-			return na.Label < nb.Label
-		})
-	}
-	for i := range tree.Nodes {
-		byLabel(tree.Nodes[i].Children)
-	}
-	byLabel(tree.Roots)
 }
 
 // --- pivots from a config file ---------------------------------------------------------

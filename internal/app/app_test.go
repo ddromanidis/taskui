@@ -7,6 +7,8 @@ import (
 
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/ddromanidis/taskui/internal/theme"
 )
 
 func appWith(t *testing.T, names []string) *App {
@@ -820,5 +822,53 @@ func TestSearchingStopsFollowing(t *testing.T) {
 	a.ApplySearch()
 	if a.Following {
 		t.Error("should have stopped following")
+	}
+}
+
+// --- ordering, end to end ---------------------------------------------------------------
+
+// rowLabels is the picker's tree rows, top to bottom.
+func rowLabels(a *App) []string {
+	out := make([]string, 0, len(a.Rows))
+	for _, r := range a.Rows {
+		out = append(out, a.Tree.Nodes[r.Node].Label)
+	}
+	return out
+}
+
+// A config that names an order has to reach the tree the first frame draws, not the one
+// after the first keypress.
+func TestTheConfiguredOrderIsInTheFirstTreeDrawn(t *testing.T) {
+	config := theme.DefaultConfig()
+	config.Order.Pins = []string{"site", "infra"}
+
+	a := New(pivot.Fixture([]string{"app:build", "backend:build", "infra:lint", "site:build"}),
+		"/tmp/repo")
+	a.SetStateDir(t.TempDir())
+	a.WithConfig(config)
+	a.SetFoldAll(false)
+
+	want := []string{"site", "infra", "app", "backend"}
+	if got := rowLabels(a); !reflect.DeepEqual(got, want) {
+		t.Errorf("rows = %v; want %v", got, want)
+	}
+}
+
+// `recent` and `failed` are sorted on the archive, which changes every time a run finishes —
+// so the lookup has to be the live one rather than a closure captured at startup.
+func TestRecentOrderFollowsTheArchiveAsItChanges(t *testing.T) {
+	a := appWith(t, []string{"aaa", "zzz"})
+	a.Order.By = pivot.ByRecent
+	a.Rebuild(-1)
+	a.SetFoldAll(true)
+
+	if got := rowLabels(a); got[1] != "aaa" {
+		t.Fatalf("with an empty archive this should be alphabetical, got %v", got)
+	}
+
+	a.Outcomes["zzz"] = store.Outcome{Ok: true, WhenUnix: 1000}
+	a.Rebuild(-1)
+	if got := rowLabels(a); got[1] != "zzz" {
+		t.Errorf("the run that just happened should lead, got %v", got)
 	}
 }

@@ -699,9 +699,44 @@ kept per pivot name rather than per enum label, and `--dump` takes any of them.
 
 Two of the three built-ins keep bespoke builders, because they have shapes a plain path
 cannot express — the domain tree folds a root-level task into its own namespace, and the
-verb tree pools singletons and sorts by size. The third, `file`, is a path pivot, and it
-exists because the JSON listing added for jump-to-definition already carries where every
-task is written. It had been in this file's *Not built yet* section for that whole time.
+verb tree pools singletons. The third, `file`, is a path pivot, and it exists because the
+JSON listing added for jump-to-definition already carries where every task is written. It
+had been in this file's *Not built yet* section for that whole time.
+
+### Grouping is what is inside what; ordering is what is above what
+
+Those are two questions, and for a long time only one of them had an answer you could
+change. Each pivot sorted its own nodes its own way: domain alphabetically with subgroups
+sunk below the leaves beside them, verb by group size with the bare aggregate hoisted above
+its own fan-out, path pivots alphabetically with `(other)` pushed last. Three rules, in three
+functions, none of them nameable and none of them yours — which is why the order read as
+arbitrary. It was not arbitrary. It was just nobody's decision in particular.
+
+They are one comparator now, and the differences between them are data on the node:
+
+- **Rank** is for rows whose position is part of what the pivot *means* rather than a matter
+  of taste — `(root)` opening the domain tree, `(other)` closing any tree that has one, a
+  verb group's own aggregate sitting directly above its fan-out so the pivot doubles as a
+  preview of what `task lint` will do. A Rank beats every ordering, because none of those
+  three is a preference.
+- **Natural** is the order a grouping wants to be read in when the config has no opinion, and
+  it is a property of the grouping rather than of the reader: `verb` in alphabetical order is
+  worth nothing, since the entire point of transposing the tree is to surface the concerns
+  you did not already know to look for.
+- **Facets** are what there is to compare, aggregated over a subtree: a group is as recent as
+  its most recent task and as broken as its worst one. A fold has to be able to tell you
+  whether there is anything in there worth opening, or the ordering stops at the top level.
+
+The payoff is not that the code is shorter. It is that `sort:` had somewhere to go — the
+config names a key, one comparator reads it, and every pivot including the ones a project
+wrote itself obeys it without knowing the feature exists. The three old rules survive as the
+zero value, so a config that says nothing gets the tree it has always got.
+
+One interaction is worth stating because it looks like a bug: `groups: last` is asked before
+the sort key, so with `sort: recent` a namespace holding the run that just finished still
+sits below every plain task beside it. That is the honest consequence of two independent
+settings rather than a special case to paper over, and `groups: mixed` is the answer — which
+is why the annotated config says so next to both keys.
 
 ### Two extension mechanisms, and the one that was asked for
 
@@ -758,6 +793,31 @@ stray write lands in the middle of a frame.
 **Scoping the archive search.** Grepping every stored run is the right default and the wrong
 thing to do twice. `--task` and `--since` were already answerable from the manifests, which
 carry the task name and the start time.
+
+### A wheel that scrolled the wrong thing
+
+taskui never asked the terminal for mouse events, so the terminal kept the wheel. In a
+normal terminal that is invisible — the alternate screen has no scrollback to move — but
+inside a Neovim terminal buffer it is loud: Neovim's rule is that mouse events go to a
+program that has asked for them and are handled as ordinary buffer input otherwise, so a
+notch over the picker scrolled Neovim's own view of the buffer, back through frames taskui
+had already replaced. The tool looked like it was ignoring the mouse. It had never heard
+about it.
+
+Asking is one line, and what to do with the answer is the whole question. The answer here is
+that scrolling *is* arrowing: a wheel notch is one up or one down through the same
+`handleKey` every keystroke goes through. Every screen already answers up and down — picker,
+run, history, timeline, diff, profile, and the jump and search prompts each in their own way
+— so one branch in `Update` scrolls all of them, and nothing that hangs off arrowing has to
+be reimplemented for the mouse. Scrolling away from a running task stops following it
+because that is already what `k` does.
+
+Two things do not follow from "forward the wheel". A confirmation reads every key that is
+not `y` as "no", so the wheel is dropped while one is up — a question that vanished because
+the mouse moved is a question nobody answered. And asking for mouse events costs
+drag-to-select, since a terminal forwarding the mouse to a program is not selecting text with
+it. That is a real trade rather than a strict improvement, which is why `mouse:` is a config
+key and why its comment names the cost instead of only the feature.
 
 ### A column that only one pivot could keep
 

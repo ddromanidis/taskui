@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/ddromanidis/taskui/internal/pivot"
 )
 
 func loadStr(t *testing.T, yaml string) Config {
@@ -264,5 +265,48 @@ func TestEveryKeyIsConfigurable(t *testing.T) {
 	}
 	if c.Theme.Colors.Accent != Red || c.Theme.Colors.ConfirmBg != Red || c.Theme.Colors.Selection != Red {
 		t.Error("not every key took")
+	}
+}
+
+// --- ordering ---------------------------------------------------------------------------
+
+// The default is what taskui has always done, and the zero value says so.
+func TestNoOrderKeysMeansEachPivotsOwnOrder(t *testing.T) {
+	c := loadStr(t, "colors: {}\n")
+	if c.Order.By != pivot.ByNatural || c.Order.Interleave || len(c.Order.Pins) != 0 {
+		t.Errorf("order = %+v", c.Order)
+	}
+}
+
+func TestTheOrderingKeysAreRead(t *testing.T) {
+	c := loadStr(t, "sort: recent\ngroups: mixed\npin: [\"dev\", \"backend:*\"]\n")
+	if len(c.Problems) != 0 {
+		t.Fatalf("problems = %v", c.Problems)
+	}
+	if c.Order.By != pivot.ByRecent {
+		t.Errorf("sort = %q", c.Order.By)
+	}
+	if !c.Order.Interleave {
+		t.Error("groups: mixed did not take")
+	}
+	if len(c.Order.Pins) != 2 || c.Order.Pins[0] != "dev" || c.Order.Pins[1] != "backend:*" {
+		t.Errorf("pins = %v", c.Order.Pins)
+	}
+}
+
+// An ordering that silently stayed on the default is indistinguishable from one that does
+// not work, so a value nothing answers to is reported.
+func TestAnUnknownOrderIsReported(t *testing.T) {
+	c := loadStr(t, "sort: alphabetical\n")
+	if len(c.Problems) != 1 || !strings.Contains(c.Problems[0], "sort:") {
+		t.Errorf("problems = %v", c.Problems)
+	}
+	if c.Order.By != pivot.ByNatural {
+		t.Errorf("a rejected value still changed the order to %q", c.Order.By)
+	}
+
+	c = loadStr(t, "groups: sideways\n")
+	if len(c.Problems) != 1 || !strings.Contains(c.Problems[0], "groups:") {
+		t.Errorf("problems = %v", c.Problems)
 	}
 }

@@ -317,7 +317,7 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if opts.dump != "" {
-		return dumpPivot(opts.dump, app.New(tasks, root).WithConfig(config).Pivots, tasks)
+		return dumpPivot(opts.dump, app.New(tasks, root).WithConfig(config))
 	}
 
 	if opts.graph != "" {
@@ -445,23 +445,37 @@ func searchStored(pattern string, scope search.Scope) error {
 	return nil
 }
 
-func dumpPivot(mode string, pivots []pivot.Pivot, tasks []task.Task) error {
+// dumpPivot prints one grouping fully expanded.
+//
+// Takes the App rather than the pieces: the tasks it builds from are the App's own, the
+// order is the one the UI would have used, and both the archive and the JSON listing are
+// things it already knows how to fetch.
+func dumpPivot(mode string, a *app.App) error {
 	var chosen pivot.Pivot
-	for _, p := range pivots {
+	for _, p := range a.Pivots {
 		if p.Name == mode {
 			chosen = p
 		}
 	}
 	if chosen.Name == "" {
 		return fmt.Errorf("--dump expects one of %s, not %q",
-			strings.Join(pivotNamesFor(pivots), ", "), mode)
+			strings.Join(pivotNamesFor(a.Pivots), ", "), mode)
 	}
 
-	all := make([]int, len(tasks))
-	for i := range tasks {
+	// The grouping and the ordering that are answers about *where a task is written* need
+	// the JSON listing, which nothing on this path would otherwise fetch. A one-shot dump
+	// has no first frame to be late for, so it waits rather than printing a tree with every
+	// task pooled into `(other)` and no hint that anything was missing.
+	if mode == theme.FilePivot || a.Ordering().By == pivot.ByFile {
+		a.StartEnrichment()
+		a.AwaitDetails(detailGrace)
+	}
+
+	all := make([]int, len(a.Tasks))
+	for i := range a.Tasks {
 		all[i] = i
 	}
-	tree := pivot.Build(chosen, tasks, all)
+	tree := pivot.Build(chosen, a.Tasks, all, a.Ordering())
 	for _, row := range tree.Flatten(func(string) bool { return true }) {
 		n := tree.Nodes[row.Node]
 		glyph := " "

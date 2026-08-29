@@ -712,6 +712,61 @@ most of the implementation cost:
 - **Fold state is per-mode.** Bouncing between pivots does not collapse what you opened on
   the other side.
 
+### Ordering
+
+A pivot decides what is inside what. What sits above what is a separate question, and it is
+yours to answer:
+
+```yaml
+sort: file      # default | name | file | recent | failed | size
+groups: last    # or `mixed`
+pin: ["dev", "backend:test"]
+```
+
+| `sort:`   | what leads                                                          |
+| --------- | ------------------------------------------------------------------- |
+| `default` | each grouping's own order — alphabetical in `domain` and `file`, biggest group first in `verb` |
+| `name`    | alphabetical, everywhere                                            |
+| `file`    | the order the tasks are written in the Taskfile                     |
+| `recent`  | the last thing you ran                                              |
+| `failed`  | what is broken, most recent failure first                           |
+| `size`    | the biggest group                                                   |
+
+`file` is the one order somebody chose on purpose: a Taskfile is written in a sequence, and
+alphabetising it throws that sequence away. It needs the locations from the JSON listing,
+which arrive a moment after the first frame — the list settles once, early, and a task whose
+location has not arrived sorts by name rather than claiming line zero.
+
+`recent` and `failed` read the archive, so they are answers about this project's history
+rather than about its Taskfile: a task that has never run sorts last in both, and with no
+stored runs at all they are alphabetical. A group is as recent as its most recent task and
+as broken as its worst one, so a fold tells you whether there is anything in there worth
+opening.
+
+**`groups:`** is where a subgroup sits among the plain tasks of the same namespace. `last`
+keeps a namespace's own verbs together above its subtrees — the default, and the reason
+`docker` sits below `lint` here despite `d` sorting first:
+
+```
+groups: last            groups: mixed
+
+▾ backend  26           ▾ backend  26
+    build                   build
+    fmt                   ▸ docker   2
+    lint                    fmt
+  ▸ docker   2              lint
+```
+
+Worth setting to `mixed` alongside `recent` or `failed`, where the whole point is that the
+interesting row rises to the top — and a group holding it would otherwise still be stuck
+below every task beside it.
+
+**`pin:`** hoists task names to the top of wherever they land, in the order you write them,
+with the same `*` globbing as `.taskui-danger`. It is how you say "these are the ones I
+actually run" without teaching taskui what a daily driver is. A group rises with anything it
+holds, so pinning `backend:test` also lifts `backend` to the top of the list — a pin you
+have to go looking for is not a pin.
+
 ## Arguments
 
 Plenty of tasks need them — `wt:new NAME=backend`, `backend:test -- -p ingest`,
@@ -1102,8 +1157,21 @@ A `.taskui-danger` file in the project marks tasks that need a confirmation befo
 run — one pattern per line, `#` comments, `*` supported:
 
 ```
+
+# Ask the terminal for mouse events, so the wheel scrolls taskui.
+mouse: on
 deploy:*
 backend:migrate:prod
+The wheel moves one row a notch on whichever screen you are on — the picker, a run, the
+history list, the timeline, the diff, the profile. It is defined as arrowing rather than as
+scrolling of its own, so everything that hangs off the arrow keys comes with it: scrolling
+away from a running task stops following it, exactly as `k` does.
+
+`mouse: off` gives the mouse back to the terminal. The trade is real in both directions: a
+terminal that is forwarding mouse events to a program is not selecting text with them, so
+drag-to-select over taskui's output needs your terminal's own override — shift in most of
+them, option on macOS — until you turn this off.
+
 *:wipe
 ```
 
@@ -1153,6 +1221,13 @@ newline-delimited JSON, the plugin listens, and nothing else crosses between the
 ```lua
 require("taskui").setup({
   binary = "taskui",       -- or an absolute path
+**The wheel scrolls taskui**, not the buffer it is drawn into. Neovim forwards mouse events
+to a terminal program when that program asks for them and processes them itself when it does
+not — so before taskui asked, a notch over the picker scrolled the terminal buffer instead,
+through frames taskui had already replaced. It asks now. If you have `set mouse=`, Neovim
+has no mouse to forward and `:checkhealth taskui` says so; `mouse: off` in taskui's own
+config opts back out from the other end.
+
   project = nil,           -- nil means Neovim's cwd
   position = "float",      -- float | left | right | top | bottom | tab
   width = 80,              -- for a left or right split

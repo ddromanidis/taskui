@@ -32,7 +32,7 @@ func build(t *testing.T, p Pivot, names []string) *Tree {
 	for i := range tasks {
 		all[i] = i
 	}
-	return Build(p, tasks, all)
+	return Build(p, tasks, all, Order{})
 }
 
 // --- ByPath ---------------------------------------------------------------------------
@@ -281,7 +281,7 @@ func TestTheProgramIsAskedAboutEveryTaskNotJustTheVisibleOnes(t *testing.T) {
 	p, _ := Spec{Name: "count", Command: []string{"./pivot.sh"}}.Compile(dir)
 
 	tasks := Fixture([]string{"a", "b", "c"})
-	tree := Build(p, tasks, []int{0, 1}) // only two are visible
+	tree := Build(p, tasks, []int{0, 1}, Order{}) // only two are visible
 	if got := drawTree(tree); !strings.Contains(got, "saw3") {
 		t.Errorf("the program should have seen all three:\n%s", got)
 	}
@@ -301,7 +301,7 @@ printf 'a\tcalled%s\n' "$count"
 	tasks := Fixture([]string{"a", "b"})
 
 	for range 5 {
-		Build(p, tasks, []int{0, 1})
+		Build(p, tasks, []int{0, 1}, Order{})
 	}
 	blob, err := os.ReadFile(filepath.Join(dir, "runs"))
 	if err != nil {
@@ -312,7 +312,7 @@ printf 'a\tcalled%s\n' "$count"
 	}
 
 	// A different Taskfile is a different question.
-	Build(p, Fixture([]string{"a", "b", "c"}), []int{0, 1, 2})
+	Build(p, Fixture([]string{"a", "b", "c"}), []int{0, 1, 2}, Order{})
 	blob, _ = os.ReadFile(filepath.Join(dir, "runs"))
 	if got := strings.TrimSpace(string(blob)); got != "2" {
 		t.Errorf("a changed task list should have asked again, ran %s times", got)
@@ -327,7 +327,7 @@ func TestTheFilePivotGroupsByTaskfile(t *testing.T) {
 		{Name: "backend:test", Where: task.Where{File: "/proj/backend/Taskfile.yml", Line: 9}},
 		{Name: "site:build", Where: task.Where{File: "/proj/site/Taskfile.yml", Line: 4}},
 	}
-	tree := Build(File(), tasks, []int{0, 1, 2})
+	tree := Build(File(), tasks, []int{0, 1, 2}, Order{})
 	got := drawTree(tree)
 	if !strings.Contains(got, "backend/Taskfile.yml/") || !strings.Contains(got, "site/Taskfile.yml/") {
 		t.Errorf("got:\n%s", got)
@@ -338,7 +338,7 @@ func TestTheFilePivotGroupsByTaskfile(t *testing.T) {
 // task knows where it lives. That has to be a usable list, not an empty one.
 func TestTheFilePivotBeforeTheListingArrives(t *testing.T) {
 	tasks := Fixture([]string{"a", "b"})
-	got := drawTree(Build(File(), tasks, []int{0, 1}))
+	got := drawTree(Build(File(), tasks, []int{0, 1}, Order{}))
 	if !strings.Contains(got, OtherGroup) || !strings.Contains(got, "a") {
 		t.Errorf("got:\n%s", got)
 	}

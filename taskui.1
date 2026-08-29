@@ -464,8 +464,14 @@ Y goes ahead · anything else cancels.
 .SH FILES
 .TP
 .I $XDG_CONFIG_HOME/taskui/config.yaml
-Colours, keybindings and
-.BR peek\-lines .
+Colours, keybindings,
+.BR peek\-lines ,
+.BR mouse ,
+and what sits above what \(em
+.BR sort ,
+.B groups
+and
+.BR pin .
 Defaults to
 .IR ~/.config/taskui/config.yaml .
 The file is optional, and so is every key in it.
@@ -548,6 +554,72 @@ number, so output arriving in an earlier task does not slide the view.
 in
 .I config.yaml
 sets the size. The default is 5.
+.SS Ordering
+A pivot decides what is inside what;
+.B sort
+in
+.I config.yaml
+decides what sits above what.
+.B default
+is each grouping's own order \(em alphabetical in
+.B domain
+and
+.BR file ,
+biggest group first in
+.BR verb .
+The others are
+.BR name ,
+.B file
+(the order the tasks are written in the Taskfile),
+.B recent
+(the last thing you ran),
+.B failed
+(what is broken, most recent failure first) and
+.BR size .
+A group is as recent as its most recent task and as broken as its worst one, so a
+fold says whether there is anything in it worth opening.
+.PP
+.B groups
+is where a subgroup sits among the plain tasks of the same namespace:
+.B last
+keeps a namespace's own verbs together above its subtrees, and
+.B mixed
+sorts both as one list \(em worth setting alongside
+.B recent
+or
+.BR failed ,
+where a group holding the row you want would otherwise still sit below every task
+beside it.
+.B pin
+takes task names, globbed as in
+.IR .taskui\-danger ,
+and hoists them to the top of wherever they land in the order written; a group
+rises with anything it holds.
+.SS Mouse
+The wheel scrolls taskui a row a notch, on whichever screen you are on.
+Scrolling is arrowing: everything that hangs off the arrow keys comes with it, so
+scrolling away from a running task stops following it exactly as
+.B k
+does.
+.PP
+This needs the terminal to be told to send mouse events, which
+.B mouse
+in
+.I config.yaml
+does and
+.B off
+undoes. A terminal forwarding the mouse to a program is not selecting text with
+it, so drag\-to\-select over taskui's output needs the terminal's own override \(em
+shift in most, option on macOS.
+.PP
+Inside a Neovim terminal buffer this is the difference between the wheel
+scrolling taskui and the wheel scrolling the buffer taskui is drawn into: Neovim
+forwards mouse events to a program that has asked for them and handles them
+itself otherwise. With
+.B 'mouse'
+empty in Neovim there is nothing to forward, and
+.B :checkhealth taskui
+says so.
 .SS Credentials
 .BR "task \-\-summary" ,
 which taskui runs to build the execution graph, prints the resolved
