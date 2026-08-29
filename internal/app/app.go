@@ -15,6 +15,7 @@ import (
 	"github.com/sahilm/fuzzy"
 
 	"github.com/ddromanidis/taskui/internal/diff"
+	"github.com/ddromanidis/taskui/internal/events"
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/keys"
 	"github.com/ddromanidis/taskui/internal/loc"
@@ -438,6 +439,56 @@ type App struct {
 	// stateDir is where runs are archived. A field rather than a call so tests can point
 	// it somewhere disposable.
 	stateDir string
+
+	// events is where a host — an editor showing this terminal — is told what the runs are
+	// doing. Nil when nobody asked, which is every session started by hand.
+	events *events.Sink
+	// deltas is one tracker per slot, so a busy run cannot renumber a quiet one.
+	deltas map[string]*events.Deltas
+}
+
+// SendEventsTo attaches a host's event sink. Everything the runs do is reported to it —
+// what started, how each task went, what it exited with — so an editor can fill a quickfix
+// list and colour a statusline without drawing the run itself.
+func (a *App) SendEventsTo(sink *events.Sink) {
+	a.events = sink
+	a.deltas = map[string]*events.Deltas{}
+}
+
+// HasHost reports whether a host is listening. It is what decides who opens a file: with a
+// host attached, `e` hands the location over rather than launching $EDITOR inside the
+// terminal the host is showing.
+func (a *App) HasHost() bool { return a.events != nil }
+
+// emit reports whatever has changed about every open run.
+func (a *App) emit() {
+	if a.events == nil {
+		return
+	}
+	for _, r := range a.allRuns() {
+		d := a.deltas[r.Root]
+		if d == nil {
+			d = events.NewDeltas()
+			a.deltas[r.Root] = d
+		}
+		d.Start(a.events, r, a.Root)
+		d.Flush(a.events, r)
+		if r.Finished() && !d.Done() {
+			d.Finish(a.events, r, a.SavedTo)
+		}
+	}
+}
+
+// allRuns is every open slot, focused or parked.
+func (a *App) allRuns() []*run.Run {
+	out := make([]*run.Run, 0, len(a.Parked)+1)
+	for _, p := range a.Parked {
+		out = append(out, p.Run)
+	}
+	if a.Run != nil {
+		out = append(out, a.Run)
+	}
+	return out
 }
 
 func New(tasks []task.Task, root string) *App {
@@ -803,6 +854,7 @@ func (a *App) StartRunWith(name string, args []string) error {
 		a.Status = "running `" + name + "` — `v` for the whole screen"
 	}
 	a.RebuildPickerRows()
+	a.emit()
 	return nil
 }
 
@@ -1731,12 +1783,14 @@ func (a *App) PollRun() bool {
 		if moved {
 			// A parked run said something, and the picker is showing it under its task.
 			a.RebuildPickerRows()
+			a.emit()
 		}
 		return moved
 	}
 	if !a.Run.Poll() {
 		if moved {
 			a.RebuildPickerRows()
+			a.emit()
 		}
 		return moved
 	}
@@ -1745,6 +1799,7 @@ func (a *App) PollRun() bool {
 	a.RebuildRunRows()
 	a.RebuildPickerRows()
 	a.saveIfFinished()
+	a.emit()
 	return true
 }
 

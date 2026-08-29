@@ -3,17 +3,18 @@
 -- Registers :TaskUI. Loading the plugin requires no Lua module of its own, so
 -- startup costs nothing until the command is actually used.
 --
---   :TaskUI                    open the panel (again to close it)
---   :TaskUI run <task> [args]  run one, opening the panel for its output
+--   :TaskUI                    open the terminal (again to hide it)
+--   :TaskUI run <task>         open it and run one
 --   :TaskUI edit <task>        open the task's definition in the Taskfile
 --   :TaskUI quickfix [task]    the last run's failures, in the quickfix list
+--   :TaskUI stop               stop taskui, and every run it owns
 
 if vim.g.loaded_taskui then
   return
 end
 vim.g.loaded_taskui = true
 
-local verbs = { "run", "edit", "quickfix", "open", "close" }
+local verbs = { "run", "edit", "quickfix", "open", "close", "stop" }
 
 vim.api.nvim_create_user_command("TaskUI", function(cmd)
   local taskui = require("taskui")
@@ -24,13 +25,8 @@ vim.api.nvim_create_user_command("TaskUI", function(cmd)
     return
   end
 
-  local rest = {}
-  for i = 3, #cmd.fargs do
-    table.insert(rest, cmd.fargs[i])
-  end
-
   if verb == "run" then
-    taskui.run(cmd.fargs[2], rest)
+    taskui.run(cmd.fargs[2])
   elseif verb == "edit" then
     taskui.edit(cmd.fargs[2])
   elseif verb == "quickfix" then
@@ -39,10 +35,12 @@ vim.api.nvim_create_user_command("TaskUI", function(cmd)
     taskui.open()
   elseif verb == "close" then
     taskui.close()
+  elseif verb == "stop" then
+    taskui.stop()
   else
     -- No verb given means the task itself: `:TaskUI backend:test` is what
     -- anybody types before reading this file.
-    taskui.run(verb, vim.list_slice(cmd.fargs, 2))
+    taskui.run(verb)
   end
 end, {
   nargs = "*",

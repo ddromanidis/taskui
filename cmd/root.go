@@ -27,6 +27,7 @@ import (
 
 	"github.com/ddromanidis/taskui/internal/app"
 	"github.com/ddromanidis/taskui/internal/diff"
+	"github.com/ddromanidis/taskui/internal/events"
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
@@ -59,6 +60,7 @@ type options struct {
 	flaky      bool
 	quickfix   bool
 	asJSON     bool
+	events     string
 	searchTask string
 	since      string
 	keys       string
@@ -148,6 +150,8 @@ func init() {
 		"print the last run's failures as file:line:col: message, for an editor's error list")
 	f.BoolVar(&opts.asJSON, "json", false,
 		"machine-readable form of --list, --run (newline-delimited events) or --timeline")
+	f.StringVar(&opts.events, "events", "",
+		"report what the runs are doing to this unix socket or file, as newline-delimited JSON")
 	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
 	f.StringVar(&opts.searchTask, "task", "", "narrow --search to one task's output")
 	f.StringVar(&opts.since, "since", "", "narrow --search to runs newer than this: 90m, 2d, 3w")
@@ -343,6 +347,18 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	}
 
 	a := app.New(tasks, root).WithConfig(config)
+
+	// A host — an editor showing this terminal — asked to be told what the runs do. It is
+	// the same stream `--run --json` writes, minus the output lines: whoever is looking at
+	// this terminal can already see those.
+	if opts.events != "" {
+		sink, err := events.Open(opts.events)
+		if err != nil {
+			return fmt.Errorf("could not report events to %s: %w", opts.events, err)
+		}
+		defer func() { _ = sink.Close() }()
+		a.SendEventsTo(sink)
+	}
 
 	if opts.last && !a.OpenLastRun() {
 		return fmt.Errorf("no stored runs for this project yet")

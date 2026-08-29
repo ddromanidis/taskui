@@ -11,7 +11,8 @@ package cmd
 //
 //   - `--list --json` — the tasks, with what the archive knows about how each went
 //   - `--run <task> --json` — the run as newline-delimited JSON, one event per line, ending
-//     when the run does
+//     when the run does. `--events <path>` is the same stream from inside the TUI, for a
+//     host that is showing the terminal rather than drawing the run itself.
 //   - `--timeline <task> --json` — one task's stored runs
 //
 // The streaming form is deliberately one process per run rather than a long-lived daemon.
@@ -28,6 +29,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ddromanidis/taskui/internal/events"
 	"github.com/ddromanidis/taskui/internal/run"
 	"github.com/ddromanidis/taskui/internal/store"
 	"github.com/ddromanidis/taskui/internal/task"
@@ -127,74 +129,19 @@ func printTimelineJSON(out io.Writer, root, taskName string) error {
 
 // --- the run stream ---------------------------------------------------------------------
 
-// The events, one JSON object per line. Separate types rather than one struct with
-// everything in it: a protocol whose every line carries `"secrets": 0` is a protocol nobody
-// enjoys reading, and `omitempty` on a line index would drop the first line of every task.
-type (
-	runStarted struct {
-		Type    string   `json:"type"` // "run"
-		Root    string   `json:"root"`
-		Dir     string   `json:"dir"`
-		Args    []string `json:"args,omitempty"`
-		Started int64    `json:"started_unix"`
-	}
-	graphEvent struct {
-		Type  string              `json:"type"` // "graph"
-		Edges map[string][]string `json:"edges"`
-	}
-	taskEvent struct {
-		Type string `json:"type"` // "task"
-		Name string `json:"name"`
-		// Status is Pending, Running, Ok, Failed or Skipped — the names the archive uses.
-		Status     string `json:"status"`
-		DurationMs int64  `json:"duration_ms,omitempty"`
-		Note       string `json:"note,omitempty"`
-	}
-	lineEvent struct {
-		Type string `json:"type"` // "line"
-		Task string `json:"task"`
-		// Index counts from the start of the run, not from the start of the buffer: a task
-		// that outlives the 20,000-line cap drops lines off the front, and an index that
-		// slid with them would renumber everything a consumer had already stored.
-		Index   int    `json:"index"`
-		Text    string `json:"text"`
-		Command bool   `json:"command,omitempty"`
-	}
-	promptEvent struct {
-		Type string `json:"type"` // "prompt"
-		Text string `json:"text"`
-	}
-	exitEvent struct {
-		Type       string `json:"type"` // "exit"
-		Code       int    `json:"code"`
-		DurationMs int64  `json:"duration_ms"`
-		Saved      string `json:"saved,omitempty"`
-		Secrets    int    `json:"redacted_secrets,omitempty"`
-	}
-)
-
 // streamRun is `--run <task> --json`: the run as it happens, one event per line.
 //
-// The events are differences against the run's own state rather than the engine's internal
-// event stream. That is deliberate: `Run.Poll` folds raw events into state — a line arriving
-// is also a task starting — and a consumer wants the folded version. "Task went from
-// pending to running" has no event of its own and is exactly what a front end draws.
+// The shapes and the diffing live in internal/events, which the TUI's `--events` uses too:
+// one protocol with two ways out, rather than two protocols that drift.
 func streamRun(out io.Writer, dir, target string, argv []string) error {
 	r, err := run.Start(dir, target, argv, false, false)
 	if err != nil {
 		return err
 	}
-	enc := json.NewEncoder(out)
-	send := func(v any) {
-		// A consumer that closed the pipe is a consumer that has stopped caring; the run
-		// still gets stopped and saved below.
-		_ = enc.Encode(v)
-	}
-
-	send(runStarted{
-		Type: "run", Root: r.Root, Dir: dir,
-		Args: argv, Started: r.Started.Unix(),
-	})
+	sink := events.New(nopCloser{out})
+	// The consumer of this form is drawing the run, so it wants the output too. A TUI with
+	// a host attached does not: the terminal in front of you is already showing it.
+	sink.Lines = true
 
 	// A front end that started this stream stops it by signalling the process — `jobstop`
 	// in Neovim, ^C at a shell. Without a handler that kills taskui and leaves `task` and
@@ -209,22 +156,19 @@ func streamRun(out io.Writer, dir, target string, argv []string) error {
 		}
 	}()
 
-	sender := &deltas{seen: map[string]int{}, said: map[string]taskState{}}
+	deltas := events.NewDeltas()
+	deltas.Start(sink, r, dir)
 	for {
 		r.Poll()
-		sender.flush(r, send)
+		deltas.Flush(sink, r)
 		if r.Finished() {
 			break
-		}
-		if text, waiting := r.PendingPrompt(); waiting && text != sender.prompt {
-			sender.prompt = text
-			send(promptEvent{Type: "prompt", Text: text})
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	// One more, for whatever landed between the last poll and the exit.
 	r.Poll()
-	sender.flush(r, send)
+	deltas.Flush(sink, r)
 
 	exit := -1
 	if r.HasExit {
@@ -236,85 +180,15 @@ func streamRun(out io.Writer, dir, target string, argv []string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "taskui: not saved: %v\n", err)
 	}
-	send(exitEvent{
-		Type: "exit", Code: exit,
-		DurationMs: r.Duration.Milliseconds(),
-		Saved:      saved, Secrets: r.RedactedSecrets,
-	})
+	deltas.Finish(sink, r, saved)
 	if exit != 0 {
 		return exitWith(exit)
 	}
 	return nil
 }
 
-// deltas remembers what has already gone out, so each poll sends only what is new.
-type deltas struct {
-	// seen is how many lines of each task have been sent, counted from the start of the
-	// run so that lines dropped off the front of the buffer do not renumber anything.
-	seen   map[string]int
-	said   map[string]taskState
-	graph  bool
-	prompt string
-}
+// nopCloser lets a plain writer stand in for the closer a sink owns: stdout is not ours to
+// close.
+type nopCloser struct{ io.Writer }
 
-// taskState is what was last said about a task. The duration is part of it because it
-// arrives after the status does — a task is Ok some milliseconds before the clock settles —
-// and a consumer that was told `Ok` with no duration would never hear the figure.
-type taskState struct {
-	status     run.Status
-	durationMs int64
-}
-
-func (d *deltas) flush(r *run.Run, send func(any)) {
-	if !d.graph && len(r.Graph.Edges) > 0 {
-		d.graph = true
-		send(graphEvent{Type: "graph", Edges: r.Graph.Edges})
-	}
-	for _, name := range r.TaskNames() {
-		task := r.Tasks[name]
-		if task == nil || name == "" {
-			continue
-		}
-		now := taskState{status: task.Status, durationMs: task.Duration().Milliseconds()}
-		was, known := d.said[name]
-		changed := !known || was != now
-		announce := func() {
-			d.said[name] = now
-			send(taskEvent{
-				Type: eventTask, Name: name, Status: now.status.String(),
-				DurationMs: now.durationMs, Note: task.Note,
-			})
-		}
-
-		// A poll is a batch, so the order within one is chosen rather than observed. A task
-		// that has started is announced before its output and one that has finished after
-		// it, which is the order the two actually happen in — a consumer never sees `Ok`
-		// followed by more lines from the same task.
-		if changed && !settled(now.status) {
-			announce()
-			changed = false
-		}
-		// Where the sent count lands in the buffer as it stands now. Negative means the
-		// lines it referred to have been dropped, so start from what is left.
-		at := max(0, d.seen[name]-task.Dropped)
-		for i := at; i < len(task.Lines); i++ {
-			send(lineEvent{
-				Type: "line", Task: name, Index: task.Dropped + i,
-				// A command echo goes out as the command: `command: true` and `task`
-				// already carry what the `task: [name] ` prefix was there to say, and a
-				// consumer that had to strip it is a consumer that would forget to.
-				Text: run.CommandText(task.Lines[i]), Command: task.Lines[i].IsCommand,
-			})
-		}
-		d.seen[name] = task.Dropped + len(task.Lines)
-
-		if changed {
-			announce()
-		}
-	}
-}
-
-// settled reports whether a status is one a task does not come back from.
-func settled(s run.Status) bool {
-	return s == run.Ok || s == run.Failed || s == run.Skipped
-}
+func (nopCloser) Close() error { return nil }

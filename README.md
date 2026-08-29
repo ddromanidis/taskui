@@ -65,9 +65,8 @@ And `e` opens the file. A `file:line` anywhere in captured output is underlined,
 launches `$EDITOR` on it at that line. In the picker there is no error to follow, so `e`
 opens the task's own definition in the Taskfile instead.
 
-**In Neovim** it is the same tool without the terminal: a plugin over the binary's `--json`
-and `--quickfix` forms, with the same tree, the same runs-in-the-list model, and a quickfix
-list that lands on the failing line. See [In Neovim](#in-neovim).
+**In Neovim** it is this same tool, hosted in a terminal, with the editor filling the
+quickfix list from what fails and opening the files `e` picks. See [In Neovim](#in-neovim).
 
 ## Why
 
@@ -199,6 +198,7 @@ taskui --diff test            # what changed since it last passed
 taskui --quickfix             # the last run's failures as file:line:col: message
 taskui --list --json          # the same listings, for a program rather than a person
 taskui --run ci --json        # the run as newline-delimited events, as it happens
+taskui --events /tmp/sock     # …the same events from inside the TUI, for a host
 taskui --flaky                # tasks that went both ways at one commit
 taskui config edit            # open ~/.config/taskui/config.yaml in $EDITOR
 taskui --screenshot 90x30     # render one frame to stdout (add --keys 'p' or '/lint')
@@ -592,6 +592,13 @@ The run is archived like any other, and the process exits with the task's own co
 One process per run rather than a daemon: the archive on disk is already the shared state,
 so separate processes see each other's history for free, and a caller that wants three runs
 at once has a process table to multiplex them with.
+
+`--events <path>` is the same stream from inside the interactive UI, written to a unix
+socket (or a file) instead of stdout — for a host that is *showing* taskui rather than
+drawing it. The output lines are left out, because whoever is looking at that terminal can
+already see them; what goes out is what started, how each task went, what it exited with,
+and the location `e` was pressed on, which the host opens in its own editor. That last one
+is why the Neovim plugin does not have to know anything about `$EDITOR`.
 
 ## Pivots
 
@@ -1106,86 +1113,64 @@ written the list down, that list is the answer.
 
 ## In Neovim
 
-The same tool, without leaving the editor. `taskui` ships a Neovim plugin in this
-repository: it is a front end over the binary's `--json` and `--quickfix` forms, not a
-second implementation of anything.
+The tool itself, hosted in a terminal, with the editor doing the two things a
+terminal cannot do from inside itself.
 
 ```lua
 -- lazy.nvim
-{ "ddromanidis/taskui", opts = {} }
-
--- packer / paq / manually: the plugin directory is on the runtimepath, then
-require("taskui").setup({})
+{ "ddromanidis/taskui", build = "go install .", cmd = "TaskUI", opts = {} }
 ```
 
-It needs Neovim 0.10 or newer, the `taskui` binary on your `PATH`, and go-task — which is
-what `:checkhealth taskui` checks, in that order.
+Neovim 0.10 or newer, the `taskui` binary on your `PATH`, and go-task — which is what
+`:checkhealth taskui` checks, in that order.
 
 ```
-:TaskUI                    open the panel (again to close it)
-:TaskUI backend:test       run one, with completion over the task names
-:TaskUI edit backend:test  open the task's own definition in the Taskfile
+:TaskUI                    open the terminal (again to hide it)
+:TaskUI backend:test       open it and run one, with completion over the task names
+:TaskUI edit backend:test  open the task's definition in the Taskfile
 :TaskUI quickfix           the last run's failures, in the quickfix list
+:TaskUI stop               stop taskui and every run it owns
 ```
 
-The panel is the task tree, and a run unfolds under the row it was started from — the same
-model the terminal UI settled on, for the same reason. Two runs at once are two blocks of
-live output in one list.
+**What you see is taskui.** Not a reimplementation of it in Lua: the pivots, the fold
+tree, the peek windows, the slots, the archive, the timeline and the diff are all there,
+because it is the same program. The plugin's job is to host it and to listen.
 
-```
-  ▾ backend                                                    3
-  ├   lint    Lint both tag sets                          ✓
-  ├   test    Run the suite                        ▿ ✗ 1.3s
-  │ ├ ▿ ✓ deps                                        208ms
-  │ │    1 ✓ ❯ go mod download
-  │ └ ▾ ✗ backend:test                                 1.3s
-  │      1 ✗ ❯ go test -race ./...
-  │      2 │   === RUN   TestOrderTotal
-  │      3 └       order_test.go:88: want 1200, got 1180
-```
+**What Neovim adds** is what the terminal cannot do from inside itself:
 
-| key | |
-|---|---|
-| `⏎` | run the task · fold a namespace · open the `file:line` under the cursor |
-| `space` | fold or unfold a namespace |
-| `o` | how much of the run: hidden, a peek, all of it — one task inside a block |
-| `⇧O` | fold or unfold every namespace |
-| `r` `x` | re-run · stop the run this row belongs to |
-| `c` | put its failures in the quickfix list and open it |
-| `e` | open the task's own definition |
-| `R` `?` `q` | refresh · the keymap · close the panel (runs carry on) |
+- **The quickfix list.** A failed run fills it — resolved by the binary, so `]q` lands on
+  the failing assertion of a `go test` whose paths are relative to a directory Neovim knows
+  nothing about. `quickfix = "always" | "never"` if you would rather it did not.
+- **`e` opens the file here.** Press `e` on a `file:line` in the terminal and it opens in
+  the editor that is already open, rather than launching `$EDITOR` in a window inside it.
+- **A statusline component.** `require("taskui").status()` is `✗ backend:test 7.1s`, fed by
+  the events, so it keeps saying so with the terminal closed.
+- **Notifications**, for when the terminal is not the window you are looking at.
 
-**The quickfix list is the point.** A failed run fills it automatically, resolved by the
-binary, so `]q` walks you onto the failing assertions of a `go test` whose paths are
-relative to a directory Neovim knows nothing about. `quickfix = "always" | "never"` if you
-would rather it did not.
-
-Everything is optional and defaults are shown:
+That is the whole seam: `taskui --events <socket>` writes what its runs are doing as
+newline-delimited JSON, the plugin listens, and nothing else crosses between them.
 
 ```lua
 require("taskui").setup({
   binary = "taskui",       -- or an absolute path
   project = nil,           -- nil means Neovim's cwd
-  peek = 5,                -- lines a peeking task shows, as `peek-lines:` does
-  position = "left",       -- left | right | top | bottom
-  width = 62,              -- for a left or right panel
-  height = 18,             -- for a top or bottom one
+  position = "float",      -- float | left | right | top | bottom | tab
+  width = 80,              -- for a left or right split
+  height = 20,             -- for a top or bottom one
+  args = {},               -- extra arguments, e.g. { "--theme", "y2k" }
   quickfix = "on_failure", -- on_failure | always | never
   open_quickfix = false,   -- open the quickfix window when a run fills it
-  notify = true,           -- say how a run went, for when the panel is closed
-  keys = { run = "<CR>", fold_tree = "<Space>", fold_output = "o" },
+  notify = true,           -- say how a run went
+  keys = { close = "<C-q>" }, -- hide the terminal from inside it
 })
 ```
 
-`require("taskui").status()` is a statusline component — `✗ backend:test 7.1s` — for
-watching a run while you edit the thing that broke it.
+Only one key is the host's: `<C-q>` hides the window. Everything else in that terminal
+belongs to taskui, because taking its keys would be taking them from the thing you asked
+for. Hiding is hiding — the process carries on with its slots and its scroll position, and
+`:TaskUI` brings it back where you left it.
 
-The panel is one buffer that is rendered into rather than edited, and a run outlives it:
-closing the panel is not stopping anything, `x` is. Stopping does reap the whole process
-group, because the headless stream takes its child down with it — the same guarantee the
-terminal UI gives.
-
-## Development
+## Development## Development
 
 The project's own Taskfile is the smallest honest test of taskui — it is deliberately
 shaped to exercise what it claims to handle, with tasks that are both runnable and parents

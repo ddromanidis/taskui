@@ -8,40 +8,35 @@ local M = {}
 
 ---@class Taskui.Config
 ---@field binary string Executable name or absolute path.
----@field project string|nil Directory to read the Taskfile from. Nil means the cwd.
----@field peek integer How many lines a peeking task shows, as `peek-lines:` does in the TUI.
----@field position "left"|"right"|"bottom"|"top" Where the panel opens.
----@field width integer Columns for a left or right panel.
----@field height integer Rows for a top or bottom panel.
+---@field project string|nil Directory to open taskui in. Nil means the cwd.
+---@field position "float"|"left"|"right"|"top"|"bottom"|"tab" Where the terminal opens.
+---@field width integer Columns for a left or right split.
+---@field height integer Rows for a top or bottom split.
+---@field args string[] Extra arguments for the binary, e.g. { "--theme", "y2k" }.
 ---@field quickfix "on_failure"|"always"|"never" When a finished run fills the quickfix list.
 ---@field open_quickfix boolean Open the quickfix window when it is filled from a failure.
----@field notify boolean Report a run's result with vim.notify as well as in the panel.
----@field keys table<string, string|false> Panel keymaps, by action. False unbinds one.
+---@field notify boolean Say how a run went — for when the terminal is not the window you are in.
+---@field keys table<string, string|false> The two keys the host owns; the rest belong to taskui.
 M.defaults = {
   binary = "taskui",
   project = nil,
-  peek = 5,
-  position = "left",
-  width = 62,
-  height = 18,
-  -- The quickfix list is the plugin's largest daily return, and a failed run
-  -- is exactly the moment it is wanted — but filling it on a run that passed
-  -- would clear whatever you were working through.
+  -- A float, because taskui is a whole interface rather than a sidebar: it has
+  -- its own header, footer and columns, and squeezing those into sixty columns
+  -- beside a file is how you end up reimplementing it.
+  position = "float",
+  width = 80,
+  height = 20,
+  args = {},
+  -- The quickfix list is the largest daily return, and a failed run is exactly
+  -- the moment it is wanted — but filling it on a run that passed would clear
+  -- whatever you were working through.
   quickfix = "on_failure",
   open_quickfix = false,
   notify = true,
   keys = {
-    run = "<CR>",
-    fold_tree = "<Space>",
-    fold_output = "o",
-    fold_all = "O",
-    rerun = "r",
-    stop = "x",
-    quickfix = "c",
-    edit = "e",
-    refresh = "R",
-    help = "?",
-    close = "q",
+    -- Hides the terminal from inside it. Everything else in there is taskui's:
+    -- intercepting its keys would be taking them from the thing you asked for.
+    close = "<C-q>",
   },
 }
 

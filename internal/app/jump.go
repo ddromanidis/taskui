@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ddromanidis/taskui/internal/diff"
+	"github.com/ddromanidis/taskui/internal/events"
 	"github.com/ddromanidis/taskui/internal/loc"
 )
 
@@ -152,6 +154,21 @@ func (a *App) openLocationFrom(l loc.Loc, note string) {
 		a.Status = where + " — no such file under " + baseName(a.Root) + note
 		return
 	}
+
+	// With a host attached — an editor showing this terminal — the file is its to open.
+	// Launching $EDITOR here would put a second editor inside the first one's window.
+	if a.HasHost() {
+		reason := note
+		if ambiguous {
+			reason += " — several files share that name"
+		}
+		a.events.Send(events.Edit{
+			Type: "edit", Path: abs, Line: l.Line, Col: l.Col, Note: strings.TrimSpace(reason),
+		})
+		a.Status = fmt.Sprintf("opening %s:%d in the editor", relativeTo(a.Root, abs), l.Line) + reason
+		return
+	}
+
 	editor, ok := loc.EditorFor(l, abs)
 	if !ok {
 		a.Status = "set $EDITOR or $VISUAL to open " + where
