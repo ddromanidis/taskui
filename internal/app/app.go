@@ -1993,7 +1993,9 @@ func (a *App) follow() {
 			a.releaseFollowed(name)
 			a.expandTo(name)
 			a.RebuildRunRows()
-			a.cursorToTask(name)
+			if !a.cursorInTask(name) {
+				a.cursorToTask(name)
+			}
 		}
 		return
 	}
@@ -2019,9 +2021,28 @@ func (a *App) follow() {
 		// behaviour changed does not leave a full task behind it.
 		a.releaseFollowed("")
 		a.RebuildRunRows()
+		// The cursor is already inside this task — reading it, almost certainly, since a
+		// task whose lines you can see is one that is open. Following exists to bring what
+		// is running into view, and it is in view: moving the cursor to the header now
+		// would be dragging you off the line you were on, once per line that arrives.
+		if a.cursorInTask(name) {
+			return
+		}
 		a.cursorToTask(name)
 		return
 	}
+}
+
+// cursorInTask reports whether the run cursor is on a task or on one of its output lines.
+func (a *App) cursorInTask(name string) bool {
+	if a.RunCursor < 0 || a.RunCursor >= len(a.RunRows) {
+		return false
+	}
+	row := a.RunRows[a.RunCursor]
+	if row.IsTask {
+		return row.Name == name
+	}
+	return row.Task == name
 }
 
 // releaseFollowed gives back the task following opened, unless it is keep.

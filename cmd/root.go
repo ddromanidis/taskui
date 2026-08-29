@@ -308,7 +308,8 @@ func rootRun(cmd *cobra.Command, args []string) error {
 			// Ignore write errors: piping into `head` closes the pipe on us, and that is
 			// not a failure of ours.
 			if _, err := fmt.Fprintf(out, "%s\t%s\n", t.Name, t.Desc); err != nil {
-				return nil //nolint:nilerr // piping into `head` closes the pipe on us
+				// Piping into `head` closes the pipe on us, which is not a failure.
+				return nil
 			}
 		}
 		fmt.Fprintf(out, "-- %d tasks\n", len(tasks))

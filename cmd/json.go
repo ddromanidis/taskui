@@ -35,11 +35,6 @@ import (
 	"github.com/ddromanidis/taskui/internal/task"
 )
 
-// eventTask names the event a task's status change goes out as. It shares its spelling
-// with the `--task` flag and nothing else: one is a kind of event, the other is a flag,
-// and a constant they both used would be a coincidence pretending to be a decision.
-const eventTask = "task"
-
 // listing is `--list --json`.
 type listing struct {
 	Project string     `json:"project"`

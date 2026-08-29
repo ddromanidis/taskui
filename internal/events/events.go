@@ -14,6 +14,7 @@ package events
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -112,7 +113,7 @@ type Sink struct {
 // both want.
 func Open(path string) (*Sink, error) {
 	if path == "" {
-		return nil, nil
+		return nil, errors.New("no path to report events to")
 	}
 	if conn, err := net.Dial("unix", path); err == nil {
 		return New(conn), nil

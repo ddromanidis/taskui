@@ -208,6 +208,12 @@ it off the screen — which is the whole reason to watch a run instead of tailin
 fold you set yourself is yours, and following will not overrule it when the next task
 starts.
 
+And it does not move the cursor at all when the cursor is **already inside the task it
+would follow**. Following exists to bring what is running into view; a task whose lines you
+are sitting in is in view. Without that rule, reading an open task while it prints meant
+being dragged back to its header once per line — which is what `⇧G` on a live run did,
+since jumping to the end turns following back on.
+
 Reading is likewise not disturbed by output arriving elsewhere. The cursor tracks the line
 it is *on*, not the row number it happens to sit at, so a task higher up the tree printing
 another hundred lines no longer slides the stack trace you are halfway through out from
