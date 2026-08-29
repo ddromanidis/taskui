@@ -12,11 +12,12 @@
 package graph
 
 import (
-	"os/exec"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
+
+	taskpkg "github.com/ddromanidis/taskui/internal/task"
 )
 
 // Graph maps a task name to the tasks it invokes, in the order it invokes them.
@@ -245,8 +246,9 @@ func DescribeTask(dir, task string) Detail {
 }
 
 func summaryOf(dir, task string) string {
-	cmd := exec.Command("task", "--summary", task)
-	cmd.Dir = dir
+	// Through task.Ask, so the summary arrives plain: this output is parsed, and go-task
+	// colours it whenever something in the environment asks it to.
+	cmd := taskpkg.Ask(dir, "--summary", task)
 	// A task that cannot be summarised is not fatal — it just has no known children.
 	out, _ := cmd.Output()
 	return string(out)

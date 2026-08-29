@@ -26,6 +26,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Task is one entry of `task --list-all`.
@@ -283,7 +285,11 @@ func looksDangerous(name, desc string) bool {
 //
 //   - build:      Build all components                    (aliases: b)
 func parseEntry(line string) (Task, bool) {
-	rest, ok := strings.CutPrefix(line, "* ")
+	// Stripped even though Ask turns the colour off, because those are two different kinds
+	// of promise: NO_COLOR is a request to a program we do not control, and what it costs
+	// when it is not honoured is not an error but a project that appears to have no tasks in
+	// it. This is the half we can guarantee.
+	rest, ok := strings.CutPrefix(ansi.Strip(line), "* ")
 	if !ok {
 		return Task{}, false
 	}
@@ -321,14 +327,33 @@ func parseEntry(line string) (Task, bool) {
 	}, true
 }
 
+// Ask builds the command for a question taskui puts to go-task, with colour off.
+//
+// Every question here is parsed, and go-task colours its answers whenever the environment
+// tells it to — which on a CI runner is the normal case, not an exotic one. A listing line
+// that arrives as "\x1b[33m* \x1b[0m\x1b[32mbuild\x1b[0m:" starts with an escape rather than
+// with `* `, so the parser below matches nothing and discovery reports a project with no
+// tasks in it. No error, no empty output, nothing to notice: the worst shape a bug can take.
+//
+// `NO_COLOR` is the standard way to say so and go-task honours it over anything asking for
+// colour the other way. Deliberately not applied to the command that *runs* your task: that
+// output is yours, it is shown and archived with its escapes intact, and stripping the colour
+// out of a test runner's output would be taking something away rather than asking a question
+// plainly.
+func Ask(dir string, args ...string) *exec.Cmd {
+	cmd := exec.Command("task", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "NO_COLOR=1")
+	return cmd
+}
+
 // Discover runs `task --list-all` in dir and returns the tasks, minus the `*:default`
 // entries — in a UI where a namespace is itself a selectable row, a task whose only job is
 // "show available tasks" is noise.
 func Discover(dir string) ([]Task, error) {
 	declared := DangerPatterns(dir)
 
-	cmd := exec.Command("task", "--list-all")
-	cmd.Dir = dir
+	cmd := Ask(dir, "--list-all")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
@@ -403,8 +428,7 @@ type jsonListing struct {
 // Measured at fifty-six times the text form on such a repo — 4.28s against 0.076s — almost
 // all of it system time. Which is why nothing calls this before the first frame.
 func Details(dir string) (map[string]Detail, error) {
-	cmd := exec.Command("task", "--list-all", "--json")
-	cmd.Dir = dir
+	cmd := Ask(dir, "--list-all", "--json")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()

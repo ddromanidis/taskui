@@ -215,3 +215,45 @@ func TestFlagsProductionTasks(t *testing.T) {
 		}
 	}
 }
+
+// --- talking to go-task ----------------------------------------------------------------
+
+// go-task colours its output whenever the environment asks it to, and on a CI runner that
+// is the ordinary case. A listing line that arrives coloured starts with an escape rather
+// than with `* `, so the parser matches nothing and a project with forty tasks in it is
+// reported as having none — no error, no empty output, nothing to notice.
+//
+// This is what that looked like: it cost a release, because the failure reached CI as a
+// panic three packages away, in a test asserting on the first task of an empty list.
+func TestAskTurnsTheColourOff(t *testing.T) {
+	cmd := Ask(t.TempDir(), "--list-all")
+	found := false
+	for _, kv := range cmd.Env {
+		if kv == "NO_COLOR=1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("every question we parse has to be asked in plain text: %v", cmd.Env)
+	}
+	if cmd.Args[0] != "task" || cmd.Args[1] != "--list-all" {
+		t.Errorf("args = %v", cmd.Args)
+	}
+}
+
+// And the parser is not left relying on that alone: NO_COLOR is a request to a program we
+// do not control, and the cost of it being ignored is a silent empty list rather than an
+// error. Stripping is the half we can guarantee.
+func TestAColouredListingStillParses(t *testing.T) {
+	coloured := "\x1b[33m* \x1b[0m\x1b[32mbuild\x1b[0m\x1b[0m:       Compile it\x1b[0m"
+	got, ok := parseEntry(coloured)
+	if !ok {
+		t.Fatalf("a coloured line parsed as nothing: %q", coloured)
+	}
+	if got.Name != "build" {
+		t.Errorf("name = %q", got.Name)
+	}
+	if got.Desc != "Compile it" {
+		t.Errorf("desc = %q", got.Desc)
+	}
+}
