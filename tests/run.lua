@@ -30,6 +30,11 @@ dofile(root .. "/plugin/taskui.lua")
 local project = vim.fn.tempname()
 vim.fn.mkdir(project, "p")
 vim.env.XDG_STATE_HOME = vim.fn.tempname()
+-- And a config of its own, for the same reason pointed the other way: taskui reads
+-- `$XDG_CONFIG_HOME/taskui/config.yaml`, so without this the suite asserts against
+-- whichever theme the person running it happens to like. `theme: y2k` alone is enough
+-- to fail it, because that wordmark is `TASKUI` and the assertion below wants `taskui`.
+vim.env.XDG_CONFIG_HOME = vim.fn.tempname()
 vim.fn.writefile({
   'version: "3"',
   "tasks:",
