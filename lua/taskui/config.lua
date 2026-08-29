@@ -16,7 +16,7 @@ local M = {}
 ---@field quickfix "on_failure"|"always"|"never" When a finished run fills the quickfix list.
 ---@field open_quickfix boolean Open the quickfix window when it is filled from a failure.
 ---@field notify boolean Say how a run went — for when the terminal is not the window you are in.
----@field keys table<string, string|false> The two keys the host owns; the rest belong to taskui.
+---@field keys table<string, string|false> The two keys the host owns inside the terminal; the rest belong to taskui.
 M.defaults = {
   binary = "taskui",
   project = nil,
@@ -34,8 +34,15 @@ M.defaults = {
   open_quickfix = false,
   notify = true,
   keys = {
-    -- Hides the terminal from inside it. Everything else in there is taskui's:
+    -- The two keys the host owns, bound *inside* the terminal buffer only, so
+    -- they cost nothing anywhere else. Everything else in there is taskui's:
     -- intercepting its keys would be taking them from the thing you asked for.
+    --
+    -- toggle is the same key you bound `:TaskUI` to. It has to be repeated
+    -- here because a focused terminal is in terminal mode, where a normal-mode
+    -- mapping never fires — the keystroke goes to the program, which is the
+    -- whole point of a terminal and exactly wrong for the key that closes it.
+    toggle = "<A-t>",
     close = "<C-q>",
   },
 }

@@ -1161,14 +1161,22 @@ require("taskui").setup({
   quickfix = "on_failure", -- on_failure | always | never
   open_quickfix = false,   -- open the quickfix window when a run fills it
   notify = true,           -- say how a run went
-  keys = { close = "<C-q>" }, -- hide the terminal from inside it
+  keys = {                 -- bound inside the terminal only
+    toggle = "<A-t>",      -- the same key you bound `:TaskUI` to
+    close = "<C-q>",
+  },
 })
 ```
 
-Only one key is the host's: `<C-q>` hides the window. Everything else in that terminal
-belongs to taskui, because taking its keys would be taking them from the thing you asked
-for. Hiding is hiding — the process carries on with its slots and its scroll position, and
-`:TaskUI` brings it back where you left it.
+Two keys are the host's, and both are bound **inside the terminal buffer only**, so neither
+exists anywhere else in the editor. `toggle` needs saying twice — once in your `:TaskUI`
+mapping and once here — because a focused terminal is in terminal mode, where every
+keystroke goes to the program: the normal-mode mapping that opened the window cannot close
+it. Set it to whatever you opened it with.
+
+Everything else in that terminal belongs to taskui, because taking its keys would be taking
+them from the thing you asked for. Hiding is hiding — the process carries on with its slots
+and its scroll position, and `:TaskUI` brings it back where you left it.
 
 ## Development## Development
 

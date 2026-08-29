@@ -215,6 +215,21 @@ check("hiding the terminal leaves the process alone", function()
   end
 end)
 
+-- A focused terminal sends every key to the program, so the key that opened the
+-- window has to exist in terminal mode too or there is no way back out of it.
+check("the toggle key works from inside the terminal", function()
+  vim.cmd("TaskUI")
+  wait_for("the terminal", function()
+    return term.is_open()
+  end, 3000)
+  for _, mode in ipairs({ "t", "n" }) do
+    local map = vim.fn.maparg(require("taskui.config").options.keys.toggle, mode, false, true)
+    if vim.tbl_isempty(map) or map.buffer ~= 1 then
+      error(("no buffer-local %s-mode mapping: %s"):format(mode, vim.inspect(map)))
+    end
+  end
+end)
+
 check("checkhealth runs", function()
   require("taskui.health").check()
 end)

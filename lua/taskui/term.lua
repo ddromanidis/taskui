@@ -218,15 +218,24 @@ function M.open_file(path, lnum, col)
   end
 end
 
---- Binds the two keys the host owns. Everything else belongs to the tool: this
---- is a terminal, and intercepting its keys would be taking them away from the
---- thing that was asked for.
+--- Binds the keys the host owns, in terminal mode as well as normal mode.
+---
+--- Terminal mode is the part that is easy to forget: a focused terminal sends
+--- every keystroke to the program, so the normal-mode mapping that opened this
+--- window cannot close it. Both keys are buffer-local, so neither exists
+--- anywhere else in the editor.
 function M.bind()
-  local close = config.options.keys.close
-  if close and close ~= "" then
-    vim.keymap.set("t", close, function()
-      M.close()
-    end, { buffer = M.buf, desc = "taskui: hide the terminal" })
+  local keys = config.options.keys
+  for _, entry in ipairs({
+    { keys.toggle, "taskui: hide the terminal" },
+    { keys.close, "taskui: hide the terminal" },
+  }) do
+    local lhs = entry[1]
+    if lhs and lhs ~= "" then
+      vim.keymap.set({ "t", "n" }, lhs, function()
+        M.close()
+      end, { buffer = M.buf, nowait = true, desc = entry[2] })
+    end
   end
   vim.keymap.set("n", "q", function()
     M.close()
