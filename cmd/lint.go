@@ -20,6 +20,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,6 +85,43 @@ func namespaceOf(name string) string {
 // things where this one finds four, and the seven were all correct as written. A namespace
 // the aggregate reaches at all has been given its chance to run.
 func coverage(tasks []task.Task, reach func(string) []string, exempt []string) []finding {
+	return buildGrid(tasks, reach, exempt).findings()
+}
+
+// state is what one aggregate does about one namespace.
+type state int
+
+const (
+	// absent: the namespace does not answer this verb at all, which is most of the grid and
+	// is not a finding — `site` has no `test` and should not.
+	absent state = iota
+	covered
+	// elsewhere: not reached by the aggregate sharing its verb, but reached by another.
+	elsewhere
+	exempt
+	gap
+)
+
+// grid is the whole answer: every aggregate against every namespace that answers any
+// aggregate's verb.
+//
+// Built once and projected twice. `--lint` prints the disagreements, `--matrix` prints the
+// table they came out of, and computing them separately would be two chances to disagree
+// about what covered means.
+type grid struct {
+	// Rows in the order the Taskfile declares them, so a matrix reads down the file rather
+	// than alphabetically.
+	Rows []task.Task
+	// Columns sorted, and only namespaces that answer at least one aggregate's verb — a
+	// column of nothing but `—` is a column about a namespace nobody asked about.
+	Columns []string
+	Cells   map[string]map[string]state
+	// Tasks is what a namespace answers a verb with, for naming it in a finding.
+	Tasks     map[string]map[string][]string
+	Elsewhere map[string]map[string][]string
+}
+
+func buildGrid(tasks []task.Task, reach func(string) []string, exemptions []string) grid {
 	// The verb every namespaced task answers, so an aggregate can ask who claims its name.
 	byVerb := map[string][]task.Task{}
 	for _, t := range tasks {
@@ -95,18 +133,22 @@ func coverage(tasks []task.Task, reach func(string) []string, exempt []string) [
 	// An aggregate is a root-level task some namespace also answers. `wt:new` has no root
 	// task and `precommit` has no namespace answering it; neither is making a claim about
 	// coverage, so neither is checked.
-	var roots []task.Task
+	g := grid{
+		Cells:     map[string]map[string]state{},
+		Tasks:     map[string]map[string][]string{},
+		Elsewhere: map[string]map[string][]string{},
+	}
 	for _, t := range tasks {
 		if namespaceOf(t.Name) == "" && len(byVerb[t.Name]) > 0 {
-			roots = append(roots, t)
+			g.Rows = append(g.Rows, t)
 		}
 	}
 
-	// Resolved once each and kept, because Elsewhere asks every aggregate about every task
+	// Resolved once each and kept, because elsewhere asks every aggregate about every task
 	// and re-walking a graph per question would be dozens of process spawns for an answer
 	// already on hand.
 	reached := map[string]map[string]bool{}
-	for _, r := range roots {
+	for _, r := range g.Rows {
 		set := map[string]bool{}
 		for _, name := range reach(r.Name) {
 			set[name] = true
@@ -114,44 +156,80 @@ func coverage(tasks []task.Task, reach func(string) []string, exempt []string) [
 		reached[r.Name] = set
 	}
 
-	var out []finding
-	for _, r := range roots {
+	columns := map[string]bool{}
+	for _, r := range g.Rows {
 		// Which namespaces this aggregate got to at all, by any route and at any depth.
-		covered := map[string]bool{}
+		got := map[string]bool{}
 		for name := range reached[r.Name] {
-			covered[namespaceOf(name)] = true
+			got[namespaceOf(name)] = true
 		}
 
-		// Grouped by namespace so a namespace answering a verb twice is one finding rather
-		// than two, and ordered by name so two runs report the same thing twice.
-		seen := map[string]bool{}
-		var order []string
-		claims := map[string][]string{}
+		g.Cells[r.Name] = map[string]state{}
+		g.Tasks[r.Name] = map[string][]string{}
+		g.Elsewhere[r.Name] = map[string][]string{}
+
 		for _, t := range byVerb[r.Name] {
 			ns := namespaceOf(t.Name)
-			if covered[ns] || exemptedBy(exempt, t.Name) {
+			columns[ns] = true
+			g.Tasks[r.Name][ns] = append(g.Tasks[r.Name][ns], t.Name)
+
+			switch {
+			case got[ns]:
+				g.Cells[r.Name][ns] = covered
+			// Already settled as covered by one of this namespace's other tasks; a second
+			// task must not downgrade it.
+			case g.Cells[r.Name][ns] == covered:
+			case exemptedBy(exemptions, t.Name):
+				// Only if nothing else in this namespace is still asking to be reported.
+				if g.Cells[r.Name][ns] == absent {
+					g.Cells[r.Name][ns] = exempt
+				}
+			default:
+				g.Cells[r.Name][ns] = gap
+			}
+		}
+
+		// Whether somewhere else reaches it, which softens a gap into a note.
+		for ns, names := range g.Tasks[r.Name] {
+			if g.Cells[r.Name][ns] != gap {
 				continue
 			}
-			if !seen[ns] {
-				seen[ns] = true
-				order = append(order, ns)
-			}
-			claims[ns] = append(claims[ns], t.Name)
-		}
-		slices.Sort(order)
-
-		for _, ns := range order {
-			f := finding{Aggregate: r.Name, Desc: r.Desc, Namespace: ns, Tasks: claims[ns]}
-			for _, other := range roots {
+			for _, other := range g.Rows {
 				if other.Name == r.Name {
 					continue
 				}
-				if slices.ContainsFunc(f.Tasks, func(n string) bool { return reached[other.Name][n] }) {
-					f.Elsewhere = append(f.Elsewhere, other.Name)
+				if slices.ContainsFunc(names, func(n string) bool { return reached[other.Name][n] }) {
+					g.Elsewhere[r.Name][ns] = append(g.Elsewhere[r.Name][ns], other.Name)
 				}
 			}
-			slices.Sort(f.Elsewhere)
-			out = append(out, f)
+			if len(g.Elsewhere[r.Name][ns]) > 0 {
+				slices.Sort(g.Elsewhere[r.Name][ns])
+				g.Cells[r.Name][ns] = elsewhere
+			}
+		}
+	}
+
+	g.Columns = slices.Sorted(maps.Keys(columns))
+	return g
+}
+
+// findings is the grid with everything that is working left out.
+func (g grid) findings() []finding {
+	var out []finding
+	for _, r := range g.Rows {
+		// Sorted, so two runs report the same thing in the same order.
+		for _, ns := range g.Columns {
+			s := g.Cells[r.Name][ns]
+			if s != gap && s != elsewhere {
+				continue
+			}
+			out = append(out, finding{
+				Aggregate: r.Name,
+				Desc:      r.Desc,
+				Namespace: ns,
+				Tasks:     g.Tasks[r.Name][ns],
+				Elsewhere: g.Elsewhere[r.Name][ns],
+			})
 		}
 	}
 	return out
@@ -181,9 +259,13 @@ func coverPatterns(dir string) []string {
 // printLint is `--lint`: walk every aggregate's graph and report what it claims and does not
 // reach. Returns the number of gaps, which is what the exit code is decided on — notes are
 // printed and not counted.
-func printLint(out io.Writer, root string, tasks []task.Task) int {
+func printLint(out io.Writer, root string, tasks []task.Task, matrix bool) int {
 	reach := func(name string) []string { return graph.Resolve(root, name).Reachable(name) }
-	found := coverage(tasks, reach, coverPatterns(root))
+	g := buildGrid(tasks, reach, coverPatterns(root))
+	if matrix {
+		return printMatrix(out, g)
+	}
+	found := g.findings()
 
 	gaps := 0
 	last := ""
@@ -217,4 +299,79 @@ func printLint(out io.Writer, root string, tasks []task.Task) int {
 		fmt.Fprintf(out, "\nA gap that is deliberate belongs in %s, one glob per line.\n", CoverFile)
 	}
 	return gaps
+}
+
+// marks are what a cell says, in the order the legend lists them.
+var marks = map[state]string{
+	absent:    "—",
+	covered:   "✓",
+	elsewhere: "·",
+	exempt:    "~",
+	gap:       "✗",
+}
+
+// printMatrix prints the whole grid rather than only the disagreements.
+//
+// This table gets written by hand. xerum's root Taskfile carries one as a comment — verbs
+// down the side, namespaces across the top, a tick where the aggregate covers the domain —
+// and it had already drifted from the Taskfile under it by the time this was written. The
+// table is derived from two things taskui reads anyway, so deriving it is strictly better
+// than keeping it in step.
+func printMatrix(out io.Writer, g grid) int {
+	if len(g.Rows) == 0 {
+		fmt.Fprintln(out, "no aggregate tasks here — nothing claims to cover a namespace")
+		return 0
+	}
+
+	label := 0
+	for _, r := range g.Rows {
+		label = max(label, len([]rune(r.Name)))
+	}
+	width := make([]int, len(g.Columns))
+	for i, ns := range g.Columns {
+		width[i] = max(len([]rune(ns)), 1)
+	}
+
+	fmt.Fprint(out, strings.Repeat(" ", label+2))
+	for i, ns := range g.Columns {
+		fmt.Fprintf(out, "%s  ", pad(ns, width[i]))
+	}
+	fmt.Fprintln(out)
+
+	gaps := 0
+	for _, r := range g.Rows {
+		fmt.Fprintf(out, "%s  ", pad(r.Name, label))
+		for i, ns := range g.Columns {
+			s := g.Cells[r.Name][ns]
+			if s == gap {
+				gaps++
+			}
+			// Centred under the heading, so a wide namespace name does not drag its column
+			// of marks off to one side.
+			fmt.Fprintf(out, "%s  ", centre(marks[s], width[i]))
+		}
+		fmt.Fprintln(out)
+	}
+
+	fmt.Fprintf(out, "\n%s reached   %s covered by another aggregate   %s never reached   "+
+		"%s exempt   %s not declared\n",
+		marks[covered], marks[elsewhere], marks[gap], marks[exempt], marks[absent])
+	return gaps
+}
+
+// pad left-aligns to a width counted in runes, which is what a terminal column is.
+func pad(s string, width int) string {
+	if n := width - len([]rune(s)); n > 0 {
+		return s + strings.Repeat(" ", n)
+	}
+	return s
+}
+
+func centre(s string, width int) string {
+	n := width - len([]rune(s))
+	if n <= 0 {
+		return s
+	}
+	left := n / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", n-left)
 }

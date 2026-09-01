@@ -59,6 +59,7 @@ type options struct {
 	diffTask   string
 	flaky      bool
 	lint       bool
+	matrix     bool
 	quickfix   bool
 	asJSON     bool
 	events     string
@@ -156,6 +157,8 @@ func init() {
 	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
 	f.BoolVar(&opts.lint, "lint", false,
 		"print the namespaces an aggregate task claims and does not reach, and exit")
+	f.BoolVar(&opts.matrix, "matrix", false,
+		"with --lint: print the whole aggregate-by-namespace table rather than only the gaps")
 	f.StringVar(&opts.searchTask, "task", "", "narrow --search to one task's output")
 	f.StringVar(&opts.since, "since", "", "narrow --search to runs newer than this: 90m, 2d, 3w")
 	f.StringVar(
@@ -237,7 +240,7 @@ func projectCommand(cmd *cobra.Command, root string, tasks []task.Task, config t
 	// rather than ExitFailed: `task precommit` fails on either, and a script that wants to
 	// tell "this Taskfile has a hole in it" from "there is no Taskfile here" can.
 	case opts.lint:
-		if printLint(out, root, tasks) > 0 {
+		if printLint(out, root, tasks, opts.matrix) > 0 {
 			return true, exitWith(ExitFound)
 		}
 		return true, nil
@@ -253,6 +256,17 @@ func printTaskListText(out io.Writer, tasks []task.Task) {
 		}
 	}
 	fmt.Fprintf(out, "-- %d tasks\n", len(tasks))
+}
+
+// matrixFormOK rejects `--matrix` on its own. Like `--json` it is a form another flag is
+// printed in rather than a command, and launching the TUI at somebody who asked for a table
+// is worse than saying so.
+func matrixFormOK() error {
+	if opts.matrix && !opts.lint {
+		return errors.New("--matrix is the full-table form of --lint; on its own there is " +
+			"nothing for it to be the form of")
+	}
+	return nil
 }
 
 // jsonFormOK rejects the two ways `--json` can be asked for and mean nothing.
@@ -305,6 +319,9 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	// `--json` is a form the other flags can be printed in, not a command of its own.
 	// Saying so beats launching the TUI at somebody who is piping this into a program.
 	if err := jsonFormOK(); err != nil {
+		return err
+	}
+	if err := matrixFormOK(); err != nil {
 		return err
 	}
 

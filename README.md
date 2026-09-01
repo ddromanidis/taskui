@@ -199,6 +199,7 @@ taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
 taskui --quickfix             # the last run's failures as file:line:col: message
 taskui --lint                 # aggregates that cover less than their name claims
+taskui --lint --matrix        # the whole aggregate-by-namespace table, not just the gaps
 taskui --list --json          # the same listings, for a program rather than a person
 taskui --run ci --json        # the run as newline-delimited events, as it happens
 taskui --events /tmp/sock     # …the same events from inside the TUI, for a host
@@ -557,6 +558,30 @@ site:build
 Same shape as `.taskui-danger`, and a repository without one loses nothing. A check whose
 findings are mostly deliberate is a check people stop reading, which is the failure mode
 worth designing against.
+
+`--lint --matrix` prints the table the findings came out of rather than only the
+disagreements:
+
+```
+$ taskui --lint --matrix
+       api  app  backend  deploy  dev  infra  site
+all     —    —      —       ✓      —     —     —
+build   ✗    ✓      ✓       —      —     —     ✓
+check   ·    ✓      ✓       ✓      —     ✓     ✓
+clean   ✓    ✓      ✓       —      ✓     ✓     ✓
+fmt     —    ✓      ✓       —      —     ✓     —
+lint    ✓    ✓      ✓       —      —     ✓     —
+test    —    ✓      ✓       —      —     —     —
+
+✓ reached   · covered by another aggregate   ✗ never reached   ~ exempt   — not declared
+```
+
+This is the table that gets written by hand. A Taskfile organised by `includes:` tends to
+grow a comment above the aggregates with the verbs down one side and the domains across the
+top, and it drifts, because nothing regenerates it — the one it replaced here claimed `api`
+had no `build`, and `api:tenant:docs:build` had been added since. Both views come out of one
+grid, so the table and the report cannot disagree about what covered means. Only namespaces
+that answer some aggregate get a column.
 
 ### Running several at once
 

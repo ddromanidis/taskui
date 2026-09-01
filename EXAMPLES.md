@@ -420,6 +420,21 @@ are printed and not counted. Gaps exit `2`, so it composes as a gate:
 taskui --lint || echo "an aggregate is claiming more than it runs"
 ```
 
+`--matrix` prints the whole grid instead of only the disagreements, which is the table a
+Taskfile organised by `includes:` tends to carry as a comment above its aggregates:
+
+```
+$ taskui --lint --matrix
+       api  app  backend  site  infra
+build   ✗    ✓      ✓      ✓     —
+check   ·    ✓      ✓      ✓     ✓
+test    —    ✓      ✓      —     —
+
+✓ reached   · covered by another aggregate   ✗ never reached   ~ exempt   — not declared
+```
+
+Point the comment at the command and it stops drifting.
+
 ---
 
 ## Making it readable in your terminal
