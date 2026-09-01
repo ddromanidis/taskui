@@ -30,6 +30,26 @@ func appAt(t *testing.T, name string) *App {
 
 func press(a *App, k Key) { a.HandleKey(k) }
 
+// groupRows is where the picker's group headers sit in its list.
+func groupRows(a *App) []int {
+	var out []int
+	for i, row := range a.PickerRows {
+		if !row.IsRun() && a.Tree.Nodes[a.Rows[row.Tree].Node].IsGroup() {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// rootLabels is the top-level rows of the tree, in the order they are read.
+func rootLabels(a *App) []string {
+	var out []string
+	for _, r := range a.Tree.Roots {
+		out = append(out, a.Tree.Nodes[r].Label)
+	}
+	return out
+}
+
 func rootOf(a *App) string {
 	if a.Run == nil {
 		return ""
@@ -657,6 +677,110 @@ func TestALoneGIsDisarmedByAnythingElse(t *testing.T) {
 	}
 }
 
+// `{` and `}`, as in vim: the next group header, whatever lies between here and it.
+func TestBracesJumpBetweenGroups(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	a.SetFoldAll(true)
+	groups := groupRows(a)
+	if len(groups) < 2 {
+		t.Fatalf("the fixture needs two groups to jump between: %v", groups)
+	}
+
+	a.Cursor = groups[0]
+	press(a, Char('}'))
+	if a.Cursor != groups[1] {
+		t.Errorf("`}` should have reached the next group at %d: %d", groups[1], a.Cursor)
+	}
+	press(a, Char('{'))
+	if a.Cursor != groups[0] {
+		t.Errorf("`{` should have come back to %d: %d", groups[0], a.Cursor)
+	}
+}
+
+// Past the last group there is no next one, and a movement key that does nothing at all
+// reads as broken — so it runs out at the end of the list, the way vim's does at the end
+// of the file.
+func TestBracesRunOutAtTheEnds(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	a.SetFoldAll(true)
+	groups := groupRows(a)
+	last := len(a.PickerRows) - 1
+
+	a.Cursor = groups[len(groups)-1]
+	press(a, Char('}'))
+	if a.Cursor != last {
+		t.Errorf("cursor = %d, want the last row %d", a.Cursor, last)
+	}
+	press(a, Char('{'))
+	press(a, Char('{'))
+	press(a, Char('{'))
+	if a.Cursor != 0 {
+		t.Errorf("cursor = %d, want the first row", a.Cursor)
+	}
+}
+
+// The block a run prints is exactly what you press `}` to get past, so its rows are not
+// somewhere the jump can land.
+func TestBracesStepOverAnUnfoldedRun(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	a.SetFoldAll(true)
+	a.Run = run.Detached("backend:lint", run.GraphFrom(run.Edge{Parent: "backend:lint"}))
+	a.Run.Feed("backend:lint", "compiling")
+	a.RebuildRunRows()
+	a.RebuildPickerRows()
+	if len(blockRows(a, "backend:lint")) == 0 {
+		t.Fatal("no run rows to step over")
+	}
+	groups := groupRows(a)
+
+	a.Cursor = groups[0]
+	press(a, Char('}'))
+	if a.Cursor != groups[1] {
+		t.Errorf("cursor = %d, want the next group at %d", a.Cursor, groups[1])
+	}
+}
+
+// `?` lists `t jump to a task`, so `t` has to work from the screen that says so — closing
+// the help and opening the prompt in one press.
+func TestTJumpsStraightFromTheHelpScreen(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('?'))
+	if a.Screen != ScreenHelp {
+		t.Fatalf("screen = %v", a.Screen)
+	}
+
+	press(a, Char('t'))
+
+	if a.Screen != ScreenPicker {
+		t.Errorf("the help should have closed: %v", a.Screen)
+	}
+	if !a.Jumping {
+		t.Error("and the jump prompt should be open")
+	}
+	// And it is a real prompt: the next key types at it rather than scrolling anything.
+	press(a, Char('l'))
+	if a.JumpQuery != "l" {
+		t.Errorf("jump query = %q", a.JumpQuery)
+	}
+}
+
+// From anywhere else `?` is over a screen with nothing to jump through, and `t` stays a key
+// that screen does not have.
+func TestTFromHelpOverARunDoesNothing(t *testing.T) {
+	a := appWithLiveRun(t, "backend:lint")
+	a.Screen = ScreenRun
+	press(a, Char('?'))
+
+	press(a, Char('t'))
+
+	if a.Screen != ScreenHelp {
+		t.Errorf("it should still be on the help screen: %v", a.Screen)
+	}
+	if a.Jumping {
+		t.Error("nothing to jump through from a run")
+	}
+}
+
 // `p` took over the pivot so `gg` could have `g`.
 func TestPTogglesThePivot(t *testing.T) {
 	a := appAt(t, "backend:lint")
@@ -664,6 +788,57 @@ func TestPTogglesThePivot(t *testing.T) {
 	press(a, Char('p'))
 	if a.ModeLabel() == before {
 		t.Error("the pivot did not toggle")
+	}
+}
+
+// `⇧S` is the other half of `p`: the pivot decides what the tree is, the order decides what
+// sits above what inside it. It cycles every ordering and wraps back to the default.
+func TestShiftSCyclesEveryOrdering(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	if a.Order.By != pivot.ByNatural {
+		t.Fatalf("a fresh app should start on the default order: %q", a.Order.By)
+	}
+
+	var seen []pivot.By
+	for range len(pivot.Orders()) {
+		press(a, Char('S'))
+		seen = append(seen, a.Order.By)
+	}
+	if !reflect.DeepEqual(seen, append(pivot.Orders()[1:], pivot.ByNatural)) {
+		t.Errorf("the cycle went %v", seen)
+	}
+}
+
+// Re-sorting is a way of looking for something, so the thing you were looking at has to
+// survive it — the same rule `p` follows.
+func TestTheSelectionSurvivesAReSort(t *testing.T) {
+	a := appAt(t, "backend:migrate:down")
+	before := a.SelectedTask()
+	if before == pivot.NoTask {
+		t.Fatal("nothing selected to keep")
+	}
+
+	press(a, Char('S'))
+
+	if a.SelectedTask() != before {
+		t.Errorf("the cursor left the task: %d -> %d", before, a.SelectedTask())
+	}
+}
+
+// And it has to actually re-sort: `size` puts the biggest group first, whatever the pivot
+// would have done on its own.
+func TestOrderingChangesWhatSitsAboveWhat(t *testing.T) {
+	a := appWith(t, []string{"zeta:one", "zeta:two", "zeta:three", "alpha:one"})
+	a.Order.By = pivot.ByName
+	a.Rebuild(pivot.NoTask)
+	if got := rootLabels(a); !equalStrings(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("by name the roots are %v", got)
+	}
+
+	a.Order.By = pivot.BySize
+	a.Rebuild(pivot.NoTask)
+	if got := rootLabels(a); !equalStrings(got, []string{"zeta", "alpha"}) {
+		t.Errorf("by size the roots are %v, want the three-task group first", got)
 	}
 }
 

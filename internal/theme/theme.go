@@ -877,6 +877,8 @@ func orderYAML() string {
 	b.WriteString("#   recent   most recently run first\n")
 	b.WriteString("#   failed   what is broken first, most recent first within it\n")
 	b.WriteString("#   size     biggest group first\n")
+	b.WriteString("#\n")
+	b.WriteString("# This is where the list starts; `⇧S` cycles the same set at the keyboard.\n")
 	fmt.Fprintf(&b, "sort: %s\n", pivot.ByNatural)
 	b.WriteString("\n")
 	b.WriteString("# Where a subgroup sits among the plain tasks of the same namespace.\n")

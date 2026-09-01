@@ -26,6 +26,14 @@ const (
 	idleTick = 200 * time.Millisecond
 )
 
+// statusLife is how long a notice holds the footer before it hands the keys back.
+//
+// The status line and the hint bar are the same row, so a message that never leaves is a
+// footer you cannot read — and `grouped by verb` was still sitting there twenty minutes
+// later, hiding the only place the keys are listed. Three seconds catches it on the way
+// past and gives the row back before you go looking for a binding.
+const statusLife = 3 * time.Second
+
 func (a *App) tick() tea.Cmd {
 	d := idleTick
 	if a.AnyInFlight() {
@@ -42,7 +50,31 @@ func (a *App) tick() tea.Cmd {
 
 func (a *App) Init() tea.Cmd { return a.tick() }
 
+// Update is the loop's one door, which is what lets the status line be timed in one place:
+// whatever a message did to it, expireStatus sees the result on the way out.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := a.update(msg)
+	a.expireStatus()
+	return model, cmd
+}
+
+// expireStatus takes the footer back once a notice has had its three seconds.
+//
+// Timed from here rather than from a setter every caller has to remember: a status is a
+// plain field written in a hundred places, and noticing that the text changed is the same
+// thing as noticing it was set. Re-arming on a change means a notice that arrives while
+// another is showing gets its own three seconds rather than the rest of someone else's.
+func (a *App) expireStatus() {
+	if a.Status != a.statusShown {
+		a.statusShown, a.statusAt = a.Status, time.Now()
+		return
+	}
+	if a.Status != "" && time.Since(a.statusAt) >= statusLife {
+		a.Status, a.statusShown = "", ""
+	}
+}
+
+func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.Width, a.Height = msg.Width, msg.Height
@@ -544,6 +576,14 @@ func (a *App) handleHelpKey(k Key) bool {
 		a.HelpScroll(10)
 	case k.kind == keyPageUp:
 		a.HelpScroll(-10)
+
+	// `t` goes straight to the jump prompt instead of making you close this screen first.
+	// The line you are reading when you press it says `t jump to a task`, and a key that
+	// does nothing where it is documented reads as broken. Only where there is a list to
+	// jump through: `?` opens from every screen and the jump is the picker's.
+	case a.action(k, ScreenPicker) == keys.Jump && a.helpReturn == ScreenPicker:
+		a.ToggleHelp()
+		a.BeginJump()
 	}
 	return false
 }
@@ -649,10 +689,22 @@ func (a *App) handlePickerKey(k Key) bool {
 	case k.kind == keyEnd:
 		a.MoveCursor(len(a.Rows))
 
+	// Vim's paragraph keys, over the tree's groups: `}` past whatever is under this group
+	// to the next header, `{` back to the previous one.
+	case k.isChar('}'):
+		a.MoveGroup(1)
+	case k.isChar('{'):
+		a.MoveGroup(-1)
+
 	// The pivot. Selection, filter and the other mode's folds all survive it. On `p`, not
 	// `g`: `gg` belongs to vim.
 	case act() == keys.Pivot:
 		a.ToggleMode()
+
+	// The other half of the same question: `p` is what the tree is, `⇧S` is what sits above
+	// what inside it.
+	case act() == keys.Order:
+		a.CycleOrder()
 
 	// Space folds, enter runs — kept strictly separate. A node that is both a group and a
 	// task (`backend:migrate`) is then runnable from its own header, so its subtree never
@@ -1039,6 +1091,9 @@ func (a *App) handleRunKey(k Key) bool {
 		if name, ok := a.RunSelectedTask(); ok {
 			a.BeginArgs(name)
 		}
+
+	case act() == keys.Help:
+		a.ToggleHelp()
 
 	// Jump straight to a slot, as the bar numbers them. Last, so that rebinding an action
 	// onto a digit still wins — the keymap is the thing users can change.

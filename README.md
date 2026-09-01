@@ -231,11 +231,13 @@ In the picker:
 | key | |
 |---|---|
 | `j` `k` `↑` `↓` | move |
+| `{` `}` | previous / next group |
 | `space` `←` `→` | fold / unfold a group |
 | `o` | how much of the run under a task: hidden, a peek, all of it |
 | `⇧O` `⇥` | fold or unfold every group |
 | `⏎` | run — or every marked task, each in its own slot — and stay here |
 | `p` | toggle the pivot |
+| `⇧S` | cycle the order: name, file, recent, failed, size |
 | `a` | run with arguments |
 | `i` | arm interactive mode for the next run |
 | `/` | filter by name |
@@ -838,6 +840,11 @@ pin: ["dev", "backend:test"]
 alphabetising it throws that sequence away. It needs the locations from the JSON listing,
 which arrive a moment after the first frame — the list settles once, early, and a task whose
 location has not arrived sorts by name rather than claiming line zero.
+
+`⇧S` cycles the same list at the keyboard, starting from whatever `sort:` set, and the
+header names the order beside the pivot while it is not the default. It moves `sort:` only:
+`groups:` and `pin:` below are decisions about a project rather than about the next ten
+seconds.
 
 `recent` and `failed` read the archive, so they are answers about this project's history
 rather than about its Taskfile: a task that has never run sorts last in both, and with no

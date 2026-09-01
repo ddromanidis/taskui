@@ -473,7 +473,12 @@ func (a *App) helpFooter() line {
 	if l, ok := a.confirmBar(); ok {
 		return l
 	}
-	return line{plain(" "), styled("j k scroll   ? esc close   q quit", fg(a.Theme.Colors.Dim))}
+	// `t` only works its way back to a list, so it is only offered where there is one.
+	hints := "j k scroll   ? esc close   q quit"
+	if a.helpReturn == ScreenPicker {
+		hints = "j k scroll   t jump   ? esc close   q quit"
+	}
+	return line{plain(" "), styled(hints, fg(a.Theme.Colors.Dim))}
 }
 
 // --- history ----------------------------------------------------------------------
@@ -1080,6 +1085,13 @@ func (a *App) pickerHeader() line {
 	}
 
 	state := a.pivotNames()
+	// The order rides beside the grouping, and only when it is not the default: `⇧S` is a
+	// key you press and forget, and a list sorted by what failed looks exactly like a list
+	// that is broken unless something says why. The default says nothing, because every
+	// pivot already names the order it is read in.
+	if a.Order.By != pivot.ByNatural {
+		state = append(state, styled("   by "+a.OrderLabel(), fg(t.Colors.Mode)))
+	}
 
 	if a.Query == "" {
 		if a.InteractiveNext {

@@ -250,8 +250,13 @@ type App struct {
 
 	Root   string
 	Status string
-	Theme  theme.Theme
-	Keymap *keys.Keymap
+	// statusShown is the notice the clock below is running for, and statusAt is when it
+	// went up. Kept beside the text rather than folded into it because every one of the
+	// hundred-odd places that writes a status writes the field directly.
+	statusShown string
+	statusAt    time.Time
+	Theme       theme.Theme
+	Keymap      *keys.Keymap
 
 	Screen Screen
 	// Run is the run on screen. The live view fields below belong to this run; the others
@@ -2791,6 +2796,43 @@ func (a *App) ToggleMode() {
 	a.Status = "grouped by " + a.ModeLabel()
 }
 
+// CycleOrder advances to the next ordering, wrapping.
+//
+// The same shape as ToggleMode, and for the same reason: order and pivot are two
+// independent questions about one list — what the tree is, and what sits above what inside
+// it — so they cycle on two keys rather than one combined list of every pairing. The
+// selection survives, because "sort this by what failed and tell me where my task went" is
+// the question the key exists to answer.
+//
+// It moves `sort:` only. `groups:` and `pin:` stay where the config put them: interleaving
+// and pinning are decisions about a project, not about the next ten seconds.
+func (a *App) CycleOrder() {
+	orders := pivot.Orders()
+	at := 0
+	for i, by := range orders {
+		if by == a.Order.By {
+			at = i
+			break
+		}
+	}
+	a.Order.By = orders[(at+1)%len(orders)]
+	a.Rebuild(a.SelectedTask())
+	if a.Order.By == pivot.ByNatural {
+		a.Status = "back to each pivot's own order"
+		return
+	}
+	a.Status = "sorted by " + a.OrderLabel()
+}
+
+// OrderLabel spells the active ordering for the header and the notice. `default` is what
+// the config file calls it and says nothing on its own, so here it says what it defers to.
+func (a *App) OrderLabel() string {
+	if a.Order.By == pivot.ByNatural {
+		return "each pivot's own order"
+	}
+	return a.Order.By.String()
+}
+
 func (a *App) ToggleFold() {
 	node := a.SelectedNode()
 	if node == nil || !node.IsGroup() {
@@ -2866,6 +2908,34 @@ func (a *App) MoveCursor(delta int) {
 		return
 	}
 	a.Cursor = clamp(a.Cursor+delta, 0, len(a.PickerRows)-1)
+}
+
+// MoveGroup is `{` and `}` in the picker — the previous or next group header.
+//
+// Vim's paragraph keys, on a tree instead of on blank lines: every group counts whatever
+// its depth, because `{` and `}` land on the next boundary rather than on one of a
+// particular size. Rows inside an unfolded run are stepped over, which is most of the point
+// — the block a run prints is the thing you want past. Running out of groups goes to the
+// end of the list, as vim's do to the end of the file, so the key always moves.
+func (a *App) MoveGroup(delta int) {
+	if len(a.PickerRows) == 0 {
+		return
+	}
+	for i := a.Cursor + delta; i >= 0 && i < len(a.PickerRows); i += delta {
+		row := a.PickerRows[i]
+		if row.IsRun() {
+			continue
+		}
+		if a.Tree.Nodes[a.Rows[row.Tree].Node].IsGroup() {
+			a.Cursor = i
+			return
+		}
+	}
+	if delta > 0 {
+		a.Cursor = len(a.PickerRows) - 1
+	} else {
+		a.Cursor = 0
+	}
 }
 
 func (a *App) PushQuery(c rune) {

@@ -63,6 +63,7 @@ const (
 	ClearMarks
 	Detach
 	RerunFailed
+	Order
 )
 
 // Mods is what was held down with a key.
@@ -207,10 +208,12 @@ var defaults = []binding{
 	{ClearMarks, 'M', "clear-marks"},
 	{Detach, 'A', "detach"},
 	{RerunFailed, 'F', "rerun-failed"},
+	{Order, 'S', "sort"},
 }
 
 var pickerActions = []Action{
 	Pivot,
+	Order,
 	Args,
 	Detail,
 	Jump,
@@ -457,11 +460,15 @@ var Picker = Section{
 	Bindings: []Binding{
 		b("j k ↑ ↓", "move"),
 		b("gg G", "first / last row"),
+		b("{ }", "previous / next group, over whatever is under this one"),
 		b("^d ^u", "half a screen down / up"),
 		b("PgUp PgDn Home End", "move faster"),
 		// No footer label: the picker's footer names the pivot you would switch to, which
 		// is more use than the word "pivot" and would otherwise be printed twice.
 		b("p", "cycle the grouping: by domain, by verb, by file, and any your config added"),
+		// No footer label: the footer already carries the pivot's own list in the header's
+		// place, and a second cycling key on the same line reads as a duplicate of it.
+		b("⇧S", "cycle the order rows are read in: name, file, recent, failed, size"),
 		f("space", "fold or unfold a group", "fold"),
 		f("o", "how much of the run under a task: hidden, a peek, all of it", "output"),
 		// No footer label: with `space fold` and `o output` both on the line, the footer is

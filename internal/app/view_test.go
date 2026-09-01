@@ -49,6 +49,12 @@ func manyTasks(t *testing.T, n int) *App {
 	return a
 }
 
+// footerOf is the last row of the picker: the hint bar, or whatever notice is borrowing it.
+func footerOf(a *App) string {
+	lines := a.RenderHeadless(80, 20)
+	return lines[len(lines)-1]
+}
+
 func find(lines []string, want string) (string, bool) {
 	for _, l := range lines {
 		if strings.Contains(l, want) {
@@ -595,6 +601,67 @@ func TestTheFooterNeverEndsMidBinding(t *testing.T) {
 				t.Errorf("%d wide: %q is not a whole binding, in %q", w, piece, footer)
 			}
 		}
+	}
+}
+
+// The header names the order as well as the pivot, so a list sorted by what failed cannot
+// be mistaken for a list that has gone wrong. The default says nothing: every pivot already
+// names the order it is read in.
+func TestTheHeaderNamesTheOrderOnlyWhenItIsNotTheDefault(t *testing.T) {
+	a := viewSample(t)
+	if head := a.RenderHeadless(96, 20)[0]; strings.Contains(head, " by ") {
+		t.Errorf("the default order should be silent: %q", head)
+	}
+
+	press(a, Char('S'))
+
+	head := a.RenderHeadless(96, 20)[0]
+	if !strings.Contains(head, "by "+a.OrderLabel()) {
+		t.Errorf("the header should name the order: %q", head)
+	}
+	// Beside the pivot, not instead of it: they are two different questions.
+	if !strings.Contains(head, a.ModeLabel()) {
+		t.Errorf("the pivot went missing: %q", head)
+	}
+}
+
+// A notice borrows the footer, and the footer is the only place the keys are listed — so it
+// hands the row back after three seconds rather than sitting on it for the rest of the
+// session.
+func TestANoticeGivesTheFooterBack(t *testing.T) {
+	a := manyTasks(t, 20)
+	press(a, Char('p'))
+	if a.Status == "" {
+		t.Fatal("the pivot should have said what it switched to")
+	}
+
+	// The clock starts when the notice does, and the next frame is far too early to drop it.
+	a.Update(tickMsg{})
+	if last := footerOf(a); !strings.Contains(last, a.Status) {
+		t.Fatalf("the notice should still be up: %q", last)
+	}
+
+	a.statusAt = a.statusAt.Add(-statusLife - time.Second)
+	a.Update(tickMsg{})
+	if a.Status != "" {
+		t.Errorf("the notice outlived its three seconds: %q", a.Status)
+	}
+	if last := footerOf(a); !strings.HasSuffix(strings.TrimSpace(last), "? keys") {
+		t.Errorf("the keys should be back: %q", last)
+	}
+}
+
+// A second notice gets its own three seconds, not what is left of the first one's.
+func TestASecondNoticeRestartsTheClock(t *testing.T) {
+	a := manyTasks(t, 20)
+	press(a, Char('p'))
+	a.Update(tickMsg{})
+	a.statusAt = a.statusAt.Add(-statusLife + 200*time.Millisecond)
+
+	press(a, Char('p'))
+	a.Update(tickMsg{})
+	if a.Status == "" {
+		t.Fatal("the new notice inherited the old one's clock")
 	}
 }
 
