@@ -621,6 +621,7 @@ var Prompts = Section{
 	Bindings: []Binding{
 		b("arguments", "← → Home End Delete edit · ⏎ run · esc cancel"),
 		b("search / filter", "⏎ keep the query · esc clear · ↑ ↓ step through matches"),
+		b("find (on this screen)", "opened with t · ⏎ keeps what is left · esc clears, then esc closes"),
 		b("input", "every key goes to the task · esc stop typing"),
 		b("confirmation", "y goes ahead · anything else cancels"),
 	},

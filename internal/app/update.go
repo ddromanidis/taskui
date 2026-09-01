@@ -563,11 +563,43 @@ func (a *App) handleDetailKey(k Key) bool {
 }
 
 func (a *App) handleHelpKey(k Key) bool {
+	// The find prompt owns every key that is not a way out of it or a way to scroll what it
+	// left — `q` and `?` are bindings out there and letters in here, and typing `quit` to
+	// look up how to quit must not quit.
+	if a.HelpFinding {
+		switch {
+		case k.kind == keyEsc:
+			a.ClearHelpFind()
+			return false
+		case k.kind == keyEnter:
+			// Keep what it narrowed to and give the scroll keys back, as the picker's
+			// filter does: you search to find the line, then you read it.
+			a.HelpFinding = false
+			return false
+		case k.kind == keyBackspace:
+			a.PopHelpFind()
+			return false
+		case k.typed():
+			a.PushHelpFind(k.ch)
+			return false
+		}
+	}
+
 	switch {
 	case k.isChar('q'), k.isCtrl('c'):
 		return a.quit()
+	// `esc` drops the query first and closes the screen second, so backing out of a search
+	// does not also throw away the keymap you were reading.
+	case k.kind == keyEsc && a.HelpQuery != "":
+		a.ClearHelpFind()
 	case k.isChar('?'), k.kind == keyEsc:
 		a.ToggleHelp()
+
+	// Find a binding in the keymap itself. The same key that finds a task in the picker,
+	// because "show me the one I mean" should not change name with the screen.
+	case a.action(k, ScreenPicker) == keys.Jump:
+		a.BeginHelpFind()
+
 	case k.isChar('j'), k.kind == keyDown:
 		a.HelpScroll(1)
 	case k.isChar('k'), k.kind == keyUp:
@@ -576,14 +608,6 @@ func (a *App) handleHelpKey(k Key) bool {
 		a.HelpScroll(10)
 	case k.kind == keyPageUp:
 		a.HelpScroll(-10)
-
-	// `t` goes straight to the jump prompt instead of making you close this screen first.
-	// The line you are reading when you press it says `t jump to a task`, and a key that
-	// does nothing where it is documented reads as broken. Only where there is a list to
-	// jump through: `?` opens from every screen and the jump is the picker's.
-	case a.action(k, ScreenPicker) == keys.Jump && a.helpReturn == ScreenPicker:
-		a.ToggleHelp()
-		a.BeginJump()
 	}
 	return false
 }

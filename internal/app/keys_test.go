@@ -740,44 +740,99 @@ func TestBracesStepOverAnUnfoldedRun(t *testing.T) {
 	}
 }
 
-// `?` lists `t jump to a task`, so `t` has to work from the screen that says so — closing
-// the help and opening the prompt in one press.
-func TestTJumpsStraightFromTheHelpScreen(t *testing.T) {
+// `t` on the `?` screen searches the keymap itself: 140 bindings over eight screens is a
+// page and a half of scrolling to answer "which key copies a line".
+func TestTFindsABindingInTheHelp(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-	if a.Screen != ScreenHelp {
-		t.Fatalf("screen = %v", a.Screen)
-	}
-
 	press(a, Char('t'))
+	if !a.HelpFinding {
+		t.Fatal("the find prompt should be open")
+	}
+	if a.Screen != ScreenHelp {
+		t.Errorf("and the help should still be up: %v", a.Screen)
+	}
 
-	if a.Screen != ScreenPicker {
-		t.Errorf("the help should have closed: %v", a.Screen)
+	for _, c := range "copy" {
+		press(a, Char(c))
 	}
-	if !a.Jumping {
-		t.Error("and the jump prompt should be open")
+	if a.HelpQuery != "copy" {
+		t.Errorf("query = %q", a.HelpQuery)
 	}
-	// And it is a real prompt: the next key types at it rather than scrolling anything.
-	press(a, Char('l'))
-	if a.JumpQuery != "l" {
-		t.Errorf("jump query = %q", a.JumpQuery)
+	page := strings.Join(a.RenderHeadless(96, 30), "\n")
+	if !strings.Contains(page, "copy the line under the cursor") {
+		t.Errorf("the binding it was looking for is not there:\n%s", page)
+	}
+	// And it is a search, not a scroll: what did not match is gone.
+	if strings.Contains(page, "quit — always asks first") {
+		t.Errorf("the rest of the keymap should have been filtered out:\n%s", page)
 	}
 }
 
-// From anywhere else `?` is over a screen with nothing to jump through, and `t` stays a key
-// that screen does not have.
-func TestTFromHelpOverARunDoesNothing(t *testing.T) {
-	a := appWithLiveRun(t, "backend:lint")
-	a.Screen = ScreenRun
+// While the prompt is open every key is text — including the ones that are bindings out
+// there. Typing `quit` to look up how to quit must not quit.
+func TestTheHelpFindPromptSwallowsItsOwnBindings(t *testing.T) {
+	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-
 	press(a, Char('t'))
 
-	if a.Screen != ScreenHelp {
-		t.Errorf("it should still be on the help screen: %v", a.Screen)
+	for _, c := range "quit" {
+		if press(a, Char(c)); a.Screen != ScreenHelp {
+			t.Fatalf("`%c` escaped the prompt: screen = %v", c, a.Screen)
+		}
 	}
-	if a.Jumping {
-		t.Error("nothing to jump through from a run")
+	if a.HelpQuery != "quit" {
+		t.Errorf("query = %q", a.HelpQuery)
+	}
+	if a.Confirm != nil {
+		t.Error("and it must not have asked to quit")
+	}
+}
+
+// `⏎` keeps what the query narrowed the table to and gives the scroll keys back, as the
+// picker's filter does. `esc` then drops the query rather than the screen: backing out of a
+// search must not throw away the keymap you were reading.
+func TestEnterKeepsTheFindAndEscDropsItFirst(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('?'))
+	press(a, Char('t'))
+	press(a, Char('y'))
+
+	press(a, Enter())
+	if a.HelpFinding || a.HelpQuery != "y" {
+		t.Errorf("finding = %v query = %q", a.HelpFinding, a.HelpQuery)
+	}
+	press(a, Char('j'))
+	if a.HelpOffset != 1 {
+		t.Errorf("the scroll keys should be back: offset = %d", a.HelpOffset)
+	}
+
+	press(a, Esc())
+	if a.Screen != ScreenHelp {
+		t.Fatalf("the first `esc` should only clear the query: %v", a.Screen)
+	}
+	if a.HelpQuery != "" {
+		t.Errorf("query = %q", a.HelpQuery)
+	}
+	press(a, Esc())
+	if a.Screen != ScreenPicker {
+		t.Errorf("the second should close the screen: %v", a.Screen)
+	}
+}
+
+// A query does not outlive the screen: `?` is somewhere you arrive to look one thing up.
+func TestClosingTheHelpForgetsTheQuery(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('?'))
+	press(a, Char('t'))
+	press(a, Char('y'))
+	press(a, Enter())
+
+	press(a, Char('?'))
+	press(a, Char('?'))
+
+	if a.HelpQuery != "" || a.HelpFinding {
+		t.Errorf("query = %q finding = %v", a.HelpQuery, a.HelpFinding)
 	}
 }
 

@@ -344,9 +344,14 @@ type App struct {
 	EscStreak int
 	// helpReturn is where `?` was pressed, so `esc` puts you back rather than somewhere
 	// arbitrary.
-	helpReturn   Screen
-	inHelp       bool
-	HelpOffset   int
+	helpReturn Screen
+	inHelp     bool
+	HelpOffset int
+	// HelpFinding is the find prompt on the `?` screen taking the keys; HelpQuery is what
+	// it narrows the keymap to, and outlives the prompt so `⏎` can leave you reading the
+	// handful of bindings you were looking for.
+	HelpFinding  bool
+	HelpQuery    string
 	DetailOf     string
 	Detail       graph.Detail
 	DetailOffset int
@@ -1573,6 +1578,7 @@ func (a *App) ToggleHelp() {
 	if a.inHelp {
 		a.Screen = a.helpReturn
 		a.inHelp = false
+		a.ClearHelpFind()
 		return
 	}
 	a.helpReturn = a.Screen
@@ -1580,6 +1586,40 @@ func (a *App) ToggleHelp() {
 	a.Screen = ScreenHelp
 	a.HelpOffset = 0
 	a.Status = ""
+}
+
+// BeginHelpFind opens the find prompt on the `?` screen.
+//
+// The keymap is 140 bindings over eight screens, which is a page and a half of scrolling to
+// answer "which key copies a line". `t` is the same key that finds a task in the picker, so
+// the thing you press to look something up does not change with the screen you are on.
+func (a *App) BeginHelpFind() {
+	a.HelpFinding = true
+	a.HelpOffset = 0
+}
+
+// PushHelpFind and PopHelpFind narrow as you type. Back to the top on every keystroke: the
+// list under the scroll position has changed, and the answer is usually the first line of
+// what is left.
+func (a *App) PushHelpFind(c rune) {
+	a.HelpQuery += string(c)
+	a.HelpOffset = 0
+}
+
+func (a *App) PopHelpFind() {
+	runes := []rune(a.HelpQuery)
+	if len(runes) > 0 {
+		a.HelpQuery = string(runes[:len(runes)-1])
+	}
+	a.HelpOffset = 0
+}
+
+// ClearHelpFind drops the query and the prompt, which is what `esc` means here — the whole
+// keymap back, rather than the screen closed.
+func (a *App) ClearHelpFind() {
+	a.HelpFinding = false
+	a.HelpQuery = ""
+	a.HelpOffset = 0
 }
 
 func (a *App) HelpScroll(delta int) {

@@ -432,6 +432,33 @@ func (a *App) helpHeader() line {
 	})
 }
 
+// helpMatch says whether a binding answers the find query.
+//
+// Plain case-insensitive substring, over the section, the keys and the description
+// together, rather than the fuzzy match the picker uses on task names. A name is a short
+// token where a subsequence is a good guess at what you meant; these are sentences, and
+// fuzzy over prose matches almost everything.
+func helpMatch(section *keys.Section, b keys.Binding, query string) bool {
+	if query == "" {
+		return true
+	}
+	hay := strings.ToLower(section.Title + " " + b.Keys + " " + b.What)
+	return strings.Contains(hay, strings.ToLower(query))
+}
+
+// helpMatches is how many bindings the query leaves, for the prompt's counter.
+func (a *App) helpMatches() int {
+	n := 0
+	for _, section := range keys.Sections {
+		for _, b := range section.Bindings {
+			if helpMatch(section, b, a.HelpQuery) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func (a *App) drawHelp(width, height int) []string {
 	t := a.Theme
 	// Widest key column across every section, so the descriptions line up as one table
@@ -440,6 +467,24 @@ func (a *App) drawHelp(width, height int) []string {
 
 	var lines []line
 	for _, section := range keys.Sections {
+		// A section with nothing left in it is dropped whole. Its title is what says where
+		// a binding lives, so an empty one would answer the question with a heading and
+		// nothing under it.
+		var body []line
+		for _, binding := range section.Bindings {
+			if !helpMatch(section, binding, a.HelpQuery) {
+				continue
+			}
+			body = append(body, line{
+				plain("  "),
+				styled(padRight(binding.Keys, pad), fgBold(t.Colors.Mode)),
+				plain("  "),
+				styled(binding.What, fg(t.Colors.Text)),
+			})
+		}
+		if len(body) == 0 {
+			continue
+		}
 		if len(lines) > 0 {
 			lines = append(lines, line{})
 		}
@@ -447,14 +492,10 @@ func (a *App) drawHelp(width, height int) []string {
 			styled(section.Title, fgBold(t.Colors.Accent)),
 			styled("  — "+section.Note, fg(t.Colors.Dim)),
 		})
-		for _, binding := range section.Bindings {
-			lines = append(lines, line{
-				plain("  "),
-				styled(padRight(binding.Keys, pad), fgBold(t.Colors.Mode)),
-				plain("  "),
-				styled(binding.What, fg(t.Colors.Text)),
-			})
-		}
+		lines = append(lines, body...)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, line{styled("  no binding says `"+a.HelpQuery+"`", fg(t.Colors.Dim))})
 	}
 
 	return a.scrollPane(lines, width, height, &a.HelpOffset)
@@ -473,12 +514,28 @@ func (a *App) helpFooter() line {
 	if l, ok := a.confirmBar(); ok {
 		return l
 	}
-	// `t` only works its way back to a list, so it is only offered where there is one.
-	hints := "j k scroll   ? esc close   q quit"
-	if a.helpReturn == ScreenPicker {
-		hints = "j k scroll   t jump   ? esc close   q quit"
+	t := a.Theme
+	if a.HelpFinding || a.HelpQuery != "" {
+		l := line{
+			plain(" "),
+			styled("find: ", fg(t.Colors.Accent)),
+			plain(a.HelpQuery),
+		}
+		if a.HelpFinding {
+			l = append(l, styled(t.Glyphs.Cursor, fg(t.Colors.Accent)))
+		}
+		if a.HelpQuery != "" {
+			l = append(l, styled(fmt.Sprintf("   %d keys", a.helpMatches()), fg(t.Colors.Dim)))
+		}
+		// Once `⏎` has been pressed the prompt is gone and the scroll keys are back, so the
+		// hints are the ones that still do something.
+		hints := "   ⏎ keep   esc clear"
+		if !a.HelpFinding {
+			hints = "   j k scroll   t find   esc clear"
+		}
+		return append(l, styled(hints, fg(t.Colors.Dim)))
 	}
-	return line{plain(" "), styled(hints, fg(a.Theme.Colors.Dim))}
+	return line{plain(" "), styled("j k scroll   t find   ? esc close   q quit", fg(t.Colors.Dim))}
 }
 
 // --- history ----------------------------------------------------------------------

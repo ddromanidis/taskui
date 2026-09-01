@@ -217,8 +217,9 @@ stale. `taskui examples <topic>` prints just one.
 `man taskui` covers the options, the commands, the keys and the files — its reference
 sections are generated from the same flag set and keymap table the program uses, and a test
 fails if they drift. `?` from any screen lists every
-binding, grouped by context. The footer shows a subset of
-the same table — one source of truth, so the two cannot disagree.
+binding, grouped by context, and `t` there searches that list rather than scrolling it —
+eight sections is a page and a half to get to "which key copies a line". The footer shows a
+subset of the same table — one source of truth, so the two cannot disagree.
 
 The picker is one column at any width. A list can be columnised; a tree cannot — the
 columns fill in sequence, so a group header ends in one while its own children continue in
