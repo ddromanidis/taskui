@@ -386,6 +386,42 @@ down, the list is the answer.
 
 ---
 
+## Checking that an aggregate covers what it says
+
+`task test` says "Run all automated tests". Whether that is true is a fact about the graph,
+not about the sentence:
+
+```
+$ taskui --lint
+test — Run all automated tests
+  ✗ web:test                     declared, never reached
+
+1 gap, 0 notes
+```
+
+`web:test` exists and nothing reaches it, so those tests run nowhere — in the local gate or
+in CI — and the description reads as correct until you go looking.
+
+Most of what a first run reports is deliberate. Write those down in `.taskui-cover`, same
+shape as `.taskui-danger`, with the reason beside each:
+
+```
+# the deploy pipeline runs from CI with production credentials
+deploy:*
+# the site has its own workflow
+site:build
+```
+
+A `·` rather than a `✗` means covered by a different aggregate — `api:check` reached by
+`lint` and not by `check`, which is deliberate where `check` promises not to codegen. Those
+are printed and not counted. Gaps exit `2`, so it composes as a gate:
+
+```
+taskui --lint || echo "an aggregate is claiming more than it runs"
+```
+
+---
+
 ## Making it readable in your terminal
 
 If the defaults wash out — embedded terminals often render the dim half of the palette

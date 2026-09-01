@@ -58,6 +58,7 @@ type options struct {
 	timeline   string
 	diffTask   string
 	flaky      bool
+	lint       bool
 	quickfix   bool
 	asJSON     bool
 	events     string
@@ -153,6 +154,8 @@ func init() {
 	f.StringVar(&opts.events, "events", "",
 		"report what the runs are doing to this unix socket or file, as newline-delimited JSON")
 	f.BoolVar(&opts.flaky, "flaky", false, "print tasks that both passed and failed at one commit")
+	f.BoolVar(&opts.lint, "lint", false,
+		"print the namespaces an aggregate task claims and does not reach, and exit")
 	f.StringVar(&opts.searchTask, "task", "", "narrow --search to one task's output")
 	f.StringVar(&opts.since, "since", "", "narrow --search to runs newer than this: 90m, 2d, 3w")
 	f.StringVar(
@@ -211,6 +214,45 @@ func archiveCommand(cmd *cobra.Command, root string) (bool, error) {
 		return true, printQuickfix(out, root, opts.searchTask)
 	}
 	return false, nil
+}
+
+// projectCommand runs whichever of the Taskfile-reading print-and-exit flags was given, and
+// reports whether one was. The counterpart of archiveCommand, grouped for the same reason:
+// they share a shape — read the project, print, exit — and rootRun is a dispatcher rather
+// than a list of every command.
+func projectCommand(cmd *cobra.Command, root string, tasks []task.Task, config theme.Config) (bool, error) {
+	out := cmd.OutOrStdout()
+	switch {
+	case opts.list && opts.asJSON:
+		return true, printTaskList(out, root, tasks)
+	case opts.list:
+		printTaskListText(out, tasks)
+		return true, nil
+	case opts.dump != "":
+		return true, dumpPivot(opts.dump, app.New(tasks, root).WithConfig(config))
+	case opts.graph != "":
+		printGraph(root, opts.graph)
+		return true, nil
+	// Like --graph, this reads the project rather than the archive. Gaps exit ExitFound
+	// rather than ExitFailed: `task precommit` fails on either, and a script that wants to
+	// tell "this Taskfile has a hole in it" from "there is no Taskfile here" can.
+	case opts.lint:
+		if printLint(out, root, tasks) > 0 {
+			return true, exitWith(ExitFound)
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func printTaskListText(out io.Writer, tasks []task.Task) {
+	for _, t := range tasks {
+		if _, err := fmt.Fprintf(out, "%s\t%s\n", t.Name, t.Desc); err != nil {
+			// Piping into `head` closes the pipe on us, which is not a failure.
+			return
+		}
+	}
+	fmt.Fprintf(out, "-- %d tasks\n", len(tasks))
 }
 
 // jsonFormOK rejects the two ways `--json` can be asked for and mean nothing.
@@ -299,29 +341,8 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if opts.list {
-		out := cmd.OutOrStdout()
-		if opts.asJSON {
-			return printTaskList(out, root, tasks)
-		}
-		for _, t := range tasks {
-			// Ignore write errors: piping into `head` closes the pipe on us, and that is
-			// not a failure of ours.
-			if _, err := fmt.Fprintf(out, "%s\t%s\n", t.Name, t.Desc); err != nil {
-				// Piping into `head` closes the pipe on us, which is not a failure.
-				return nil
-			}
-		}
-		fmt.Fprintf(out, "-- %d tasks\n", len(tasks))
-		return nil
-	}
-
-	if opts.dump != "" {
-		return dumpPivot(opts.dump, app.New(tasks, root).WithConfig(config))
-	}
-
-	if opts.graph != "" {
-		return printGraph(root, opts.graph)
+	if handled, err := projectCommand(cmd, root, tasks, config); handled {
+		return err
 	}
 
 	if opts.runTask != "" {
@@ -504,7 +525,7 @@ func dumpPivot(mode string, a *app.App) error {
 	return nil
 }
 
-func printGraph(root, rootTask string) error {
+func printGraph(root, rootTask string) {
 	g := graph.Resolve(root, rootTask)
 	// Print the tree, marking revisits rather than expanding them twice.
 	seen := map[string]bool{}
@@ -523,7 +544,7 @@ func printGraph(root, rootTask string) error {
 			mark = "  (already shown)"
 		}
 		if _, err := fmt.Printf("%s%s%s\n", strings.Repeat("  ", top.depth), top.name, mark); err != nil {
-			return nil //nolint:nilerr // piping into `head` closes the pipe on us
+			return // piping into `head` closes the pipe on us
 		}
 		if !repeat {
 			children := g.Children(top.name)
@@ -532,7 +553,6 @@ func printGraph(root, rootTask string) error {
 			}
 		}
 	}
-	return nil
 }
 
 // printTimeline is `--timeline`: one task's stored runs, newest first.

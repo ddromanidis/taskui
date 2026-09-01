@@ -196,6 +196,7 @@ taskui --search FAIL --task backend:test --since 2d
 taskui --timeline test        # how one task has gone, run after run
 taskui --diff test            # what changed since it last passed
 taskui --quickfix             # the last run's failures as file:line:col: message
+taskui --lint                 # aggregates that cover less than their name claims
 taskui --list --json          # the same listings, for a program rather than a person
 taskui --run ci --json        # the run as newline-delimited events, as it happens
 taskui --events /tmp/sock     # …the same events from inside the TUI, for a host
@@ -480,6 +481,60 @@ It exits non-zero when it finds any, so it composes: `taskui --flaky || echo "lo
 A task's timeline says so too, in the header — `flaky at d1f091a` — which is where you are
 already standing when you need to know whether a failure means anything. Runs from a dirty
 tree never count: two runs of uncommitted work are not two runs of the same code.
+
+### Aggregates that cover less than they claim
+
+`task test` says "Run all automated tests". Whether that is true depends on which namespaces
+have a `test` and which of them the execution graph reaches, and those are two facts in
+different files with a `desc:` string between them claiming they agree. Nothing checks the
+claim: go-task runs what it is told, yamllint reads syntax, and a description is prose.
+
+`--lint` checks it, because taskui is holding both halves already:
+
+```
+$ taskui --lint
+test — Run all automated tests
+  ✗ web:test                     declared, never reached
+
+check — Type-check everything (fast feedback; no codegen)
+  · api:check, api:control:check  covered by lint — not by check
+
+1 gap, 1 note
+```
+
+The first is the one worth having. `web:test` exists, root `test` claims to run all the
+tests, and the graph never gets there — so those tests run nowhere, which is a green tick
+over untested code and reads as correct until you go looking.
+
+Reachability rather than names, which is what makes it right: an aggregate that reaches a
+namespace through something else still covers it. `lint` never calls `api:lint` — it calls
+`api:check`, which reaches `api:tenant:lint` two levels down — and a check that matched names
+would call that a gap and be wrong. The question is asked per namespace and not per task for
+the same reason: `build` calling `app:dist` rather than `app:build` is a deliberate choice
+about which artifact a deploy consumes, not a hole, and the namespace got its chance to run.
+
+A `·` is the softer finding: covered, just not by the aggregate sharing its verb. `api:check`
+sits in `lint` and not in `check` because `check` promises not to codegen — deliberate, worth
+saying, not worth failing over. Notes do not count towards the exit code.
+
+`✗` does. It exits `2`, the code `--flaky` already uses for "found what it was looking for",
+so a script can tell a hole in the Taskfile from no Taskfile at all, and `precommit` fails on
+either.
+
+Most of what a first run reports is correct as written — a deploy that must not fire from a
+local gate, a docs build, a binary for another platform — so `.taskui-cover` in the project
+root silences those, one glob per line, `#` for the reason:
+
+```
+# the deploy pipeline runs from CI with production credentials
+deploy:*
+# the site has its own workflow
+site:build
+```
+
+Same shape as `.taskui-danger`, and a repository without one loses nothing. A check whose
+findings are mostly deliberate is a check people stop reading, which is the failure mode
+worth designing against.
 
 ### Running several at once
 

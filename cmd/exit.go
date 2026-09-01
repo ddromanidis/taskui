@@ -13,17 +13,17 @@ import (
 // and what the program did not do — a failing pipeline came back 0, and a CI step calling it
 // went green. There is no worse shape for a bug than that.
 //
-// `--flaky` gets a code of its own rather than sharing the failure one. Sharing it means a
-// script cannot tell "this task is flaky" from "there is no Taskfile here", which is the
-// distinction the exit code exists to draw. `diff` and `grep` both separate "found something"
-// from "went wrong" for the same reason.
+// `--flaky` and `--lint` get a code of their own rather than sharing the failure one. Sharing
+// it means a script cannot tell "this task is flaky" from "there is no Taskfile here", which
+// is the distinction the exit code exists to draw. `diff` and `grep` both separate "found
+// something" from "went wrong" for the same reason.
 const (
 	// ExitOK is nothing wrong.
 	ExitOK = 0
 	// ExitFailed is taskui could not do what was asked: a bad flag, no Taskfile, no go-task,
 	// an unreadable config.
 	ExitFailed = 1
-	// ExitFound is the check found what it was looking for. `--flaky` and nothing else.
+	// ExitFound is the check found what it was looking for: `--flaky` and `--lint`.
 	ExitFound = 2
 )
 
