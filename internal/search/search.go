@@ -158,7 +158,10 @@ func InStoreScoped(base string, q *Query, maxPerRun int, scope Scope) ([]RunHits
 	dropped := 0
 
 	for _, manifest := range store.List(base) {
-		if !scope.keeps(manifest) {
+		// Remembered but pruned: the ledger keeps a run long after its text is gone, and
+		// there is nothing here to grep. Skipping early saves opening files that are not
+		// there, once per task of every evicted run.
+		if !scope.keeps(manifest) || !store.HasOutput(base, manifest.ID) {
 			continue
 		}
 		dir := store.RunDir(base, manifest.ID)

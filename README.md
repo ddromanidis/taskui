@@ -45,7 +45,9 @@ than orphaning it.
 
 **The archive** keeps finished runs on disk as plain text — a directory per run, a
 `manifest.json`, and a `.txt` and `.ansi` file per task. `taskui --search 'FAIL'` greps all
-of it from anywhere.
+of it from anywhere. Beside those sits `history.ndjson`, one line per run, which remembers
+how a run went long after its output has been dropped — so a timeline goes back thousands of
+runs per project while the text stays capped at the last fifty.
 
 **A timeline** is one task's own history: `⇧H` on any task lists every stored run of it,
 newest first, with a duration bar and a `✓✓✓✗✗` trend across the top. `h` answers "what has
@@ -481,6 +483,26 @@ It exits non-zero when it finds any, so it composes: `taskui --flaky || echo "lo
 A task's timeline says so too, in the header — `flaky at d1f091a` — which is where you are
 already standing when you need to know whether a failure means anything. Runs from a dirty
 tree never count: two runs of uncommitted work are not two runs of the same code.
+
+### What the archive remembers, and for how long
+
+Two caps, because two different things are being kept.
+
+The **output** of a run is unbounded — kilobytes for a `task fmt`, megabytes for a `task all`
+carrying build logs — so the last fifty runs keep their text and older ones are deleted. The
+**record** of a run is the manifest without any of that: 461 bytes at the median, so
+`history.ndjson` holds the last two thousand per project and costs a megabyte to do it.
+
+Capping them together was the bug. The fifty counted every project at once, so an afternoon
+in one repository deleted another's history, and with it the three things worth keeping runs
+for: a timeline had one point to draw, `--flaky` needs one commit to appear twice and never
+saw it, and the `✓`/`✗` column forgot tasks you ran yesterday. Now only a diff is bounded by
+the output cap, because a diff is the only one that needs the lines.
+
+What you notice: `⇧H` and `--flaky` go back much further, and `⇧D` on a run old enough to
+have been dropped says the output is no longer stored rather than diffing against nothing.
+The ledger is written the first time a run is saved after upgrading, absorbing whatever
+directories are still there — no migration step, and nothing to delete.
 
 ### Aggregates that cover less than they claim
 

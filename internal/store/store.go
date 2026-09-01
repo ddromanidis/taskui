@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,9 +25,32 @@ import (
 	"github.com/ddromanidis/taskui/internal/run"
 )
 
-// KeepRuns is how many runs to keep. A full `task all` on a large repo is a lot of build
-// output and it accumulates fast.
+// KeepRuns is how many runs' *output* to keep. A full `task all` on a large repo is a lot of
+// build output and it accumulates fast.
 const KeepRuns = 50
+
+// KeepHistory is how many runs to remember per project, which is a different number because
+// it buys a different thing.
+//
+// Output is unbounded — kilobytes for a `task fmt`, megabytes for a `task all` carrying build
+// logs — so it has to be capped tightly, and KeepRuns caps it across every project at once.
+// A ledger entry is the manifest without any of that: 461 bytes at the median and 1.7KB at
+// the worst, so ten thousand of them is under 5MB.
+//
+// Capping the two together was the mistake. A busy afternoon in one repository would evict
+// another's history entirely, and with it the three things the archive is kept for: a
+// timeline has one point to draw, `--flaky` needs one commit to appear twice, and neither
+// survives an eviction that counts every project's runs against the same fifty. Only a diff
+// genuinely needs the text, so only a diff stays bounded by KeepRuns.
+const KeepHistory = 2000
+
+// compactAt is how many lines the ledger reaches before it is rewritten.
+//
+// Rewriting on every save would be a read-modify-write of the whole file per run, which is
+// both the slow way and the racy way. Appending is neither: one line per run, opened
+// O_APPEND, and a write below PIPE_BUF is atomic — several taskui processes (six slots, more
+// than one repository, an agent per worktree) can append at once without a lock.
+const compactAt = 10000
 
 type TaskEntry struct {
 	Name   string `json:"name"`
@@ -105,6 +129,112 @@ func StateDir() string {
 
 func runsDir(base string) string { return filepath.Join(base, "runs") }
 
+// historyPath is the ledger: one manifest per line, newest last.
+//
+// Beside `runs/` rather than in `~/.config`, because it is written by the program and not by
+// you — deleting the state directory has always been how you remove everything taskui
+// accumulated, and a second home for half of it would quietly stop being true.
+func historyPath(base string) string { return filepath.Join(base, "history.ndjson") }
+
+// appendHistory adds one run to the ledger.
+//
+// Errors are returned but a caller is expected to ignore them: the run directory is already
+// written at this point, and losing the ledger line costs a row in a timeline. Failing the
+// save over it would cost the output as well.
+func appendHistory(base string, m Manifest) error {
+	blob, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(historyPath(base), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(blob, '\n'))
+	return err
+}
+
+// readHistory parses the ledger, oldest first.
+//
+// A line that will not parse is skipped rather than fatal. The file is append-only from
+// several processes, so a torn last line is a thing that can happen; one unreadable run is
+// not a reason to lose the other two thousand.
+func readHistory(base string) []Manifest {
+	blob, err := os.ReadFile(historyPath(base))
+	if err != nil {
+		return nil
+	}
+	var out []Manifest
+	for line := range strings.SplitSeq(string(blob), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m Manifest
+		if json.Unmarshal([]byte(line), &m) != nil {
+			continue
+		}
+		// Written by something newer than this build. Reading it would be guessing.
+		if m.Version > ManifestVersion {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// compactHistory rewrites the ledger keeping the newest KeepHistory runs of each project, and
+// does nothing until the file is long enough to be worth it.
+//
+// The rewrite is the one moment the append-only story does not hold: a run finishing inside
+// the rename loses its line. That is one row in one timeline, once every few thousand runs,
+// against a lock on every write for the rest of them.
+func compactHistory(base string) error {
+	all := readHistory(base)
+	if len(all) <= compactAt {
+		return nil
+	}
+
+	// Newest first per project, so the tail of each is what gets dropped.
+	sortNewestFirst(all)
+	kept := map[string]int{}
+	keep := make([]Manifest, 0, len(all))
+	for _, m := range all {
+		if kept[m.Dir] >= KeepHistory {
+			continue
+		}
+		kept[m.Dir]++
+		keep = append(keep, m)
+	}
+
+	var b strings.Builder
+	for _, m := range slices.Backward(keep) {
+		blob, err := json.Marshal(m)
+		if err != nil {
+			continue
+		}
+		b.Write(blob)
+		b.WriteByte('\n')
+	}
+
+	tmp := historyPath(base) + ".tmp"
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, historyPath(base))
+}
+
+// sortNewestFirst is the order every reader wants: most recent run first, ties broken by id
+// so two runs that started in the same second still order the same way twice.
+func sortNewestFirst(m []Manifest) {
+	sort.SliceStable(m, func(i, j int) bool {
+		if m[i].StartedUnix != m[j].StartedUnix {
+			return m[i].StartedUnix > m[j].StartedUnix
+		}
+		return m[i].ID > m[j].ID
+	})
+}
+
 // safeName exists because task names contain colons and can contain slashes; neither
 // belongs in a filename.
 func safeName(task string) string {
@@ -130,6 +260,10 @@ func lockDown(path string, dir bool) error {
 
 // Save writes a finished run into base and returns the directory it landed in.
 func Save(base, projectDir string, r *run.Run) (string, error) {
+	// Before this run's own directory exists, or it would be absorbed here and appended
+	// again below.
+	backfillHistory(base)
+
 	started := time.Now().Unix()
 	if r.HasDuration {
 		started -= int64(r.Duration.Seconds())
@@ -219,10 +353,40 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 		return "", err
 	}
 
+	// Best-effort: the run is already safely on disk, and failing to remember it is not a
+	// reason to report the save as failed. Before the prune, or the prune would delete
+	// output whose only record is the directory it is about to remove.
+	_ = appendHistory(base, manifest)
+	_ = compactHistory(base)
+
 	if _, err := Prune(base, KeepRuns); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// backfillHistory writes any run directory the ledger has not heard of into it.
+//
+// This is the migration and it needs no flag day: the first save after an upgrade absorbs
+// whatever the fifty surviving directories still hold, and from then on the ledger is ahead
+// of them. It also picks up anything an older build wrote in the meantime, so running two
+// versions of taskui alternately does not lose runs.
+func backfillHistory(base string) {
+	known := map[string]bool{}
+	for _, m := range readHistory(base) {
+		known[m.ID] = true
+	}
+	missing := make([]Manifest, 0)
+	for _, m := range scanRuns(base) {
+		if !known[m.ID] {
+			missing = append(missing, m)
+		}
+	}
+	sortNewestFirst(missing)
+	// Oldest first, so the file stays in the order it would have been written in.
+	for _, m := range slices.Backward(missing) {
+		_ = appendHistory(base, m)
+	}
 }
 
 // uniqueID appends a counter until the id names a directory that does not exist yet.
@@ -283,8 +447,30 @@ func exitOf(r *run.Run) int {
 	return -1
 }
 
-// List returns every stored run, newest first.
+// List returns every run taskui remembers, newest first — which is more than it still holds
+// the output of.
+//
+// Both sources, merged on id. The ledger is the long memory and outlives KeepRuns; the
+// directories are what an older build wrote and what the current one is still holding text
+// for, and a run present in only one of them is a real run either way. Nothing here writes:
+// a directory the ledger has not heard of is absorbed by the next Save.
 func List(base string) []Manifest {
+	out := readHistory(base)
+	seen := make(map[string]bool, len(out))
+	for _, m := range out {
+		seen[m.ID] = true
+	}
+	for _, m := range scanRuns(base) {
+		if !seen[m.ID] {
+			out = append(out, m)
+		}
+	}
+	sortNewestFirst(out)
+	return out
+}
+
+// scanRuns reads the manifest out of every run directory.
+func scanRuns(base string) []Manifest {
 	entries, err := os.ReadDir(runsDir(base))
 	if err != nil {
 		return nil
@@ -305,13 +491,16 @@ func List(base string) []Manifest {
 		}
 		out = append(out, m)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].StartedUnix != out[j].StartedUnix {
-			return out[i].StartedUnix > out[j].StartedUnix
-		}
-		return out[i].ID > out[j].ID
-	})
 	return out
+}
+
+// HasOutput reports whether a remembered run still has its text on disk.
+//
+// A ledger entry outlives its directory by design, so everything that wants to read what a
+// run printed — the diff, the quickfix list, reopening it — has to ask first rather than
+// discover it as an empty file.
+func HasOutput(base, id string) bool {
+	return exists(filepath.Join(RunDir(base, id), "manifest.json"))
 }
 
 func RunDir(base, id string) string { return filepath.Join(runsDir(base), id) }
@@ -322,6 +511,13 @@ func RunDir(base, id string) string { return filepath.Join(runsDir(base), id) }
 // the stripped half is what search matches on, the escaped half is what renders. They are
 // written a line at a time from the same buffer, so they stay in step.
 func Load(base string, manifest Manifest) (*run.Run, error) {
+	// The ledger remembers runs whose output has been pruned. Rebuilding one of those gives a
+	// run with every task empty, which reads as "it printed nothing" rather than as "that is
+	// no longer here" — so say which it is.
+	if !HasOutput(base, manifest.ID) {
+		return nil, fmt.Errorf("the output of %s is no longer stored (kept: the last %d runs)",
+			manifest.ID, KeepRuns)
+	}
 	dir := RunDir(base, manifest.ID)
 	tasks := map[string]*run.TaskRun{}
 	var order []string
@@ -473,9 +669,12 @@ func Timeline(base, project, task string) []Point {
 //
 // `skip` is a run id to ignore, so a diff of a stored run against the archive does not find
 // itself.
+// Runs whose output has been pruned are passed over rather than returned: a timeline shows
+// them because a verdict and a duration are all it draws, but a diff needs the text, and
+// comparing against a run whose lines are gone reports every line as deleted.
 func LastGreen(base, project, task, skip string) (Point, bool) {
 	for _, p := range Timeline(base, project, task) {
-		if p.Ok() && p.RunID != skip {
+		if p.Ok() && p.RunID != skip && HasOutput(base, p.RunID) {
 			return p, true
 		}
 	}
@@ -487,7 +686,7 @@ func LastGreen(base, project, task, skip string) (Point, bool) {
 // question.
 func Previous(base, project, task, skip string) (Point, bool) {
 	for _, p := range Timeline(base, project, task) {
-		if p.RunID != skip {
+		if p.RunID != skip && HasOutput(base, p.RunID) {
 			return p, true
 		}
 	}

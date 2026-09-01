@@ -112,8 +112,28 @@ func TestPruningKeepsTheNewestRuns(t *testing.T) {
 	if _, err := Prune(base, 2); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(List(base)); got != 2 {
-		t.Errorf("after pruning: %d", got)
+
+	// Pruning takes the output, not the memory of it: the ledger still names all five, and
+	// two of them still have text to read. That split is the point — a timeline draws
+	// verdicts and durations, and only a diff needs the lines.
+	all := List(base)
+	if len(all) != 5 {
+		t.Errorf("after pruning the ledger should still name every run, got %d", len(all))
+	}
+	withOutput := 0
+	for _, m := range all {
+		if HasOutput(base, m.ID) {
+			withOutput++
+		}
+	}
+	if withOutput != 2 {
+		t.Errorf("output kept for %d runs, want 2", withOutput)
+	}
+	// And the newest two are the ones that kept it.
+	for _, m := range all[:2] {
+		if !HasOutput(base, m.ID) {
+			t.Errorf("%s is one of the newest two and lost its output", m.ID)
+		}
 	}
 }
 
@@ -506,6 +526,17 @@ func atCommit(t *testing.T, base, project, commit string, ok bool, ago int) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rewriteStored(t, base, dir, func(m *Manifest) { m.Commit = commit })
+}
+
+// rewriteStored edits a saved run's manifest in both places it lives: the copy in the run
+// directory, and the line in the ledger.
+//
+// A manifest is written once from one value and never edited afterwards, so nothing in the
+// program has to keep the two in step — only a test reaching in behind Save, which is what
+// this is for. Editing one alone leaves a run whose commit depends on which reader you ask.
+func rewriteStored(t *testing.T, base, dir string, mutate func(*Manifest)) {
+	t.Helper()
 	path := filepath.Join(dir, "manifest.json")
 	blob, err := os.ReadFile(path)
 	if err != nil {
@@ -515,12 +546,29 @@ func atCommit(t *testing.T, base, project, commit string, ok bool, ago int) {
 	if err := json.Unmarshal(blob, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.Commit = commit
+	mutate(&m)
+
 	out, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var rebuilt strings.Builder
+	for _, entry := range readHistory(base) {
+		if entry.ID == m.ID {
+			entry = m
+		}
+		line, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rebuilt.Write(line)
+		rebuilt.WriteByte('\n')
+	}
+	if err := os.WriteFile(historyPath(base), []byte(rebuilt.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -650,17 +698,8 @@ func TestAManifestFromTheFutureIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "manifest.json")
-	blob, _ := os.ReadFile(path)
-	var m Manifest
-	if err := json.Unmarshal(blob, &m); err != nil {
-		t.Fatal(err)
-	}
-	m.Version = ManifestVersion + 1
-	out, _ := json.MarshalIndent(m, "", "  ")
-	if err := os.WriteFile(path, out, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Both copies, because a newer taskui would have written both.
+	rewriteStored(t, base, dir, func(m *Manifest) { m.Version = ManifestVersion + 1 })
 
 	if got := len(List(base)); got != 0 {
 		t.Errorf("listed %d runs from a format this build does not know", got)
