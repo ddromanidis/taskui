@@ -434,16 +434,21 @@ func (a *App) helpHeader() line {
 
 // helpMatch says whether a binding answers the find query.
 //
-// Plain case-insensitive substring, over the section, the keys and the description
-// together, rather than the fuzzy match the picker uses on task names. A name is a short
-// token where a subsequence is a good guess at what you meant; these are sentences, and
-// fuzzy over prose matches almost everything.
-func helpMatch(section *keys.Section, b keys.Binding, query string) bool {
+// Plain case-insensitive substring, over the keys and the description, rather than the
+// fuzzy match the picker uses on task names. A name is a short token where a subsequence is
+// a good guess at what you meant; these are sentences, and fuzzy over prose matches almost
+// everything.
+//
+// The section title is deliberately not part of the haystack. It was, and `ke` — three
+// letters of `Picker` — kept every binding in that section, none of which said `ke`
+// anywhere. A filter whose surviving lines do not contain what you typed is a filter you
+// cannot read, and the title is a heading you can already see; being able to search it back
+// is not worth the rows it drags in.
+func helpMatch(b keys.Binding, query string) bool {
 	if query == "" {
 		return true
 	}
-	hay := strings.ToLower(section.Title + " " + b.Keys + " " + b.What)
-	return strings.Contains(hay, strings.ToLower(query))
+	return strings.Contains(strings.ToLower(b.Keys+" "+b.What), strings.ToLower(query))
 }
 
 // helpMatches is how many bindings the query leaves, for the prompt's counter.
@@ -451,7 +456,7 @@ func (a *App) helpMatches() int {
 	n := 0
 	for _, section := range keys.Sections {
 		for _, b := range section.Bindings {
-			if helpMatch(section, b, a.HelpQuery) {
+			if helpMatch(b, a.HelpQuery) {
 				n++
 			}
 		}
@@ -472,7 +477,7 @@ func (a *App) drawHelp(width, height int) []string {
 		// nothing under it.
 		var body []line
 		for _, binding := range section.Bindings {
-			if !helpMatch(section, binding, a.HelpQuery) {
+			if !helpMatch(binding, a.HelpQuery) {
 				continue
 			}
 			body = append(body, line{

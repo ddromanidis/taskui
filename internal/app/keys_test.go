@@ -769,6 +769,25 @@ func TestTFindsABindingInTheHelp(t *testing.T) {
 	}
 }
 
+// Every line the find leaves has to contain what you typed. It did not: the section title
+// was part of the haystack, so `ke` — three letters of `Picker` — kept all 27 of that
+// section's bindings, and not one of them says `ke`.
+func TestEveryBindingTheFindLeavesSaysWhatYouTyped(t *testing.T) {
+	for _, query := range []string{"ke", "run", "fold", "esc", "⇧"} {
+		for _, section := range keys.Sections {
+			for _, b := range section.Bindings {
+				if !helpMatch(b, query) {
+					continue
+				}
+				shown := strings.ToLower(b.Keys + " " + b.What)
+				if !strings.Contains(shown, strings.ToLower(query)) {
+					t.Errorf("%q kept `%s  %s`, which does not say it", query, b.Keys, b.What)
+				}
+			}
+		}
+	}
+}
+
 // While the prompt is open every key is text — including the ones that are bindings out
 // there. Typing `quit` to look up how to quit must not quit.
 func TestTheHelpFindPromptSwallowsItsOwnBindings(t *testing.T) {
