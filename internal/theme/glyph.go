@@ -43,6 +43,7 @@ type Glyphs struct {
 	Cursor  string
 	Bar     string
 	Marked  string
+	Covers  string
 
 	DiffAdded   string
 	DiffRemoved string
@@ -124,6 +125,12 @@ var glyphFields = []glyphField{
 		func(g *Glyphs) *string { return &g.Marked },
 	},
 	{
+		"covers",
+		"Marks the aggregates that run a namespace, on the namespace's own row.",
+		false,
+		func(g *Glyphs) *string { return &g.Covers },
+	},
+	{
 		"bar",
 		"The duration bar on a task's timeline, drawn one cell per unit of the slowest run.",
 		false,
@@ -181,6 +188,9 @@ func DefaultGlyphs() Glyphs {
 		Cursor:  "█",
 		Bar:     "▄",
 		Marked:  "◉",
+		// Upwards, because that is where the task is: the row names something above this
+		// namespace that runs it, not something inside.
+		Covers: "↑",
 
 		// `+` and `-` rather than anything prettier: this is the one place in the UI where
 		// a reader already has a lifetime of muscle memory for what the marker means.

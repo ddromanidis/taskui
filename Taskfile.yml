@@ -142,7 +142,7 @@ tasks:
   #                              DRIVING TASKUI ITSELF
   #########################################################################################
   run:
-    desc: 'Open taskui on a directory (task run -- ~/Documents/atlas)'
+    desc: 'Open taskui on a directory (task run -- ~/src/project)'
     cmds:
       - go run . {{.CLI_ARGS | default "."}}
 

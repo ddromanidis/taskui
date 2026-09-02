@@ -14,6 +14,7 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
+	"github.com/ddromanidis/taskui/internal/cover"
 	"github.com/ddromanidis/taskui/internal/diff"
 	"github.com/ddromanidis/taskui/internal/events"
 	"github.com/ddromanidis/taskui/internal/graph"
@@ -391,6 +392,14 @@ type App struct {
 	Details  map[string]task.Detail
 	detailCh chan map[string]task.Detail
 
+	// Reaches is which aggregates run each namespace: `backend` is run by `fmt`, `lint`,
+	// `test`. From `internal/cover`, on a background goroutine, because working it out means
+	// a `task --summary` per node of every aggregate's graph and the list must not wait on
+	// that. Nil until it lands, which the header rows read as "nothing to say yet" rather
+	// than as "nothing runs this".
+	Reaches map[string][]string
+	reachCh chan map[string][]string
+
 	// Where the run on screen spent its time, slowest first.
 	ProfileRows   []Cost
 	ProfileCursor int
@@ -562,6 +571,77 @@ func (a *App) StartEnrichment() {
 	}()
 }
 
+// StartCoverage works out which aggregates reach which namespaces, in the background.
+//
+// The question the domain tree could not answer: standing in `backend`, is there something
+// above that runs it? A root `fmt` that gathers every namespace's `fmt` is the whole reason
+// the tree has a top level, and until now the only way to see the relationship was to pivot
+// to `verb` and look at the fan-out, or to leave the program and run `--lint`.
+//
+// It is a graph walk and not a name match, for the reason `internal/cover` exists: xerum's
+// `lint` never calls `api:lint`, it calls `api:check`, which reaches `api:tenant:lint` two
+// levels down. Names would call that a miss.
+//
+// Opt-in for the same reason as StartEnrichment — it shells out, and the tests that build an
+// App from a fixture have no Taskfile to shell out to. The cost is why it is a goroutine: a
+// `--summary` is a process spawn, an aggregate's graph is dozens of them, and a Taskfile
+// with a dozen aggregates is dozens of dozens. Nothing on screen waits for it.
+func (a *App) StartCoverage() {
+	if a.reachCh != nil {
+		return
+	}
+	ch := make(chan map[string][]string, 1)
+	a.reachCh = ch
+	root, tasks := a.Root, slices.Clone(a.Tasks)
+	go func() {
+		reach := func(name string) []string { return graph.Resolve(root, name).Reachable(name) }
+		// No exemptions: `.taskui-cover` says which gaps are deliberate, and a gap is not
+		// what this projection reads. A namespace is annotated with what reaches it.
+		ch <- cover.BuildGrid(tasks, reach, nil).Reaches()
+		close(ch)
+	}()
+}
+
+// collectCoverage takes the answer if it has arrived. Non-blocking, like collectDetails: it
+// is called from the poll loop, which must not wait for anything.
+func (a *App) collectCoverage() bool {
+	if a.reachCh == nil {
+		return false
+	}
+	select {
+	case reaches, ok := <-a.reachCh:
+		a.reachCh = nil
+		if !ok || len(reaches) == 0 {
+			return false
+		}
+		a.Reaches = reaches
+		return true
+	default:
+		return false
+	}
+}
+
+// AwaitCoverage blocks until the walk lands or the grace runs out.
+//
+// The counterpart to AwaitDetails, and for the same reason: a screenshot is a picture of a
+// loaded UI, and one taken mid-walk would show a different thing every time depending on how
+// the race went.
+func (a *App) AwaitCoverage(grace time.Duration) {
+	if a.reachCh == nil {
+		return
+	}
+	select {
+	case reaches, ok := <-a.reachCh:
+		a.reachCh = nil
+		if ok {
+			a.Reaches = reaches
+		}
+	case <-time.After(grace):
+		// Leave the channel in place — the poll loop picks it up if this is not a one-frame
+		// process after all.
+	}
+}
+
 // collectDetails takes the JSON listing if it has arrived. Non-blocking: it is called from
 // the poll loop, which must not wait for anything.
 func (a *App) collectDetails() bool {
@@ -608,7 +688,7 @@ func (a *App) AwaitDetails(grace time.Duration) {
 // and one of them originally did neither: the locations go onto the tasks themselves — a
 // pivot is a function of a task, and the file pivot cannot be one if the file lives in a map
 // beside it — and the tree is rebuilt, since it may have been built before any of this was
-// known and the file pivot would have pooled everything into `(other)` and stayed there.
+// known and the file pivot would have listed everything ungrouped and stayed that way.
 func (a *App) applyDetails(details map[string]task.Detail) {
 	if details == nil {
 		return

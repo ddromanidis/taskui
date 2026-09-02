@@ -241,6 +241,7 @@ type Colors struct {
 
 	Location Color
 	Marked   Color
+	Covers   Color
 
 	DiffAdded   Color
 	DiffRemoved Color
@@ -316,6 +317,11 @@ var colorFields = []colorField{
 	},
 
 	{"marked", "A task chosen to run alongside others.", func(t *Colors) *Color { return &t.Marked }},
+	{
+		"covers",
+		"The aggregates that run a namespace, named on the namespace's own row.",
+		func(t *Colors) *Color { return &t.Covers },
+	},
 
 	{"diff-added", "A line only the newer run printed.", func(t *Colors) *Color { return &t.DiffAdded }},
 	{"diff-removed", "A line only the older run printed.", func(t *Colors) *Color { return &t.DiffRemoved }},
@@ -367,6 +373,7 @@ func DefaultColors() Colors {
 		// a failure line that is already red without competing with it for the same job.
 		Location: Cyan,
 		Marked:   Yellow,
+		Covers:   Blue,
 
 		DiffAdded:   Green,
 		DiffRemoved: Red,

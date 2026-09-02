@@ -71,7 +71,7 @@ func TestAPathPivotNests(t *testing.T) {
 
 // A task the pivot has no answer for still has to be reachable. Dropping it would leave the
 // list holding fewer tasks than the header claims.
-func TestATaskThePivotCannotPlaceGoesToOther(t *testing.T) {
+func TestATaskThePivotCannotPlaceStandsOnItsOwn(t *testing.T) {
 	p := ByPath("only-a", func(x task.Task) []string {
 		if strings.HasPrefix(x.Name, "a") {
 			return []string{"a"}
@@ -80,11 +80,8 @@ func TestATaskThePivotCannotPlaceGoesToOther(t *testing.T) {
 	})
 	tree := build(t, p, []string{"apple", "banana", "cherry"})
 	got := drawTree(tree)
-	if !strings.Contains(got, OtherGroup) {
-		t.Fatalf("no other group:\n%s", got)
-	}
-	if !strings.Contains(got, "banana") || !strings.Contains(got, "cherry") {
-		t.Errorf("a homeless task went missing:\n%s", got)
+	if got != "a/\n  apple\nbanana\ncherry\n" {
+		t.Errorf("a homeless task should be a row of its own:\n%s", got)
 	}
 	// Every task is still counted.
 	total := 0
@@ -96,17 +93,17 @@ func TestATaskThePivotCannotPlaceGoesToOther(t *testing.T) {
 	}
 }
 
-// `(other)` is where you look last, so it goes last.
-func TestOtherSortsToTheBottom(t *testing.T) {
+// What the pivot could not place is where you look last, so it sinks below what it could —
+// even when the name would otherwise sort it to the top.
+func TestWhatThePivotCannotPlaceSinksToTheBottom(t *testing.T) {
 	p := ByPath("z-only", func(x task.Task) []string {
 		if strings.HasPrefix(x.Name, "z") {
 			return []string{"zeds"}
 		}
 		return nil
 	})
-	lines := strings.Split(strings.TrimSpace(drawTree(build(t, p, []string{"apple", "zebra"}))), "\n")
-	if !strings.Contains(lines[len(lines)-2], OtherGroup) && !strings.Contains(lines[0], "zeds") {
-		t.Errorf("got:\n%s", strings.Join(lines, "\n"))
+	if got := drawTree(build(t, p, []string{"apple", "zebra"})); got != "zeds/\n  zebra\napple\n" {
+		t.Errorf("got:\n%s", got)
 	}
 }
 
@@ -149,11 +146,12 @@ func TestARegexWithNoGroupsUsesTheWholeMatch(t *testing.T) {
 	}
 }
 
-// A name the pattern does not match is not an error — it is a task in `(other)`.
-func TestARegexThatDoesNotMatchPoolsRatherThanFails(t *testing.T) {
+// A name the pattern does not match is not an error — it is a task the grouping has nothing
+// to say about, listed under its own name below the ones it does.
+func TestARegexThatDoesNotMatchListsRatherThanFails(t *testing.T) {
 	p, _ := Spec{Name: "ns", Regex: `^([^:]+):`}.Compile(".")
 	got := drawTree(build(t, p, []string{"backend:lint", "standalone"}))
-	if !strings.Contains(got, OtherGroup) || !strings.Contains(got, "standalone") {
+	if got != "backend/\n  backend:lint\nstandalone\n" {
 		t.Errorf("got:\n%s", got)
 	}
 }
@@ -229,17 +227,14 @@ done
 	}
 }
 
-// A pivot that cannot answer should leave a usable list, not an empty one.
-func TestAMissingProgramPoolsEverythingRatherThanEmptyingTheList(t *testing.T) {
+// A pivot that cannot answer should leave a usable list, not an empty one — and a flat
+// list is usable in a way that one closed fold called `(other)` is not.
+func TestAMissingProgramLeavesAFlatListRatherThanAnEmptyOne(t *testing.T) {
 	p, err := Spec{Name: "risk", Command: []string{"./does-not-exist"}}.Compile(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := drawTree(build(t, p, []string{"a", "b"}))
-	if !strings.Contains(got, "a") || !strings.Contains(got, "b") {
-		t.Errorf("tasks went missing when the program did:\n%s", got)
-	}
-	if !strings.Contains(got, OtherGroup) {
+	if got := drawTree(build(t, p, []string{"a", "b"})); got != "a\nb\n" {
 		t.Errorf("got:\n%s", got)
 	}
 }
@@ -267,8 +262,8 @@ printf 'b\t\n'
 	if !strings.Contains(got, "good/\n  a") {
 		t.Errorf("the good line was lost:\n%s", got)
 	}
-	// `b` was given an empty path, which is no answer at all.
-	if !strings.Contains(got, OtherGroup) || !strings.Contains(got, "b") {
+	// `b` was given an empty path, which is no answer at all, so it stands on its own.
+	if !strings.Contains(got, "\nb\n") {
 		t.Errorf("got:\n%s", got)
 	}
 }
@@ -338,8 +333,7 @@ func TestTheFilePivotGroupsByTaskfile(t *testing.T) {
 // task knows where it lives. That has to be a usable list, not an empty one.
 func TestTheFilePivotBeforeTheListingArrives(t *testing.T) {
 	tasks := Fixture([]string{"a", "b"})
-	got := drawTree(Build(File(), tasks, []int{0, 1}, Order{}))
-	if !strings.Contains(got, OtherGroup) || !strings.Contains(got, "a") {
+	if got := drawTree(Build(File(), tasks, []int{0, 1}, Order{})); got != "a\nb\n" {
 		t.Errorf("got:\n%s", got)
 	}
 }

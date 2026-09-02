@@ -54,8 +54,7 @@ lines each of them printed.
 ```
  taskui ▸ acme                                domain·verb·file   17 tasks
  ─────────────────────────────────────────────────────────────────────────
- ▾ (root)                                                               6
-▌├ all            Everything: format, lint, test, build      ▿ ✗ 2.1s
+▌  all            Everything: format, lint, test, build      ▿ ✗ 2.1s
  │ ├ ▿ ✓ fmt                                                        208ms
  │ │   1 ✓ ❯ gofmt -l -w .
  │ │   2 └   3 files reformatted
@@ -699,7 +698,7 @@ kept per pivot name rather than per enum label, and `--dump` takes any of them.
 
 Two of the three built-ins keep bespoke builders, because they have shapes a plain path
 cannot express — the domain tree folds a root-level task into its own namespace, and the
-verb tree pools singletons. The third, `file`, is a path pivot, and it exists because the
+verb tree sets singletons loose at the top level. The third, `file`, is a path pivot, and it exists because the
 JSON listing added for jump-to-definition already carries where every task is written. It
 had been in this file's *Not built yet* section for that whole time.
 
@@ -708,17 +707,25 @@ had been in this file's *Not built yet* section for that whole time.
 Those are two questions, and for a long time only one of them had an answer you could
 change. Each pivot sorted its own nodes its own way: domain alphabetically with subgroups
 sunk below the leaves beside them, verb by group size with the bare aggregate hoisted above
-its own fan-out, path pivots alphabetically with `(other)` pushed last. Three rules, in three
+its own fan-out, path pivots alphabetically with what they could not place pushed last.
+Three rules, in three
 functions, none of them nameable and none of them yours — which is why the order read as
 arbitrary. It was not arbitrary. It was just nobody's decision in particular.
 
 They are one comparator now, and the differences between them are data on the node:
 
 - **Rank** is for rows whose position is part of what the pivot *means* rather than a matter
-  of taste — `(root)` opening the domain tree, `(other)` closing any tree that has one, a
-  verb group's own aggregate sitting directly above its fan-out so the pivot doubles as a
-  preview of what `task lint` will do. A Rank beats every ordering, because none of those
-  three is a preference.
+  of taste — the unnamespaced tasks opening the domain tree, the ungrouped ones closing any
+  tree that has them, a verb group's own aggregate sitting directly above its fan-out so the
+  pivot doubles as a preview of what `task lint` will do. A Rank beats the key you are
+  sorting on, because none of those three is a preference — with one exception. The two
+  *hoists* give way to an order you named, because a hoist is the pivot saying "read this
+  first" and that only outranks a sort key while you are reading the pivot the way it means
+  to be read. Ask for `recent` and you are asking what you just ran; the hoist has no view on
+  that and was answering it anyway. The *sink* does not give way, and the asymmetry is the
+  point: it is not a claim about recency that a better answer displaces, it is the grouping
+  admitting it had nothing to say — and since leaves sort above groups, dropping it would put
+  the rows the pivot could not place at the top rather than merely un-sinking them.
 - **Natural** is the order a grouping wants to be read in when the config has no opinion, and
   it is a property of the grouping rather than of the reader: `verb` in alphabetical order is
   worth nothing, since the entire point of transposing the tree is to surface the concerns
@@ -764,8 +771,41 @@ Two things make it affordable. It is asked about the *whole* task list rather th
 visible one — a filter changes what is shown and cannot change where a task belongs — which
 means the answer can be cached against the list, which means `Rebuild` on every keystroke of
 a filter does not spawn a process. And it is bounded by a timeout, because a hung pivot
-would hang the UI with it. A program that is missing, fails, or times out pools everything
-into `(other)`: a grouping that cannot answer should leave a usable list, not an empty one.
+would hang the UI with it. A program that is missing, fails, or times out leaves every task
+ungrouped and listed: a grouping that cannot answer should leave a usable list, not an empty
+one.
+
+## What runs a namespace
+
+The domain tree's one blind spot, and the reason `--lint` had a monopoly on the answer.
+
+`backend:fmt`, `web:fmt` and a root `fmt` that gathers them are three rows in two places:
+the namespaces have the work, the top level has the thing you actually type. Splitting on
+`:` puts the namespaces in front of you and files the gatherer somewhere else, so standing
+at `backend` there was no way to see that anything above ran it — the verb pivot showed the
+relationship, but only by leaving the tree you were reading.
+
+The namespace's row says it now, in the column descriptions start in: `▸ backend  ↑ fmt lint
+test`. Three decisions in that:
+
+**The header, not rows inside it.** A row per aggregate per namespace was the first shape,
+and on a Taskfile with six aggregates it puts six near-identical rows above every namespace's
+real tasks — and raises three questions the tree had no answer to, about whether such a row
+counts towards the fold's total, what marking it does, and which of the two copies a jump
+lands on. The question is one you ask *of a fold before you open it*, so it belongs on the
+fold.
+
+**Reachability, not names**, which is `internal/cover`'s whole argument: `lint` never calls
+`api:lint`, it calls `api:check`, which reaches `api:tenant:lint` two levels down. It is the
+same grid `--lint` prints, read the other way up — the linter asks what an aggregate misses,
+the picker asks what runs a namespace, and those are one set of cells transposed. Computing
+them separately would be two chances to disagree about what covered means, which is why the
+check moved out of `cmd/lint.go` the moment a second caller existed.
+
+**Late, and silent until it lands.** A `--summary` is a process spawn, an aggregate's graph
+is dozens of them, and a Taskfile worth checking has a dozen aggregates. Nothing waits for
+it. Before it arrives the row says nothing rather than saying nothing runs this — the two are
+different answers, and only one of them is worth drawing.
 
 ## Four small things
 

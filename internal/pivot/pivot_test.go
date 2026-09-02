@@ -47,22 +47,24 @@ func render(tree *Tree) []string {
 	return out
 }
 
-func TestDomainPinsRootGroupFirst(t *testing.T) {
+// The daily drivers are rows of the tree, above the namespaces — not a fold called
+// `(root)` that has to be opened before a Taskfile shows you what it is for.
+func TestDomainPutsUnnamespacedTasksAtTheTop(t *testing.T) {
 	tasks := sample()
 	tree := Build(Domain(), tasks, all(tasks), Order{})
-	if got := tree.Nodes[tree.Roots[0]].Label; got != RootGroup {
-		t.Errorf("first root = %q", got)
+
+	var roots []string
+	for _, r := range tree.Roots {
+		roots = append(roots, tree.Nodes[r].Label)
 	}
-	if got := tree.Nodes[tree.Roots[0]].Count; got != 4 {
-		t.Errorf("(root) count = %d", got)
+	want := []string{"all", "build", "fmt", "lint", "app", "backend", "infra", "site", "wt"}
+	if !reflect.DeepEqual(roots, want) {
+		t.Errorf("roots = %v, want %v", roots, want)
 	}
-	var rest []string
-	for _, r := range tree.Roots[1:] {
-		rest = append(rest, tree.Nodes[r].Label)
-	}
-	want := []string{"app", "backend", "infra", "site", "wt"}
-	if !reflect.DeepEqual(rest, want) {
-		t.Errorf("rest = %v, want %v", rest, want)
+	for _, r := range tree.Roots[:4] {
+		if n := tree.Nodes[r]; n.IsGroup() || n.Task == NoTask {
+			t.Errorf("%q should be a runnable row and nothing else: %+v", n.Label, n)
+		}
 	}
 }
 
@@ -76,7 +78,7 @@ func TestARootTaskThatNamesANamespaceOwnsIt(t *testing.T) {
 	for _, r := range tree.Roots {
 		roots = append(roots, tree.Nodes[r].Label)
 	}
-	if want := []string{RootGroup, "build", "test"}; !reflect.DeepEqual(roots, want) {
+	if want := []string{"all", "build", "test"}; !reflect.DeepEqual(roots, want) {
 		t.Errorf("one `build`, not two: %v", roots)
 	}
 
@@ -96,13 +98,9 @@ func TestARootTaskThatNamesANamespaceOwnsIt(t *testing.T) {
 		t.Errorf("count = %d", build.Count)
 	}
 
-	// (root) keeps only what genuinely has no namespace.
-	var kids []string
-	for _, c := range tree.Nodes[tree.Roots[0]].Children {
-		kids = append(kids, tree.Nodes[c].Label)
-	}
-	if !reflect.DeepEqual(kids, []string{"all"}) {
-		t.Errorf("(root) kids = %v", kids)
+	// Only what genuinely has no namespace stays a bare row: `all` does, `build` does not.
+	if n := tree.Nodes[tree.Roots[0]]; n.Label != "all" || n.IsGroup() {
+		t.Errorf("`all` should be the one bare row: %+v", n)
 	}
 }
 
@@ -166,22 +164,28 @@ func TestVerbGroupsByLastSegmentSizeDescending(t *testing.T) {
 	}
 }
 
-// Grouping a verb that only appears once reads worse than not grouping it, so the
-// singletons pool into one flat bucket, pinned last.
-func TestVerbPoolsSingletonsIntoOtherLast(t *testing.T) {
+// Grouping a verb that only appears once reads worse than not grouping it — and so does
+// pooling all of them into one fold named after having failed to group them. They are rows
+// of the tree, under their own names, below every verb that did group.
+func TestVerbPutsSingletonsAtTheTopLevelLast(t *testing.T) {
 	tasks := sample()
 	tree := Build(Verb(), tasks, all(tasks), Order{})
-	last := tree.Roots[len(tree.Roots)-1]
-	if tree.Nodes[last].Label != OtherGroup {
-		t.Fatalf("last root = %q", tree.Nodes[last].Label)
+
+	var roots []string
+	for _, r := range tree.Roots {
+		roots = append(roots, tree.Nodes[r].Label)
 	}
-	var members []string
-	for _, c := range tree.Nodes[last].Children {
-		members = append(members, tree.Nodes[c].Label)
+	want := []string{
+		"build", "lint", "fmt",
+		"all", "backend:migrate", "backend:migrate:down", "backend:migrate:prod", "wt:ls",
 	}
-	want := []string{"all", "backend:migrate", "backend:migrate:down", "backend:migrate:prod", "wt:ls"}
-	if !reflect.DeepEqual(members, want) {
-		t.Errorf("members = %v, want %v", members, want)
+	if !reflect.DeepEqual(roots, want) {
+		t.Errorf("roots = %v, want %v", roots, want)
+	}
+	for _, r := range tree.Roots[3:] {
+		if n := tree.Nodes[r]; n.IsGroup() || n.Task == NoTask {
+			t.Errorf("%q should be a runnable row and nothing else: %+v", n.Label, n)
+		}
 	}
 }
 

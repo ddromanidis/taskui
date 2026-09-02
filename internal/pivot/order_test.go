@@ -90,20 +90,20 @@ func TestFileOrderFollowsTheTaskfile(t *testing.T) {
 	tasks[0].Where = task.Where{File: "Taskfile.yml", Line: 4}
 	tasks[1].Where = task.Where{File: "Taskfile.yml", Line: 9}
 	tasks[2].Where = task.Where{File: "Taskfile.yml", Line: 14}
-	want(t, ordered(tasks, Order{By: ByFile}), "(root)/\n  dev\n  build\n  test\n")
+	want(t, ordered(tasks, Order{By: ByFile}), "dev\nbuild\ntest\n")
 }
 
 // The locations arrive a beat after the first frame. Until they do, `file` has nothing to
 // say and falls through to the name rather than pretending everything is at line zero.
 func TestFileOrderFallsBackToTheNameBeforeTheListingArrives(t *testing.T) {
 	tasks := Fixture([]string{"dev", "build", "test"})
-	want(t, ordered(tasks, Order{By: ByFile}), "(root)/\n  build\n  dev\n  test\n")
+	want(t, ordered(tasks, Order{By: ByFile}), "build\ndev\ntest\n")
 }
 
 func TestAKnownLocationOutranksAnUnknownOne(t *testing.T) {
 	tasks := Fixture([]string{"aaa", "zzz"})
 	tasks[1].Where = task.Where{File: "Taskfile.yml", Line: 2}
-	want(t, ordered(tasks, Order{By: ByFile}), "(root)/\n  zzz\n  aaa\n")
+	want(t, ordered(tasks, Order{By: ByFile}), "zzz\naaa\n")
 }
 
 func TestRecentPutsTheLastThingYouRanOnTop(t *testing.T) {
@@ -113,7 +113,7 @@ func TestRecentPutsTheLastThingYouRanOnTop(t *testing.T) {
 		"test":  {Ok: true, WhenUnix: 300},
 	})}
 	// `lint` has never run, so it sorts below both and keeps its alphabetical place there.
-	want(t, ordered(tasks, order), "(root)/\n  test\n  build\n  lint\n")
+	want(t, ordered(tasks, order), "test\nbuild\nlint\n")
 }
 
 func TestFailedPutsWhatIsBrokenOnTop(t *testing.T) {
@@ -124,7 +124,7 @@ func TestFailedPutsWhatIsBrokenOnTop(t *testing.T) {
 		"test":  {Ok: false, WhenUnix: 200},
 	})}
 	// Broken first, and within it the most recent failure — the one you are here about.
-	want(t, ordered(tasks, order), "(root)/\n  test\n  lint\n  build\n")
+	want(t, ordered(tasks, order), "test\nlint\nbuild\n")
 }
 
 // A group is as recent as its most recent task and as broken as its worst one, because what
@@ -141,7 +141,35 @@ func TestAGroupCarriesTheStateOfWhatIsInside(t *testing.T) {
 // than admitting there isn't one.
 func TestRecentWithoutAnArchiveIsAlphabetical(t *testing.T) {
 	tasks := Fixture([]string{"test", "build"})
-	want(t, ordered(tasks, Order{By: ByRecent}), "(root)/\n  build\n  test\n")
+	want(t, ordered(tasks, Order{By: ByRecent}), "build\ntest\n")
+}
+
+// An order you named is a question the pivot's hoists have no view on. `recent` asks what
+// you just ran; floating the unnamespaced tasks above the answer is the grouping talking
+// over you.
+func TestAnOrderYouNamedOutranksTheHoist(t *testing.T) {
+	tasks := Fixture([]string{"clean", "fmt", "backend:lint", "backend:test"})
+	order := Order{By: ByRecent, Interleave: true, Ran: ran(map[string]Outcome{
+		"backend:test": {Ok: true, WhenUnix: 9999},
+	})}
+	want(t, ordered(tasks, order), "backend/\n  test\n  lint\nclean\nfmt\n")
+
+	// …and with no opinion of your own the hoist is back, because then the pivot's reading is
+	// the only one there is.
+	want(t, ordered(tasks, Order{}), "clean\nfmt\nbackend/\n  lint\n  test\n")
+}
+
+// The sink is not a claim an order could beat — it is the grouping saying it had nothing to
+// say about these rows. Dropping it under `recent` would send them to the top, since leaves
+// sort above groups.
+func TestWhatThePivotCannotPlaceStaysAtTheBottomUnderAnyOrder(t *testing.T) {
+	tasks := Fixture([]string{"a:build", "b:build", "wt:ls"})
+	order := Order{By: ByRecent, Ran: ran(map[string]Outcome{
+		"wt:ls": {Ok: true, WhenUnix: 9999},
+	})}
+	all := []int{0, 1, 2}
+	want(t, drawTree(Build(Verb(), tasks, all, order)),
+		"build/\n  a:build\n  b:build\nwt:ls\n")
 }
 
 // --- pins ---------------------------------------------------------------------------
@@ -149,7 +177,7 @@ func TestRecentWithoutAnArchiveIsAlphabetical(t *testing.T) {
 func TestPinsLeadInTheOrderTheyAreWritten(t *testing.T) {
 	tasks := Fixture([]string{"build", "dev", "lint", "test"})
 	want(t, ordered(tasks, Order{Pins: []string{"test", "dev"}}),
-		"(root)/\n  test\n  dev\n  build\n  lint\n")
+		"test\ndev\nbuild\nlint\n")
 }
 
 // A pin you have to go looking for is not a pin: the group holding it rises too, all the way
@@ -169,12 +197,13 @@ func TestPinsGlobAndCanNameAGroupDirectly(t *testing.T) {
 		"zzz/\n  deploy\n  build\naaa/\n  one\n")
 }
 
-// Pinning beats the ranks the pivot itself insists on, `(root)` included. You asked for this
-// row by name; nothing the grouping believes should outrank that.
-func TestAPinOutranksTheRootGroup(t *testing.T) {
+// Pinning beats the ranks the pivot itself insists on, including the one that floats the
+// unnamespaced tasks. You asked for this row by name; nothing the grouping believes should
+// outrank that.
+func TestAPinOutranksTheUnnamespacedTasks(t *testing.T) {
 	tasks := Fixture([]string{"dev", "zzz:deploy"})
 	want(t, ordered(tasks, Order{Pins: []string{"zzz:*"}}),
-		"zzz/\n  deploy\n(root)/\n  dev\n")
+		"zzz/\n  deploy\ndev\n")
 }
 
 // --- parsing --------------------------------------------------------------------------
@@ -210,7 +239,7 @@ func TestTheDefaultOrderIsSpelledDefault(t *testing.T) {
 func TestAPinNamesTheTaskAndNotAPathSegment(t *testing.T) {
 	tasks := Fixture([]string{"aaa:one", "build:release", "release"})
 	got := ordered(tasks, Order{Pins: []string{"release"}})
-	want(t, got, "(root)/\n  release\naaa/\n  one\nbuild/\n  release\n")
+	want(t, got, "release\naaa/\n  one\nbuild/\n  release\n")
 }
 
 // A namespace with no task of its own has only the names the pivot gave it, and both work.

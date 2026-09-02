@@ -1266,6 +1266,36 @@ func (a *App) bodyWidth(width int) int {
 	return width - frameWidth - a.Theme.Animation.MaxLean()
 }
 
+// coversColumn lays the aggregates that run this namespace into the column descriptions
+// start in, or says there is no room for them.
+func (a *App) coversColumn(row pivot.Row, node pivot.Node, used, width int) (span, bool) {
+	names, ok := a.coveredBy(row, node)
+	room := width - nameColumn - countWidth - 2
+	if !ok || room < 8 || used > nameColumn {
+		return span{}, false
+	}
+	text := clip(a.Theme.Glyphs.Covers+" "+names, room)
+	return styled(text, fg(a.Theme.Colors.Covers)), true
+}
+
+// coveredBy is the aggregates that run the namespace on this row, if it is one.
+//
+// Only a top-level group of the domain tree, because that is the only row whose Key *is* a
+// namespace — `backend:migrate` is a group too and is nobody's namespace, and in the verb
+// and file trees a group is not a namespace at all. Empty until the walk lands, which reads
+// as "not known yet" rather than as "nothing runs this"; the two are different answers and
+// only one of them is worth drawing.
+func (a *App) coveredBy(row pivot.Row, node pivot.Node) (string, bool) {
+	if len(a.Reaches) == 0 || row.Depth != 0 || !node.IsGroup() || a.ModeLabel() != pivot.DomainName {
+		return "", false
+	}
+	names := a.Reaches[node.Key]
+	if len(names) == 0 {
+		return "", false
+	}
+	return strings.Join(names, " "), true
+}
+
 // lastOfParent reports whether the row at i is the final child of whatever contains it, so
 // the guide can be a corner rather than a tee. Without it every branch looks like it has a
 // sibling below, including the ones that do not.
@@ -1388,6 +1418,17 @@ func (a *App) treeItem(row pivot.Row, last bool, width int) []line {
 	var signals line
 	if node.IsGroup() {
 		signals = append(signals, styled(fmt.Sprintf("%*d", countWidth, node.Count), fg(t.Colors.Dim)))
+	}
+
+	// What runs this namespace, in the column descriptions start in — so the eye runs down
+	// one column whether a row is a task explaining itself or a namespace naming what covers
+	// it. On the header rather than as rows inside: a Taskfile with six aggregates would put
+	// six near-identical rows above every namespace's real tasks, and the question this
+	// answers ("is there something above that runs this?") is one you ask of the fold before
+	// you open it.
+	if covers, ok := a.coversColumn(row, node, used, width); ok {
+		l = append(l, plain(strings.Repeat(" ", max(1, nameColumn-used))), covers)
+		used = nameColumn + utf8.RuneCountInString(covers.text)
 	}
 
 	var extra []line

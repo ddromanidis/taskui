@@ -862,13 +862,13 @@ func TestRecentOrderFollowsTheArchiveAsItChanges(t *testing.T) {
 	a.Rebuild(-1)
 	a.SetFoldAll(true)
 
-	if got := rowLabels(a); got[1] != "aaa" {
+	if got := rowLabels(a); got[0] != "aaa" {
 		t.Fatalf("with an empty archive this should be alphabetical, got %v", got)
 	}
 
 	a.Outcomes["zzz"] = store.Outcome{Ok: true, WhenUnix: 1000}
 	a.Rebuild(-1)
-	if got := rowLabels(a); got[1] != "zzz" {
+	if got := rowLabels(a); got[0] != "zzz" {
 		t.Errorf("the run that just happened should lead, got %v", got)
 	}
 }

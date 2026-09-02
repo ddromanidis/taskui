@@ -11,12 +11,24 @@ run it rather than written down here.
 
 ## Finding a task in a Taskfile you did not write
 
-A repo with 122 tasks across nine namespaces. Opening it gives you the shape, not the list:
+A repo with 122 tasks across nine namespaces. Opening it gives you what the repo is *for* —
+the tasks with no namespace, which are the ones you actually type — and then its shape:
 
 ```
  taskui ▸ atlas                                        domain·verb   122 tasks
  ─────────────────────────────────────────────────────────────────────────────
-▌▸ (root)                                                                   12
+▌  all            Everything: format, lint, test, build
+   build          Compile the workspace
+   check          Type-check and vet only
+   clean
+   dev            Bring the stack up locally
+   fmt            Format every source file
+   lint           Lint all source code
+   precommit      What CI will run, before CI runs it
+   setup          Install what a fresh clone needs
+   test           Run the whole suite
+   tidy
+   watch          Rebuild on change
  ▸ api                                                                      13
  ▸ app                                                                      17
  ▸ backend                                                                  26
@@ -28,6 +40,9 @@ A repo with 122 tasks across nine namespaces. Opening it gives you the shape, no
  ▸ wt                                                                        4
 ```
 
+Twelve rows for the twelve tasks with no namespace, rather than one fold called `(root)` —
+a label that tells you nothing is a label you open every time.
+
 Three ways in, and they answer different questions.
 
 **`/` filters** — narrows the list to what matches, hiding everything else. Use it when you
@@ -36,8 +51,7 @@ want to see *all* the linting tasks:
 ```
  taskui ▸ atlas                              domain·verb   /lint   6/122 tasks
  ─────────────────────────────────────────────────────────────────────────────
- ▾ (root)                                                                    1
-▌└ lint           Lint all source code
+▌  lint           Lint all source code
  ▾ api                                                                       2
  └ lint           Validate the spec
  ▾ backend                                                                   1
@@ -128,8 +142,7 @@ the last few lines each task printed.
 ```
  taskui ▸ acme                                    domain·verb·file   17 tasks
  ─────────────────────────────────────────────────────────────────────────────
- ▾ (root)                                                                   6
-▌├ ci             Everything: build, test, package                ▿ ✗ 2.0s
+▌  ci             Everything: build, test, package                ▿ ✗ 2.0s
  │ ├ ▿ ✓ build                                                29 more   1.2s
  │ │   3 │   compiling api
  │ │   4 └   built in 1.2s
@@ -383,6 +396,32 @@ dev:reset
 
 The file's presence switches off the built-in guess entirely — once the list is written
 down, the list is the answer.
+
+---
+
+## Seeing what runs a namespace
+
+The domain tree files the namespaces one way and the tasks that gather them another, so
+standing at `backend` there was nothing saying `fmt` reaches in. The namespace's own row says
+it, in the column descriptions start in:
+
+```
+ taskui ▸ covdemo                                 domain·verb·file    9 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+▌  fmt            Format every source file
+   lint           Lint everything
+   test           Run every suite
+ ▸ backend        ↑ fmt lint test                                           3
+ ▸ web            ↑ fmt lint                                                2
+```
+
+`web` is missing from `test` and the row says so by leaving it out — root `test` reaches
+`backend:test` and stops there. Same walk the check below reports on, from the same grid, so
+the tree and `--lint` cannot disagree about it.
+
+It arrives a beat after the first frame: a `task --summary` per node of every aggregate's
+graph is the most expensive thing taskui asks go-task for. Until it lands the row says
+nothing, which is not the same as saying nothing runs it.
 
 ---
 

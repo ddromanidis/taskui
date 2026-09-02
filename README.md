@@ -508,6 +508,34 @@ have been dropped says the output is no longer stored rather than diffing agains
 The ledger is written the first time a run is saved after upgrading, absorbing whatever
 directories are still there — no migration step, and nothing to delete.
 
+### What runs this namespace
+
+The domain tree splits `backend:migrate:down` on `:`, which puts every namespace in front of
+you and the tasks that gather them somewhere else entirely. Standing at `backend`, the one
+thing the tree could not tell you was whether something above it runs it — and `fmt`
+gathering every namespace's `fmt` is most of why a Taskfile has a top level at all.
+
+The namespace's own row says so, in the column descriptions start in:
+
+```
+ taskui ▸ covdemo                                 domain·verb·file    9 tasks
+ ─────────────────────────────────────────────────────────────────────────────
+▌  fmt            Format every source file
+   lint           Lint everything
+   test           Run every suite
+ ▸ backend        ↑ fmt lint test                                           3
+ ▸ web            ↑ fmt lint                                                2
+```
+
+`web` is not run by `test`, and the row says so by leaving it out: root `test` reaches
+`backend:test` and stops. That is the same walk `--lint` reports on, from the same grid — a
+tree that called a namespace covered while the linter called it a gap would be the tool
+arguing with itself.
+
+It arrives a beat after the first frame, because working it out is a `task --summary` per
+node of every aggregate's graph. Until then the row says nothing, which is not the same as
+saying nothing runs it.
+
 ### Aggregates that cover less than they claim
 
 `task test` says "Run all automated tests". Whether that is true depends on which namespaces
@@ -772,8 +800,8 @@ prints one the same way it prints `domain`.
 **`regex`** is matched against the task name; `path` builds the grouping from its captures,
 `{1}` being the first. `path` defaults to one level of `{1}`, or of the whole match when the
 pattern has no groups. A segment that comes out empty is dropped, so one pattern can serve
-tasks at different depths. A name the pattern does not match is not an error — that task
-lands in `(other)`.
+tasks at different depths. A name the pattern does not match is not an error — that task is
+listed under its own name below the groups.
 
 **`command`** is the escape hatch. taskui writes the task names to its stdin, one per line,
 and reads back `name<TAB>outer/inner`:
@@ -788,9 +816,9 @@ while IFS= read -r name; do
 done
 ```
 
-A name it says nothing about pools into `(other)` — as does every name if the program is
-missing, fails, or takes longer than five seconds. A pivot that cannot answer should leave
-you with a usable list rather than an empty one. It runs once per task list and the answer is
+A name it says nothing about is listed on its own below the groups — as is every name if
+the program is missing, fails, or takes longer than five seconds. A pivot that cannot answer
+should leave you with a flat list rather than an empty one. It runs once per task list and the answer is
 cached: filtering changes what is shown, not where a task belongs, so a keystroke does not
 spawn a process.
 

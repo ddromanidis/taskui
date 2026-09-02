@@ -100,7 +100,7 @@ func TestABatchTooBigForTheSlotsSaysWhatItLeft(t *testing.T) {
 func TestMarkingAGroupSaysItIsNotATask(t *testing.T) {
 	a := sample(t)
 	a.SetFoldAll(true)
-	a.Cursor = 0 // (root)
+	a.Cursor = groupRow(t, a)
 	press(a, Char('m'))
 	if len(a.Marked()) != 0 {
 		t.Error("marked a group")

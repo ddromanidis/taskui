@@ -46,7 +46,8 @@ type Node struct {
 	Count int
 	// Rank pins a row to an end of its parent whatever the ordering says — see the constants
 	// in order.go. Set by the builder, because which rows those are is part of what a pivot
-	// means: `(root)` opens the domain tree, `(other)` closes any tree that has one.
+	// means: an unnamespaced task opens the domain tree, one the grouping could not place
+	// closes any tree that has one.
 	Rank int
 	// Facets are what the ordering compares, filled in after the tree is built.
 	Facets Facets
@@ -120,13 +121,20 @@ func (t *Tree) find(idx, taskIdx int, path *[]string) bool {
 	return false
 }
 
-// RootGroup holds tasks with no namespace. Pinned to the top: in practice these are the
-// daily drivers (`all`, `build`, `test`, `dev`, …).
-const RootGroup = "(root)"
-
-// OtherGroup is the verb-mode bucket for verbs that only ever appear once. Grouping a
-// singleton reads worse than not grouping it at all, so they land here, flat.
-const OtherGroup = "other"
+// A bucket that exists only because its members did not group is not a group.
+//
+// Both trees used to end in one. The domain tree pooled every unnamespaced task into
+// `(root)`, and the verb tree pooled every verb answered once into `(other)`; folds start
+// closed, so on the first frame both were a single row whose label named nothing but the
+// absence of a grouping. In the domain tree that row hid `all`, `fmt`, `test`, `build` —
+// the tasks a Taskfile exists to run — behind the one heading on screen that says least
+// about what is under it. In the verb tree it hid whatever the transpose had failed to
+// find a concern in, which is the half of the list you did not already know about.
+//
+// So they are not folds any more. A task with nothing to group with is a top-level row of
+// its own, and the position those buckets carried survives as a Rank: unnamespaced tasks
+// open the domain tree, once-answered verbs close the verb tree. Same rows, same order,
+// one less keypress and one less label that means nothing.
 
 // Build makes the tree for a pivot and puts it in order.
 //
@@ -148,7 +156,7 @@ func buildDomain(tasks []task.Task, visible []int) *Tree {
 	index := map[string]int{}
 
 	// Namespaced tasks first, so every group node exists before the unnamespaced ones are
-	// placed. Otherwise a root-level `build` would land in (root) and `build:release`
+	// placed. Otherwise a root-level `build` would stand on its own and `build:release`
 	// would then create a second, unrelated `build` node beside it.
 	for _, ti := range visible {
 		segs := tasks[ti].Segments()
@@ -192,19 +200,14 @@ func buildDomain(tasks []task.Task, visible []int) *Tree {
 			continue
 		}
 
-		root, ok := index[RootGroup]
-		if !ok {
-			root = tree.push(RootGroup, RootGroup)
-			// Pinned to the top of the tree rather than sorted there: these are the daily
-			// drivers, and `(root)` landing between `infra` and `site` because of where a
-			// bracket sorts would be an accident wearing the clothes of a decision.
-			tree.Nodes[root].Rank = RankFirst
-			tree.Roots = append(tree.Roots, root)
-			index[RootGroup] = root
-		}
+		// Otherwise it is a row of the tree itself, above the namespaces rather than inside
+		// anything. Ranked first rather than sorted there: these are the daily drivers, and
+		// `fmt` landing between `infra` and `site` because of where an `f` sorts would be an
+		// accident wearing the clothes of a decision.
 		leaf := tree.push(name, name)
 		tree.Nodes[leaf].Task = ti
-		tree.Nodes[root].Children = append(tree.Nodes[root].Children, leaf)
+		tree.Nodes[leaf].Rank = RankFirst
+		tree.Roots = append(tree.Roots, leaf)
 	}
 
 	return tree
@@ -222,7 +225,7 @@ func buildVerb(tasks []task.Task, visible []int) *Tree {
 	}
 	sort.Strings(verbs)
 
-	// Singletons carry no grouping value — pool them.
+	// A verb one task answers is not a grouping — set those aside.
 	type group struct {
 		verb    string
 		members []int
@@ -259,15 +262,14 @@ func buildVerb(tasks []task.Task, visible []int) *Tree {
 		}
 	}
 
-	if len(singles) > 0 {
-		gi := tree.push(OtherGroup, "verb:"+OtherGroup)
-		tree.Nodes[gi].Rank = RankLast
-		tree.Roots = append(tree.Roots, gi)
-		for _, ti := range singles {
-			leaf := tree.push(tasks[ti].Name, fmt.Sprintf("verb:%s/%s", OtherGroup, tasks[ti].Name))
-			tree.Nodes[leaf].Task = ti
-			tree.Nodes[gi].Children = append(tree.Nodes[gi].Children, leaf)
-		}
+	// A verb only one task answers is a row of the tree itself. Ranked last, so the concerns
+	// this pivot was opened to find still sit above the tasks it found none in — but visible,
+	// under their own names, which is the only thing that says what they are.
+	for _, ti := range singles {
+		leaf := tree.push(tasks[ti].Name, "verb:"+tasks[ti].Name)
+		tree.Nodes[leaf].Task = ti
+		tree.Nodes[leaf].Rank = RankLast
+		tree.Roots = append(tree.Roots, leaf)
 	}
 
 	return tree

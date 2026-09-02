@@ -119,21 +119,23 @@ func TestTheWordmarkIsNotRepeatedAsTheProject(t *testing.T) {
 // Collapsed groups show a closed glyph and a subtree count; opening flips it.
 func TestGroupsRenderFoldGlyphAndCount(t *testing.T) {
 	a := viewSample(t)
-	lines := a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[2], "▸ (root)") {
-		t.Errorf("row = %q", lines[2])
+	closed, ok := find(a.RenderHeadless(70, 12), "▸ backend")
+	if !ok {
+		t.Fatal("no collapsed backend row")
 	}
-	if !strings.Contains(lines[2], "2") {
-		t.Errorf("root holds all + lint: %q", lines[2])
+	// lint, migrate, migrate:prod.
+	if !strings.Contains(closed, "3") {
+		t.Errorf("backend holds three tasks: %q", closed)
 	}
 
 	a.SetFoldAll(true)
-	lines = a.RenderHeadless(70, 12)
-	if !strings.Contains(lines[2], "▾ (root)") {
-		t.Errorf("row = %q", lines[2])
+	lines := a.RenderHeadless(70, 12)
+	open, ok := find(lines, "▾ backend")
+	if !ok {
+		t.Fatalf("opening it should flip the glyph:\n%s", strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[3], "all") {
-		t.Errorf("row = %q", lines[3])
+	if !strings.Contains(open, "3") {
+		t.Errorf("and keep the count: %q", open)
 	}
 }
 
@@ -235,13 +237,13 @@ func TestTheWindowFollowsTheCursor(t *testing.T) {
 	w, h := 150, 12
 
 	first := a.RenderHeadless(w, h)
-	if !strings.Contains(first[2], "(root)") {
+	if !strings.Contains(first[2], "task000") {
 		t.Errorf("should start at the top: %q", first[2])
 	}
 
 	a.Cursor = 40
 	paged := a.RenderHeadless(w, h)
-	if strings.Contains(paged[2], "(root)") {
+	if strings.Contains(paged[2], "task000") {
 		t.Errorf("the window should have moved to follow the cursor: %q", paged[2])
 	}
 	label := a.Tree.Nodes[a.Rows[a.Cursor].Node].Label
@@ -251,7 +253,7 @@ func TestTheWindowFollowsTheCursor(t *testing.T) {
 
 	// …and back.
 	a.Cursor = 0
-	if home := a.RenderHeadless(w, h); !strings.Contains(home[2], "(root)") {
+	if home := a.RenderHeadless(w, h); !strings.Contains(home[2], "task000") {
 		t.Errorf("row = %q", home[2])
 	}
 }
@@ -682,10 +684,14 @@ func TestDescriptionsAllStartInTheSameColumn(t *testing.T) {
 
 	at := -1
 	for _, l := range a.RenderHeadless(80, 12) {
-		i := strings.Index(l, "A description")
-		if i < 0 {
+		// Runes, not bytes: the cursor's rail is one column and three bytes wide, and a
+		// ruler that cannot tell those apart reports the selected row as misaligned however
+		// well it lines up.
+		before, _, found := strings.Cut(l, "A description")
+		if !found {
 			continue
 		}
+		i := utf8.RuneCountInString(before)
 		if at >= 0 && i != at {
 			t.Errorf("description column moved from %d to %d: %q", at, i, l)
 		}
@@ -693,6 +699,81 @@ func TestDescriptionsAllStartInTheSameColumn(t *testing.T) {
 	}
 	if at < 0 {
 		t.Fatal("no descriptions rendered")
+	}
+}
+
+// The question the domain tree could not answer: standing at `backend`, is there something
+// above that runs it? The namespace's own row says so, in the column descriptions start in.
+func TestANamespaceNamesTheAggregatesThatRunIt(t *testing.T) {
+	a := viewSample(t)
+	a.Reaches = map[string][]string{"backend": {"lint", "all"}}
+
+	row, ok := find(a.RenderHeadless(80, 12), "backend")
+	if !ok {
+		t.Fatal("no backend row")
+	}
+	if !strings.Contains(row, "↑ lint all") {
+		t.Errorf("backend should name what runs it: %q", row)
+	}
+	// The count is still on the end, because the annotation lives in the name column and
+	// not in the signals.
+	if !strings.HasSuffix(strings.TrimRight(row, " "), "3") {
+		t.Errorf("the count was pushed off: %q", row)
+	}
+}
+
+// Only a top-level group of the domain tree has a Key that *is* a namespace. `backend:migrate`
+// is a group and is nobody's namespace, and a `backend` verb group means something else
+// entirely — annotating either would be answering a question nobody asked of that row.
+func TestOnlyDomainNamespacesAreAnnotated(t *testing.T) {
+	a := viewSample(t)
+	a.Reaches = map[string][]string{"backend": {"lint"}, "migrate": {"lint"}}
+	a.SetFoldAll(true)
+
+	if row, ok := find(a.RenderHeadless(80, 16), "migrate"); ok && strings.Contains(row, "↑") {
+		t.Errorf("a nested group is not a namespace: %q", row)
+	}
+
+	a.SetPivot(pivot.VerbName)
+	for _, l := range a.RenderHeadless(80, 16) {
+		if strings.Contains(l, "↑") {
+			t.Errorf("the verb tree groups by verb, not by namespace: %q", l)
+		}
+	}
+}
+
+// The walk lands a beat after the first frame. Until it does the row says nothing, because
+// "not known yet" and "nothing runs this" are different answers and only one is worth
+// drawing.
+func TestANamespaceSaysNothingBeforeTheWalkLands(t *testing.T) {
+	a := viewSample(t)
+	for _, l := range a.RenderHeadless(80, 12) {
+		if strings.Contains(l, "↑") {
+			t.Errorf("nothing is known yet: %q", l)
+		}
+	}
+}
+
+// A namespace run by a dozen aggregates must not push the count off the end or the row past
+// the frame — it shares the description column, and a description already knows how to stop.
+func TestALongCoverageListStaysInsideTheRow(t *testing.T) {
+	a := viewSample(t)
+	a.Reaches = map[string][]string{
+		"backend": {"all", "build", "check", "fmt", "lint", "precommit", "test", "verify"},
+	}
+	for _, width := range []int{28, 40, 70, 120} {
+		for i, row := range strings.Split(a.RenderFrame(width, 12), "\n") {
+			if n := lipgloss.Width(row); n != width {
+				t.Errorf("width %d: row %d is %d columns", width, i, n)
+			}
+		}
+		row, ok := find(a.RenderHeadless(width, 12), "backend")
+		if !ok {
+			t.Fatalf("width %d: no backend row", width)
+		}
+		if !strings.HasSuffix(strings.TrimRight(row, " "), "3") {
+			t.Errorf("width %d: the count was pushed off: %q", width, row)
+		}
 	}
 }
 
@@ -976,11 +1057,13 @@ func TestALeaningRowIsStillExactlyAsWideAsEveryOtherRow(t *testing.T) {
 // not, one column further along.
 func TestTheLeanMovesTheRowRatherThanTrimmingIt(t *testing.T) {
 	a := jiggling(t, []int{0, 1})
+	// A count is what a group row carries, so that is the row to lean.
+	a.Cursor = groupRow(t, a)
 
 	a.Phase = 0
-	still := a.RenderHeadless(70, 12)[0+2]
+	still := a.RenderHeadless(70, 12)[a.Cursor+2]
 	a.Phase = 1
-	leaning := a.RenderHeadless(70, 12)[0+2]
+	leaning := a.RenderHeadless(70, 12)[a.Cursor+2]
 
 	if still == leaning {
 		t.Fatal("the row did not move")
@@ -992,9 +1075,22 @@ func TestTheLeanMovesTheRowRatherThanTrimmingIt(t *testing.T) {
 	}
 	// Specifically including the count at the right edge, which is what a lean that took the
 	// column out of the row's own width would have eaten.
-	if !strings.HasSuffix(content(leaning), "2") {
+	if !strings.HasSuffix(content(leaning), "1") {
 		t.Errorf("the count did not survive the lean: %q", leaning)
 	}
+}
+
+// groupRow is the first row of the picker that is a group, for the tests about what only a
+// group row draws.
+func groupRow(t *testing.T, a *App) int {
+	t.Helper()
+	for i, r := range a.Rows {
+		if a.Tree.Nodes[r.Node].IsGroup() {
+			return i
+		}
+	}
+	t.Fatal("no group row")
+	return 0
 }
 
 // Every other row holds the room open too, so the list does not reflow as the cursor goes

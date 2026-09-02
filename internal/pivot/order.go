@@ -11,7 +11,8 @@ import (
 //
 // Each of the three built-in pivots used to sort its own nodes its own way — domain
 // alphabetically with subgroups sunk to the bottom, verb by group size with the bare
-// aggregate hoisted, path pivots alphabetically with `(other)` pushed last. Three rules in
+// aggregate hoisted, path pivots alphabetically with what they could not place pushed last.
+// Three rules in
 // three places, none of them nameable, none of them yours.
 //
 // They are one rule now, and the differences between them are data on the nodes: Rank for
@@ -108,11 +109,13 @@ type Order struct {
 	Ran func(name string) (Outcome, bool)
 }
 
-// Rank is the coarse bucket a node sits in, and it beats every other consideration.
+// Rank is the coarse bucket a node sits in, for the few rows whose position is part of what
+// the pivot means rather than a matter of taste: an unnamespaced task opens the domain tree,
+// a task the grouping could not place closes any tree that has one, and a verb group's own
+// aggregate sits directly above its fan-out.
 //
-// For the few rows whose position is part of what the pivot means rather than a matter of
-// taste: `(root)` opens the domain tree, `(other)` closes any tree that has one, and a verb
-// group's own aggregate sits directly above its fan-out.
+// It outranks the key you are sorting on, with one exception — see `ranks`, where the hoists
+// give way to an order you asked for by name and the sink does not.
 const (
 	RankFirst  = -1
 	RankNormal = 0
@@ -240,8 +243,8 @@ func (o Order) less(a, b Node, by By) bool {
 	if a.Facets.Pin != b.Facets.Pin {
 		return a.Facets.Pin < b.Facets.Pin
 	}
-	if a.Rank != b.Rank {
-		return a.Rank < b.Rank
+	if ra, rb := o.ranks(a, b); ra != rb {
+		return ra < rb
 	}
 	if !o.Interleave && a.IsGroup() != b.IsGroup() {
 		return !a.IsGroup()
@@ -255,6 +258,29 @@ func (o Order) less(a, b Node, by By) bool {
 		return a.Label < b.Label
 	}
 	return a.Key < b.Key
+}
+
+// ranks is the two rows' Ranks, with the hoists dropped when you have named an order of
+// your own.
+//
+// A hoist is the pivot saying "read this first", and that is worth outranking a sort key
+// only while you are reading the pivot the way it means to be read. Name `recent` and the
+// question you are asking is *what did I just run* — a question the hoist has no view on and
+// was silently answering anyway. With the unnamespaced tasks floated one at a time rather
+// than pooled under one `(root)` header, it answered it a dozen rows deep: `recent` could
+// not put `backend:test` on top of a Taskfile with twelve root tasks, however recently you
+// had run it.
+//
+// The sink stays, and the asymmetry is the point. `RankLast` is not a claim about recency
+// that a better answer could displace; it is the grouping admitting it had nothing to say
+// about these rows. Dropping it would not merely un-sink them — leaves sort above groups, so
+// the tasks the pivot could not place would land at the *top*, which is the opposite of what
+// the rank means.
+func (o Order) ranks(a, b Node) (int, int) {
+	if o.By == ByNatural {
+		return a.Rank, b.Rank
+	}
+	return max(a.Rank, RankNormal), max(b.Rank, RankNormal)
 }
 
 // compare answers the ordering's own question, or says it has no answer and leaves the two

@@ -405,13 +405,23 @@ func rootRun(cmd *cobra.Command, args []string) error {
 
 	if opts.screenshot != "" {
 		a.StartEnrichment()
+		a.StartCoverage()
 		a.AwaitDetails(detailGrace)
+		// Its own grace, and a longer one: this walk is a process spawn per node and the
+		// listing's budget was set for one call.
+		a.AwaitCoverage(coverGrace)
 		return screenshot(a, opts.screenshot, opts.keys)
 	}
 
 	// Where each task is written, and whether it is up to date. Started here rather than in
 	// New because it shells out, and only the interactive path has a use for the answer.
 	a.StartEnrichment()
+
+	// Which aggregates run which namespace. The interactive path only, and for a stronger
+	// reason than the listing: this is a `task --summary` per node of every aggregate's
+	// graph, which is the most expensive thing taskui asks go-task for. A one-shot that
+	// renders a frame and exits would pay all of it for one screen.
+	a.StartCoverage()
 
 	// No options: the alternate screen is a property of the frame now, and App.View sets it.
 	program := tea.NewProgram(a)
@@ -502,8 +512,8 @@ func dumpPivot(mode string, a *app.App) error {
 
 	// The grouping and the ordering that are answers about *where a task is written* need
 	// the JSON listing, which nothing on this path would otherwise fetch. A one-shot dump
-	// has no first frame to be late for, so it waits rather than printing a tree with every
-	// task pooled into `(other)` and no hint that anything was missing.
+	// has no first frame to be late for, so it waits rather than printing a flat list with no
+	// hint that any grouping was missing.
 	if mode == theme.FilePivot || a.Ordering().By == pivot.ByFile {
 		a.StartEnrichment()
 		a.AwaitDetails(detailGrace)
@@ -835,6 +845,11 @@ func drive(a *app.App, feed string) {
 // the alternative is a frame that differs run to run depending on how the race went — which
 // is the opposite of what `--screenshot` is for.
 const detailGrace = 5 * time.Second
+
+// coverGrace is the same budget for the coverage walk, which is a `task --summary` per node
+// of every aggregate's graph rather than one call — dozens of process spawns on a Taskfile
+// the check is worth running on at all.
+const coverGrace = 20 * time.Second
 
 func screenshot(a *app.App, size, feed string) error {
 	w, h, err := parseSize(size)

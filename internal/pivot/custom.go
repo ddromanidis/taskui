@@ -23,7 +23,7 @@ type Pivot struct {
 	// Name is what `p` cycles through and what `--dump` takes.
 	Name string
 	// Build makes the tree. The two built-ins have shapes a plain path cannot express —
-	// domain folds a root-level task into its own namespace, verb pools singletons — so
+	// domain folds a root-level task into its own namespace, verb sets singletons loose — so
 	// this is a function rather than a key.
 	Build func(tasks []task.Task, visible []int) *Tree
 	// Natural is the order this grouping is meant to be read in, used when the config has
@@ -139,16 +139,15 @@ func buildByPath(tasks []task.Task, visible []int, name string, path func(task.T
 	}
 
 	// A task the pivot had no answer for still has to be reachable. Dropping it would mean
-	// the list silently holds fewer tasks than the header says.
-	if len(homeless) > 0 {
-		gi := tree.push(OtherGroup, name+":"+OtherGroup)
-		tree.Nodes[gi].Rank = RankLast
-		tree.Roots = append(tree.Roots, gi)
-		for _, ti := range homeless {
-			leaf := tree.push(tasks[ti].Name, fmt.Sprintf("%s:%s/%s", name, OtherGroup, tasks[ti].Name))
-			tree.Nodes[leaf].Task = ti
-			tree.Nodes[gi].Children = append(tree.Nodes[gi].Children, leaf)
-		}
+	// the list silently holds fewer tasks than the header says — and pooling it into a fold
+	// called `(other)` was very nearly the same thing, since folds start closed and that one
+	// named nothing. It sits at the top level under its own name, ranked below the groups the
+	// pivot did find.
+	for _, ti := range homeless {
+		leaf := tree.push(tasks[ti].Name, fmt.Sprintf("%s:%s", name, tasks[ti].Name))
+		tree.Nodes[leaf].Task = ti
+		tree.Nodes[leaf].Rank = RankLast
+		tree.Roots = append(tree.Roots, leaf)
 	}
 
 	return tree
@@ -294,9 +293,10 @@ func fingerprint(tasks []task.Task) string {
 // runPivotCommand asks a program where every task belongs.
 //
 // The protocol is the smallest thing that could work: task names in on stdin, one per line;
-// `name<TAB>outer/inner` back on stdout. A name it says nothing about pools into `(other)`,
-// which is also what happens if the program is missing, fails, or takes too long — a pivot
-// that cannot answer should leave you with a usable list, not an empty one.
+// `name<TAB>outer/inner` back on stdout. A name it says nothing about is listed on its own
+// below the groups, which is also what happens if the program is missing, fails, or takes
+// too long — a pivot that cannot answer should leave you with a flat list, not an empty one
+// and not one closed fold.
 //
 // Every task, not just the visible ones: a filter changes what is shown and cannot change
 // where a task belongs, and asking about the whole list is what makes the answer cacheable.

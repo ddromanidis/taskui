@@ -40,8 +40,8 @@ type Task struct {
 	// destroys data?
 	Dangerous bool
 	// Where the task is written, once the JSON listing has arrived. Zero until then, which
-	// is why the file pivot pools everything into `(other)` for the first moment of a
-	// session and then fills in.
+	// is why the file pivot lists everything ungrouped for the first moment of a session
+	// and then fills in.
 	Where Where
 }
 

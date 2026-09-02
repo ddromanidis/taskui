@@ -91,6 +91,7 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.PollRun()
 		a.PollWatch()
 		a.collectDetails()
+		a.collectCoverage()
 		a.refreshProfile()
 		a.noteFinished()
 		return a, tea.Batch(a.tick(), a.ringBell())

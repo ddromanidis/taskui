@@ -176,17 +176,18 @@ func wrapText(s string, width int) string {
 // fixture, in the run, and in the prose, and a demo where the text talks about one task and
 // the frame shows another would be worse than no demo.
 const (
-	sampleAll  = "all"
-	sampleFmt  = "fmt"
-	sampleLint = "lint"
-	sampleTest = "backend:test"
+	sampleAll   = "all"
+	sampleFmt   = "fmt"
+	sampleLint  = "lint"
+	sampleTest  = "backend:test"
+	sampleBuild = "build"
 )
 
 // sampleTasks is a Taskfile shaped like a real one: namespaces, cross-cutting verbs, a
 // namespace that is also a task, and descriptions long enough to wrap.
 var sampleTasks = []struct{ name, desc string }{
 	{sampleAll, "Everything: format, lint, test, build"},
-	{"build", "Compile the workspace"},
+	{sampleBuild, "Compile the workspace"},
 	{"check", "Type-check and vet only — the fastest feedback there is"},
 	{sampleFmt, "Format every source file"},
 	{sampleLint, "Lint everything, then check the architecture"},
@@ -232,6 +233,17 @@ func sampleApp() *app.App {
 		"backend:lint": {Ok: true, WhenUnix: hour},
 		"api:lint":     {Ok: true, WhenUnix: hour},
 	}
+	// What the coverage walk would have found, stated rather than walked: the examples render
+	// from a fixture and there is no Taskfile behind it to ask `task --summary` about. Root
+	// `build` reaches both namespaces that answer it, `lint` reaches all three, and `test`
+	// reaches only the backend — which is the interesting one, because `site` and `api` are
+	// then visibly not covered by it.
+	a.Reaches = map[string][]string{
+		"api":     {sampleLint},
+		"backend": {sampleBuild, sampleLint, "test"},
+		"site":    {sampleBuild, sampleLint},
+	}
+
 	a.SetFoldAll(false)
 	return a
 }
@@ -335,9 +347,11 @@ var examples = []example{{
 	name:  "browse",
 	title: "Finding a task in a Taskfile you did not write",
 	parts: []part{
-		text("Opening a project gives you its shape, not its list. Namespaces are folds, and the " +
-			"number on the right is how many tasks are inside."),
-		frame(draw(11, "", nil)),
+		text("Opening a project gives you what it is for and then its shape: the tasks with no " +
+			"namespace stand on their own, and the namespaces below them are folds with the " +
+			"number of tasks inside on the right. A namespace also names the aggregates that " +
+			"run it, so `↑ build lint test` on `backend` is three tasks above it that reach in."),
+		frame(draw(18, "", nil)),
 		text("`space` opens one. `⇧O` or `⇥` opens everything at once, which on a large " +
 			"Taskfile is how you go from shape to detail and back."),
 		frame(draw(14, "\t", nil)),
