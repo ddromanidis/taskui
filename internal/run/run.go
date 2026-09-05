@@ -34,6 +34,7 @@ import (
 
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/redact"
+	"github.com/ddromanidis/taskui/internal/task"
 )
 
 type Status int
@@ -680,7 +681,7 @@ func (r *Run) Command() string {
 	if len(r.Args) == 0 {
 		return "task " + r.Root + force
 	}
-	return "task " + r.Root + force + " " + strings.Join(r.Args, " ")
+	return "task " + r.Root + force + " " + task.JoinArgs(r.Args)
 }
 
 // FromStored rebuilds a finished run from the archive.

@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -520,6 +521,19 @@ func TestTwoRunsOfOneTaskInOneSecondBothSurvive(t *testing.T) {
 // atCommit archives a run of `test` at a given revision. The commit is written straight
 // into the manifest rather than derived: Save reads the real repository, and a test must not
 // depend on which one it happens to be sitting in.
+// withArgs is atCommit for a run that carried arguments. One commit throughout: what these
+// tests vary is the command line, and the commit being the same is the premise.
+func withArgs(t *testing.T, base string, args []string, ok bool, ago int) {
+	t.Helper()
+	r := agedRun("test", "test", ok, ago)
+	r.Args = args
+	dir, err := Save(base, "/proj", r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewriteStored(t, base, dir, func(m *Manifest) { m.Commit = "abc1234" })
+}
+
 func atCommit(t *testing.T, base, project, commit string, ok bool, ago int) {
 	t.Helper()
 	dir, err := Save(base, project, agedRun("test", "test", ok, ago))
@@ -639,6 +653,43 @@ func TestFlakesAreScopedToTheProject(t *testing.T) {
 	}
 }
 
+// Same commit, two different commands, two different answers: that is two questions with
+// one answer each, not one question with two.
+func TestTheSameTaskWithDifferentArgumentsIsNotAFlake(t *testing.T) {
+	base := t.TempDir()
+	withArgs(t, base, []string{"ENV=prod"}, true, 300)
+	withArgs(t, base, []string{"ENV=staging"}, false, 200)
+
+	if got := Flaky(base, "/proj"); len(got) != 0 {
+		t.Errorf("two different invocations were called one flaky task: %+v", got)
+	}
+
+	// The same command going both ways still is one, and it says which command.
+	withArgs(t, base, []string{"ENV=prod"}, false, 100)
+	got := Flaky(base, "/proj")
+	if len(got) != 1 {
+		t.Fatalf("got %d flakes, want 1: %+v", len(got), got)
+	}
+	if got[0].Invocation() != "ENV=prod" {
+		t.Errorf("invocation = %q, want the arguments that went both ways", got[0].Invocation())
+	}
+}
+
+// A timeline row names the run it belongs to, and two runs of one task that were invoked
+// differently are the surprising durations it exists to explain.
+func TestATimelinePointCarriesTheArgumentsItRanWith(t *testing.T) {
+	base := t.TempDir()
+	withArgs(t, base, []string{"--", "My Post Title"}, true, 300)
+
+	points := Timeline(base, "/proj", "test")
+	if len(points) != 1 {
+		t.Fatalf("got %d points", len(points))
+	}
+	if got := points[0].Command(); got != `task test -- "My Post Title"` {
+		t.Errorf("command = %q, want one that would run again as written", got)
+	}
+}
+
 func TestASteadyTaskIsNotAFlake(t *testing.T) {
 	base := t.TempDir()
 	for i := range 5 {
@@ -703,5 +754,32 @@ func TestAManifestFromTheFutureIsSkipped(t *testing.T) {
 
 	if got := len(List(base)); got != 0 {
 		t.Errorf("listed %d runs from a format this build does not know", got)
+	}
+}
+
+// A worktree is a different directory holding the same repository, and the archive has to
+// be able to tell that from a different project.
+func TestARunRecordsTheRepositoryItsDirectoryBelongsTo(t *testing.T) {
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "-C", dir, "init").CombinedOutput(); err != nil {
+		t.Skipf("no git here: %v: %s", err, out)
+	}
+	repo := RepoOf(dir)
+	if repo == "" {
+		t.Fatal("a fresh checkout reported no repository")
+	}
+
+	base := t.TempDir()
+	if _, err := Save(base, dir, finishedRun("all")); err != nil {
+		t.Fatal(err)
+	}
+	listed := List(base)
+	if len(listed) != 1 || listed[0].Repo != repo {
+		t.Errorf("manifest repo = %q, want %q", listed[0].Repo, repo)
+	}
+
+	// A directory that is not a checkout says so rather than guessing.
+	if got := RepoOf(t.TempDir()); got != "" {
+		t.Errorf("RepoOf outside a checkout = %q", got)
 	}
 }

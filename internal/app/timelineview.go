@@ -24,9 +24,15 @@ func (a *App) timelineHeader() line {
 	}
 	var state []span
 	if n := len(a.TimelineFlakes); n > 0 {
+		// Counted by commit, not by flake: with arguments in the key one commit can produce
+		// several, and "3 commits" over a single revision would be a plain lie.
+		commits := map[string]bool{}
+		for _, f := range a.TimelineFlakes {
+			commits[f.Commit] = true
+		}
 		where := a.TimelineFlakes[0].Short()
-		if n > 1 {
-			where = fmt.Sprintf("%d commits", n)
+		if len(commits) > 1 {
+			where = fmt.Sprintf("%d commits", len(commits))
 		}
 		state = append(state, styled("flaky at "+where+"   ", fg(t.Colors.Notice)))
 	}
@@ -93,9 +99,12 @@ func (a *App) drawTimeline(width, height int) []string {
 	barWidth := timelineBar(width)
 	// The commit is the last thing to earn its column and the first to lose it.
 	showCommit := width >= 104
+	// Keyed by the whole question rather than by the commit: with arguments in the key, one
+	// commit can hold a flaky `ENV=staging` and a perfectly steady `ENV=prod`, and marking
+	// both would be the header telling on the wrong row.
 	flaky := map[string]bool{}
 	for _, f := range a.TimelineFlakes {
-		flaky[f.Commit] = true
+		flaky[f.Question()] = true
 	}
 
 	out := make([]string, 0, height)
@@ -119,7 +128,7 @@ func (a *App) drawTimeline(width, height int) []string {
 			// Dimmer than the command beside it: it is there to be compared with the rows
 			// above and below, not read.
 			style := fg(t.Colors.Faint)
-			if flaky[p.Commit] {
+			if flaky[p.Question()] {
 				style = fg(t.Colors.Notice)
 			}
 			l = append(l, styled(padRight(shortCommit(p.Commit), 10), style))

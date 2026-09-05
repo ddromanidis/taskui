@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -66,6 +67,21 @@ func (t Task) Verb() string {
 // into prose often enough — "…-- -p ingest for one crate" — that pre-filling would hand
 // you a command that is wrong in a way you might not notice before pressing enter.
 func (t Task) ArgsHint() (string, bool) {
+	hints := t.ArgsHints()
+	if len(hints) == 0 {
+		return "", false
+	}
+	return hints[0], true
+}
+
+// ArgsHints is every example the description spells out, in the order they appear.
+//
+// One description often carries more than one — "task backend:test -- -p ingest, or
+// task backend:test -- -p api" — and the first is only the one the hint has room for. The
+// args prompt completes against the rest, which makes a convention nobody has to adopt
+// into a set of presets for Taskfiles nobody is going to edit.
+func (t Task) ArgsHints() []string {
+	var out []string
 	// Descriptions are written from inside the file that defines the task, so an included
 	// one often spells its example with the bare name: `site/Taskfile.yml` says
 	// "task new -- …" for what the root calls `site:new`. Try both.
@@ -74,16 +90,28 @@ func (t Task) ArgsHint() (string, bool) {
 		needles = append(needles, "task "+v+" ")
 	}
 	for _, needle := range needles {
-		at := strings.Index(t.Desc, needle)
-		if at < 0 {
-			continue
-		}
-		if hint := trimProse(t.Desc[at+len(needle):]); hint != "" {
-			return hint, true
+		rest := t.Desc
+		for {
+			at := strings.Index(rest, needle)
+			if at < 0 {
+				break
+			}
+			rest = rest[at+len(needle):]
+			if hint := trimProse(rest); hint != "" && !slices.Contains(out, hint) {
+				out = append(out, hint)
+			}
 		}
 	}
+	if len(out) == 0 {
+		if inner, ok := t.parenHint(); ok {
+			out = append(out, inner)
+		}
+	}
+	return out
+}
 
-	// Bare `NAME=value` conventions, e.g. "(NAME=add_x)" or "(WORD=адрес)".
+// parenHint reads the bare `NAME=value` conventions, e.g. "(NAME=add_x)" or "(WORD=адрес)".
+func (t Task) parenHint() (string, bool) {
 	open := strings.Index(t.Desc, "(")
 	if open < 0 {
 		return "", false
@@ -146,6 +174,38 @@ func trimProse(rest string) string {
 		}
 	}
 	return strings.TrimRight(strings.TrimSpace(rest[:end]), ".,` ")
+}
+
+// JoinArgs is SplitArgs backwards: the line that splits back into these arguments.
+//
+// Needed the moment a stored argument list is put back in front of you. `-- "My Post
+// Title"` comes out of the archive as two arguments, and joining them with a space would
+// hand back a line that runs as four.
+func JoinArgs(args []string) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		parts = append(parts, quoteArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func quoteArg(arg string) string {
+	if arg == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(arg, " \t'\"\\") {
+		return arg
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, c := range arg {
+		if c == '"' || c == '\\' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(c)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // SplitArgs splits an args line the way a shell would, so quoted arguments survive.

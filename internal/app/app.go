@@ -50,6 +50,35 @@ const (
 	ScreenProfile
 )
 
+// HistoryScope is how much of the archive the history list shows.
+//
+// Three rungs rather than the on/off it started as, because there is a real answer between
+// them. The archive is keyed by the directory a run happened in; a git worktree is a
+// different directory holding the same project, so the day you branch, every task's history
+// starts again from nothing — while "all projects" swings too far the other way and mixes
+// in the repositories you were not asking about.
+type HistoryScope int
+
+const (
+	// ScopeProject is the directory taskui was opened in, and the default.
+	ScopeProject HistoryScope = iota
+	// ScopeRepo is every checkout of this repository — the worktrees, and the main one.
+	ScopeRepo
+	// ScopeEverywhere is every project in the archive.
+	ScopeEverywhere
+)
+
+func (s HistoryScope) String() string {
+	switch s {
+	case ScopeRepo:
+		return "this repo"
+	case ScopeEverywhere:
+		return "all projects"
+	default:
+		return "this project"
+	}
+}
+
 // Fold is how much of a task's output is on screen.
 //
 // Three states rather than open-or-shut, because a run is two things at once: a shape you
@@ -320,10 +349,19 @@ type App struct {
 	History       []store.Manifest
 	HistoryCursor int
 	HistoryOffset int
-	// HistoryAllProjects widens the archive beyond this project. Scoped by default: runs
-	// from every project in one list stops being useful the moment you use taskui in two
-	// repos.
-	HistoryAllProjects bool
+	// HistoryScope is how wide the archive list is: this directory, this repository, or
+	// everything. Narrow by default — runs from every project in one list stops being
+	// useful the moment you use taskui in two repos — and widened a rung at a time, because
+	// the rung in the middle is the one a worktree needs. The archive is keyed by directory,
+	// and a worktree is a different directory holding the same project, so without it
+	// `⇧H` on a task you have run for months is empty the day you branch.
+	HistoryScope HistoryScope
+	// repo is this project's checkout, shared by every worktree of it, and repoRead says the
+	// question has been put to git. Asked once and lazily: it is a process spawn on a path
+	// only the history list takes, and the several hundred tests that build an App from a
+	// fixture are not in a checkout at all.
+	repo     string
+	repoRead bool
 
 	// Jumping moves the cursor without narrowing the list — what you want when you are
 	// looking at the tree rather than filtering it.
@@ -356,8 +394,26 @@ type App struct {
 	DetailOf     string
 	Detail       graph.Detail
 	DetailOffset int
-	// Watching is the task being re-run when the source changes.
-	Watching string
+	// The Taskfile watch: what it is pointed at, and the re-read it kicks off. See
+	// reload.go — the list used to be read once and never again, while `e` opens the file
+	// it was read from.
+	taskfileWatch    *watch.Watch
+	watchedTaskfiles []string
+	watchingTaskfile bool
+	reloadCh         chan reloaded
+	reloadPending    bool
+	// enriching and covering say the two background lookups were asked for, so a reload
+	// knows to start them again — and, just as importantly, knows not to start them on a
+	// path that never opted in. Both shell out.
+	enriching bool
+	covering  bool
+
+	// Watching is the tasks being re-run when the source changes.
+	//
+	// A set rather than one name: marks already say "these belong together", and `check`
+	// split across three tasks is the loop watch mode exists for. One task is the set of
+	// one, which is what it was before.
+	Watching []string
 	watcher  *watch.Watch
 
 	// One task's history, and the diff between two of its runs.
@@ -430,6 +486,22 @@ type App struct {
 	// if the caret lands after the `=`.
 	ArgsCursor int
 	ArgsTarget string
+	// argsVars is what the target task declares it requires, kept from the lookup that
+	// pre-filled the prompt so ⇥ can complete against it without spending a second one.
+	argsVars []string
+	// argsPast is the argument lists this task has been run with before, and argsPastRead
+	// says the archive has been walked — the walk is lazy, and finding nothing is an answer
+	// worth remembering.
+	argsPast     [][]string
+	argsPastRead bool
+	// argsComp is the ⇥-completion cycle, while one is running.
+	argsComp *argsCompletion
+	// argsPrefill is what BeginArgs put on the line and argsFromHistory says it came from
+	// the archive rather than from a declaration. The footer says so only while the line is
+	// still untouched — compared against the input rather than cleared on edit, because a
+	// flag cleared in four places is a label that lies the once it is missed.
+	argsPrefill     string
+	argsFromHistory bool
 
 	// Confirm is whatever is waiting on a yes. `⏎` runs things for real, and a fuzzy
 	// filter puts every task one keypress away, so the ones that touch production get a
@@ -554,6 +626,7 @@ func (a *App) StartEnrichment() {
 	if a.detailCh != nil {
 		return
 	}
+	a.enriching = true
 	ch := make(chan map[string]task.Detail, 1)
 	a.detailCh = ch
 	root := a.Root
@@ -590,6 +663,7 @@ func (a *App) StartCoverage() {
 	if a.reachCh != nil {
 		return
 	}
+	a.covering = true
 	ch := make(chan map[string][]string, 1)
 	a.reachCh = ch
 	root, tasks := a.Root, slices.Clone(a.Tasks)
@@ -699,6 +773,9 @@ func (a *App) applyDetails(details map[string]task.Detail) {
 			a.Tasks[i].Where = d.Where
 		}
 	}
+	// The listing is the only thing that knows where the tasks are actually written, so it
+	// is also the moment an `includes:` file becomes watchable.
+	a.rewatchTaskfile()
 	a.Rebuild(a.SelectedTask())
 }
 
@@ -1286,6 +1363,12 @@ func (a *App) BeginArgs(name string) {
 	a.EnteringArgs = true
 	a.ArgsTarget = name
 	a.Status = ""
+	// What ⇥ completes belongs to the task the prompt is aimed at, and this may be the
+	// second task it has been aimed at.
+	a.argsPast = nil
+	a.argsPastRead = false
+	a.argsComp = nil
+	a.argsFromHistory = false
 
 	// One `--summary`, ~40ms, only when the prompt opens.
 	vars := graph.RequiredVars(a.Root, name)
@@ -1300,7 +1383,20 @@ func (a *App) BeginArgs(name string) {
 	for _, k := range vars {
 		parts = append(parts, k+"=")
 	}
+	a.argsVars = vars
 	a.ArgsInput = strings.Join(parts, " ")
+	// Nothing declared and nothing mined leaves an empty line — and the best answer
+	// available then is the one you gave last time. It is your own decision coming back,
+	// not an example from someone else's description, which is the whole reason the `e.g.`
+	// hint is only ever shown: `-- -p ingest` typed four times a day is four times it did
+	// not have to be. A declaration still wins, because its value is what changes per run.
+	if a.ArgsInput == "" {
+		if past := a.argsHistory(); len(past) > 0 {
+			a.ArgsInput = task.JoinArgs(past[0])
+			a.argsFromHistory = true
+		}
+	}
+	a.argsPrefill = a.ArgsInput
 	a.ArgsCursor = len([]rune(a.ArgsInput))
 }
 
@@ -1309,6 +1405,12 @@ func (a *App) CancelArgs() {
 	a.ArgsTarget = ""
 	a.ArgsInput = ""
 	a.ArgsCursor = 0
+	a.argsPrefill = ""
+	a.argsFromHistory = false
+	a.argsVars = nil
+	a.argsPast = nil
+	a.argsPastRead = false
+	a.argsComp = nil
 }
 
 func (a *App) ArgsInsert(c rune) {
@@ -1461,10 +1563,19 @@ func (a *App) DetailScroll(delta int) {
 	a.DetailOffset = max(0, a.DetailOffset+delta)
 }
 
-// ToggleWatch watches the project and re-runs this task whenever something changes.
+// ToggleWatch watches the project and re-runs what is watched whenever something changes.
+//
+// What gets watched is the marked set if there is one, and otherwise the single task this
+// screen is about — the run you are looking at, or the row under the cursor in the picker.
+// Marks win because they are the more deliberate statement: you do not mark three tasks by
+// accident, and a `check` that is three tasks is exactly the loop this replaces.
+//
+// The marks are left standing rather than consumed the way `⏎` consumes them. `⏎` starts a
+// set once, so spending them is right; this arms a mode that keeps referring to them, and a
+// set that vanished the moment it was armed could not be seen or corrected.
 func (a *App) ToggleWatch() {
-	if a.Watching != "" {
-		a.Watching = ""
+	if len(a.Watching) > 0 {
+		a.Watching = nil
 		if a.watcher != nil {
 			a.watcher.Close()
 			a.watcher = nil
@@ -1472,56 +1583,113 @@ func (a *App) ToggleWatch() {
 		a.Status = "watch off"
 		return
 	}
-	if a.Run == nil {
-		a.Status = "nothing to watch — run something first"
-		return
+
+	names := a.Marked()
+	if len(names) == 0 {
+		name, ok := a.watchTarget()
+		if !ok {
+			return
+		}
+		names = []string{name}
 	}
-	name := a.Run.Root
+
 	w, err := watch.Start(a.Root)
 	if err != nil {
 		a.Status = fmt.Sprintf("could not watch this directory: %v", err)
 		return
 	}
 	a.watcher = w
-	a.Watching = name
-	a.Status = fmt.Sprintf("watching — `task %s` re-runs when files change", name)
+	a.Watching = names
+	if len(names) == 1 {
+		a.Status = fmt.Sprintf("watching — `task %s` re-runs when files change", names[0])
+		return
+	}
+	a.Status = fmt.Sprintf("watching — %d marked tasks re-run when files change", len(names))
+}
+
+// watchTarget is the one task to watch when nothing is marked.
+func (a *App) watchTarget() (string, bool) {
+	if a.Screen == ScreenPicker {
+		if ti := a.SelectedTask(); ti >= 0 {
+			return a.Tasks[ti].Name, true
+		}
+		a.Status = "nothing to watch here — space folds it"
+		return "", false
+	}
+	if a.Run == nil {
+		a.Status = "nothing to watch — run something first"
+		return "", false
+	}
+	return a.Run.Root, true
+}
+
+// WatchLabel names what is being watched, for the header.
+func (a *App) WatchLabel() string {
+	switch len(a.Watching) {
+	case 0:
+		return ""
+	case 1:
+		return a.Watching[0]
+	default:
+		return fmt.Sprintf("%d tasks", len(a.Watching))
+	}
 }
 
 // PollWatch re-runs if the watcher has settled on a change.
+//
+// A set is started the way the marked set is started: what fits in the free slots goes, and
+// what does not is said out loud. Silently watching four of six tasks would be a mode that
+// lies about what it is doing — and with a set larger than the slots, the tasks that lost
+// are the ones you would never see fail.
 func (a *App) PollWatch() bool {
-	if a.Watching == "" || a.watcher == nil {
+	if len(a.Watching) == 0 || a.watcher == nil {
 		return false
 	}
 	changed, ok := a.watcher.Poll()
 	if !ok {
 		return false
 	}
-	name := a.Watching
-	// Never stack a task on top of itself: a save during a build would otherwise kill the
-	// build that is already checking the previous save. Scoped to the watched task's own
-	// slot — something else running in another slot is not this one's business, which is
-	// the whole point of the slots.
-	if a.liveSlot(name) {
-		return false
+
+	started, skipped := 0, 0
+	for _, name := range a.Watching {
+		// Never stack a task on top of itself: a save during a build would otherwise kill
+		// the build that is already checking the previous save. Scoped to the watched
+		// task's own slot — something else running in another slot is not this one's
+		// business, which is the whole point of the slots.
+		if a.liveSlot(name) {
+			continue
+		}
+		if a.openSlots() >= MaxSlots {
+			skipped++
+			continue
+		}
+
+		var args []string
+		if r := a.slotRun(name); r != nil {
+			args = r.Args
+			a.InteractiveNext = r.Interactive
+			a.ForceNext = r.Force
+		}
+
+		// Deliberately bypasses the confirmation: watch mode is opt-in, on tasks you chose,
+		// and a `y` prompt firing on every keystroke would be unusable. Which is also why
+		// arming it on a production task is a bad idea.
+		if err := a.StartRunWith(name, args); err != nil {
+			a.Status = fmt.Sprintf("could not re-run `task %s`: %v", name, err)
+			return false
+		}
+		started++
 	}
 
-	var args []string
-	if r := a.slotRun(name); r != nil {
-		args = r.Args
-		a.InteractiveNext = r.Interactive
-		a.ForceNext = r.Force
-	}
-
-	// Deliberately bypasses the confirmation: watch mode is opt-in, on a task you just
-	// ran, and a `y` prompt firing on every keystroke would be unusable. Which is also why
-	// arming it on a production task is a bad idea.
-	if err := a.StartRunWith(name, args); err != nil {
-		a.Status = fmt.Sprintf("could not re-run `task %s`: %v", name, err)
+	if started == 0 && skipped == 0 {
 		return false
 	}
-	a.Watching = name
-	a.Status = fmt.Sprintf("%s changed — re-running", filepath.Base(changed))
-	return true
+	what := filepath.Base(changed) + " changed — re-running"
+	if skipped > 0 {
+		what = fmt.Sprintf("%s changed — re-ran %d, %d had no free slot", filepath.Base(changed), started, skipped)
+	}
+	a.Status = what
+	return started > 0
 }
 
 // clipboardTools are shelled out to rather than taken as a dependency: one of these exists
@@ -1736,16 +1904,36 @@ func (a *App) OpenHistory() {
 
 func (a *App) reloadHistory() {
 	all := store.List(a.stateDir)
-	if a.HistoryAllProjects {
+	if a.HistoryScope == ScopeEverywhere {
 		a.History = all
 		return
 	}
 	a.History = nil
 	for _, m := range all {
-		if m.Dir == a.Root {
+		if a.inHistoryScope(m) {
 			a.History = append(a.History, m)
 		}
 	}
+}
+
+// inHistoryScope is whether a stored run belongs in the list at the current scope.
+//
+// The repository rung falls back to the directory when either side has no repo recorded:
+// manifests written before `Repo` existed have none, and answering "not the same repo" for
+// a run made in this very directory would lose history the narrow scope always showed.
+func (a *App) inHistoryScope(m store.Manifest) bool {
+	if m.Dir == a.Root {
+		return true
+	}
+	return a.HistoryScope == ScopeRepo && a.repoDir() != "" && m.Repo == a.repoDir()
+}
+
+func (a *App) repoDir() string {
+	if !a.repoRead {
+		a.repoRead = true
+		a.repo = store.RepoOf(a.Root)
+	}
+	return a.repo
 }
 
 func (a *App) BeginHistorySearch() {
@@ -1807,8 +1995,13 @@ func (a *App) applyHistorySearch() {
 	a.HistoryCursor = 0
 }
 
+// ToggleHistoryScope widens the list a rung, and wraps back to this project from the top.
+//
+// The repository rung is skipped where it would be the same list twice: outside a checkout
+// there is no repository to widen to, and in an ordinary clone with no worktrees it holds
+// exactly what this project already holds.
 func (a *App) ToggleHistoryScope() {
-	a.HistoryAllProjects = !a.HistoryAllProjects
+	a.HistoryScope = a.nextHistoryScope()
 	keep := ""
 	if a.HistoryCursor < len(a.History) {
 		keep = a.History[a.HistoryCursor].ID
@@ -1823,6 +2016,35 @@ func (a *App) ToggleHistoryScope() {
 		}
 	}
 	a.Status = ""
+}
+
+func (a *App) nextHistoryScope() HistoryScope {
+	switch a.HistoryScope {
+	case ScopeProject:
+		if a.otherWorktrees() {
+			return ScopeRepo
+		}
+		return ScopeEverywhere
+	case ScopeRepo:
+		return ScopeEverywhere
+	default:
+		return ScopeProject
+	}
+}
+
+// otherWorktrees is whether the archive holds runs from this repository made somewhere
+// other than here — which is the only case where the middle rung shows anything new.
+func (a *App) otherWorktrees() bool {
+	repo := a.repoDir()
+	if repo == "" {
+		return false
+	}
+	for _, m := range store.List(a.stateDir) {
+		if m.Repo == repo && m.Dir != a.Root {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *App) SetFilterContext(delta int) {
@@ -2527,7 +2749,7 @@ func (a *App) RunToggleFoldAll() {
 func (a *App) ToggleForce() {
 	a.ForceNext = !a.ForceNext
 	if a.ForceNext {
-		a.Status = "force: the next run ignores go-task's up-to-date checks"
+		a.Status = "force: the next run ignores up-to-date checks — again to turn it off"
 	} else {
 		a.Status = "force off"
 	}

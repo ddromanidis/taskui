@@ -104,6 +104,50 @@ func TestTrimsTrailingProseFromAHint(t *testing.T) {
 	}
 }
 
+// One description, several examples: the first is what the hint has room for, the rest are
+// what ⇥ completes against.
+func TestMinesEveryExampleADescriptionSpellsOut(t *testing.T) {
+	x := taskWith("backend:test",
+		"Run tests: task backend:test -- -p ingest, or task backend:test -- -p api --nocapture")
+	want := []string{"-- -p ingest", "-- -p api --nocapture"}
+	if got := x.ArgsHints(); !reflect.DeepEqual(got, want) {
+		t.Errorf("hints = %q, want %q", got, want)
+	}
+	// The first of them is still exactly what the hint was before.
+	if hint, _ := x.ArgsHint(); hint != want[0] {
+		t.Errorf("hint = %q, want %q", hint, want[0])
+	}
+}
+
+// The same example written twice is one example.
+func TestTheSameExampleTwiceIsOfferedOnce(t *testing.T) {
+	x := taskWith("site:new", `usage: task site:new -- "A Title"; or task new -- "A Title"`)
+	if got := x.ArgsHints(); len(got) != 1 {
+		t.Errorf("hints = %q, want one", got)
+	}
+}
+
+// JoinArgs exists to put a stored argument list back on the prompt, so what matters is
+// that SplitArgs gets the same list back out of it.
+func TestJoiningArgumentsRoundTrips(t *testing.T) {
+	for _, args := range [][]string{
+		{"--", "-p", "ingest"},
+		{"--", "My Post Title"},
+		{"NAME=a b", `quote"inside`, `back\slash`},
+		{"--", ""},
+		{},
+	} {
+		line := JoinArgs(args)
+		got := SplitArgs(line)
+		if len(args) == 0 && len(got) == 0 {
+			continue
+		}
+		if !reflect.DeepEqual(got, args) {
+			t.Errorf("JoinArgs(%q) = %q, which splits back to %q", args, line, got)
+		}
+	}
+}
+
 func TestMinesBareAssignmentConventions(t *testing.T) {
 	x := taskWith("backend:gen:migration", "Scaffold a migration and register it (NAME=add_x)")
 	hint, _ := x.ArgsHint()

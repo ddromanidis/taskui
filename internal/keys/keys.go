@@ -226,6 +226,7 @@ var pickerActions = []Action{
 	ResumeRun,
 	Interactive,
 	Force,
+	Watch,
 	Fold,
 	FoldAll,
 	// Stopping from here is not a convenience: with several slots open the picker is the
@@ -481,8 +482,9 @@ var Picker = Section{
 		f("a", "run it with arguments", "args"),
 		// No footer label: arming a modifier for the next run is secondary to running one, and
 		// the footer is the one place where everything competes for the same line.
-		b("i", "arm interactive mode for the next run"),
-		b("⇧F", "arm --force: ignore go-task's up-to-date checks"),
+		b("i", "arm interactive mode for the next run — again to disarm"),
+		b("⇧F", "arm --force: ignore go-task's up-to-date checks — again to disarm"),
+		b("⇧W", "watch: re-run the marked set, or this task, whenever the source changes"),
 		f("/", "filter the list down to matching tasks", "filter"),
 		f("t", "jump to a task, leaving the list intact", "jump"),
 		f("s", "what this task is, and what it will run", "detail"),
@@ -533,7 +535,7 @@ var Run = Section{
 		b("⇧H", "how this one task has been going, run after run"),
 		b("⇧T", "where this run's time went, slowest first"),
 		b("w", "resume following the running task"),
-		b("⇧W", "watch: re-run this task whenever the source changes"),
+		b("⇧W", "watch: re-run the marked set, or this task, whenever the source changes"),
 		b("h", "past runs"),
 		f("⇥ ⇧⇥", "switch to the next / previous run", "switch"),
 		b("1…9", "switch straight to that slot"),
@@ -553,7 +555,7 @@ var HistorySection = Section{
 		b("gg G", "first / last row"),
 		f("⏎", "reopen the run", "open"),
 		f("/", "search across every stored run", "search runs"),
-		f("a", "widen to all projects", "all projects"),
+		f("a", "widen: this repo's other worktrees, then every project", "widen"),
 		b("?", "this screen"),
 		f("esc", "back to the picker", "back"),
 		b("q", "quit"),
@@ -619,7 +621,7 @@ var Prompts = Section{
 	Title: "Prompts",
 	Note:  "while a prompt is open, these take over",
 	Bindings: []Binding{
-		b("arguments", "← → Home End Delete edit · ⏎ run · esc cancel"),
+		b("arguments", "⇥ ⇧⇥ complete · ← → Home End Delete edit · ⏎ run · esc cancel"),
 		b("search / filter", "⏎ keep the query · esc clear · ↑ ↓ step through matches"),
 		b("find (on this screen)", "opened with t · ⏎ keeps what is left · esc clears, then esc closes"),
 		b("input", "every key goes to the task · esc stop typing"),

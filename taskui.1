@@ -195,10 +195,13 @@ Clear every mark.
 Run it with arguments.
 .TP
 .B i
-Arm interactive mode for the next run.
+Arm interactive mode for the next run — again to disarm.
 .TP
 .B ⇧F
-Arm \-\-force: ignore go\-task's up\-to\-date checks.
+Arm \-\-force: ignore go\-task's up\-to\-date checks — again to disarm.
+.TP
+.B ⇧W
+Watch: re\-run the marked set, or this task, whenever the source changes.
 .TP
 .B /
 Filter the list down to matching tasks.
@@ -312,7 +315,7 @@ Where this run's time went, slowest first.
 Resume following the running task.
 .TP
 .B ⇧W
-Watch: re\-run this task whenever the source changes.
+Watch: re\-run the marked set, or this task, whenever the source changes.
 .TP
 .B h
 Past runs.
@@ -354,7 +357,7 @@ Reopen the run.
 Search across every stored run.
 .TP
 .B a
-Widen to all projects.
+Widen: this repo's other worktrees, then every project.
 .TP
 .B ?
 This screen.
@@ -462,7 +465,7 @@ While a prompt is open, these take over.
 .PP
 .TP
 .B arguments
-← → Home End Delete edit · ⏎ run · esc cancel.
+⇥ ⇧⇥ complete · ← → Home End Delete edit · ⏎ run · esc cancel.
 .TP
 .B search / filter
 ⏎ keep the query · esc clear · ↑ ↓ step through matches.

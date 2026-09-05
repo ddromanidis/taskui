@@ -240,14 +240,16 @@ In the picker:
 | `p` | toggle the pivot |
 | `⇧S` | cycle the order: name, file, recent, failed, size |
 | `a` | run with arguments |
-| `i` | arm interactive mode for the next run |
+| `i` | arm interactive mode for the next run — again to disarm |
+| `⇧F` | arm `--force`: ignore go-task's up-to-date checks — again to disarm |
+| `⇧W` | watch: re-run the marked set, or this task, whenever the source changes |
 | `/` | filter by name |
 | `t` | jump to a task, leaving the list intact |
 | `s` | what this task is, and what it will run |
 | `m` `⇧M` | mark a task to run alongside others / clear the marks |
 | `e` | open this task's definition in `$EDITOR` |
 | `v` | the whole screen for whatever is running, or the last run |
-| `h` | past runs, across the project |
+| `h` | past runs — `a` widens to this repo's other worktrees, then to every project |
 | `⇧H` | past runs of *this* task |
 | `x` | stop this task's run, wherever it is |
 | `⇧K` | stop every run |
@@ -279,7 +281,7 @@ In a run:
 | `y` `⇧Y` | copy the line, or everything the task printed |
 | `e` | open the `file:line` under the cursor in `$EDITOR` |
 | `⇧D` | what changed since this task last passed |
-| `h` | past runs, across the project |
+| `h` | past runs — `a` widens to this repo's other worktrees, then to every project |
 | `⇧H` | past runs of *this* task |
 | `esc` | back to the picker (every run keeps going) |
 
@@ -487,6 +489,41 @@ It exits non-zero when it finds any, so it composes: `taskui --flaky || echo "lo
 A task's timeline says so too, in the header — `flaky at d1f091a` — which is where you are
 already standing when you need to know whether a failure means anything. Runs from a dirty
 tree never count: two runs of uncommitted work are not two runs of the same code.
+
+**And the arguments count too.** `deploy ENV=staging` failing where `deploy ENV=prod` passed,
+at one commit, is two answers to two different questions — reporting it as a flake is the
+confident kind of wrong, because it sends you looking for nondeterminism in a task that did
+exactly what it was told. So the key is the task, the commit *and* the command line, and the
+report says which invocation went both ways:
+
+```
+$ taskui --flaky
+deploy	ENV=staging	d1f091a	2 passed	3 failed	an hour ago
+-- 1 flaky
+```
+
+The same distinction reaches the timeline, which names the command each point ran with and
+marks only the rows the flake actually belongs to.
+
+### History, and the worktree problem
+
+The archive is keyed by the directory a run happened in, which is right until you branch. A
+git worktree is a different directory holding the same project, so on the day you make one,
+every task's history starts again from nothing — `⇧H` on a test you have been running for
+months shows a task that has never run.
+
+So `a` in the history list widens a rung at a time rather than toggling:
+
+```
+this project  →  this repo  →  all projects
+```
+
+The middle rung is every checkout of this repository, identified by the git directory all of
+its worktrees share — so two worktrees of one repo agree and two clones of it do not. It is
+a widening rather than the default because two checkouts really can be different worlds, and
+it is skipped where it would show the same list twice: outside a checkout, or in a clone the
+archive has never seen another worktree of. Runs stored before this existed still belong to
+their own directory, so nothing that used to be in the narrow list falls out of it.
 
 ### What the archive remembers, and for how long
 
@@ -733,6 +770,23 @@ already see them; what goes out is what started, how each task went, what it exi
 and the location `e` was pressed on, which the host opens in its own editor. That last one
 is why the Neovim plugin does not have to know anything about `$EDITOR`.
 
+## Watching, and a list that keeps up
+
+`⇧W` re-runs when the source changes. With tasks marked it watches **the set** — `check`
+split across three tasks is the loop this replaces, and marks already say "these belong
+together", so `⇧W` works in the picker as well as in a run. What fits in the free slots
+starts; what does not is said out loud rather than silently skipped, because the tasks that
+lost would be the ones you never see fail. Nothing is ever stacked on top of itself: a save
+during a build does not kill the build that is already checking the previous save.
+
+**The task list keeps up with the Taskfile.** It used to be read once, at startup — while
+`e` opens the very file it was read from, so the intended loop was already "edit the
+Taskfile, come back", and coming back showed the list from before you edited. Now the files
+the list came from are watched by name, including every `includes:`, and a save re-reads them
+in place: the cursor stays on the row it was on, folds and marks survive, and marks on tasks
+that are gone are dropped. A file that does not parse — which is every Taskfile, briefly,
+while you are typing one — leaves the last list that did on screen.
+
 ## Pivots
 
 Grouping is a pivot, not a set of bespoke views: one flat list of tasks plus a key
@@ -936,9 +990,46 @@ often enough — `-- -p ingest for one crate`, where `for one crate` is commenta
 pre-filling would hand you a command that is wrong in a way you might not notice before
 pressing enter.
 
+**With nothing to declare, the prompt opens on what you ran last time.** A task that
+declares no variables and mines no `KEY=` shape used to open on an empty line; it now opens
+on that task's most recent invocation, out of the archive, quoted so `-- "My Post Title"`
+comes back as one argument rather than four:
+
+```
+task site:new -- "My Post Title"█   last run   ⏎ runs it again
+```
+
+That is your own decision coming back rather than an example from someone else's
+description, which is why it is filled where the `e.g.` hint is only shown. The footer says
+where the line came from and stops saying it the moment you change a character, and a
+declared variable still wins — its value is the part that changes per run, which is the one
+thing last time's answer is reliably wrong about. Last time's value is then one `⇥` away.
+
 The line is a real input: `←`/`→`, `home`/`end`, `delete`. Input is split shell-style, so
 `-- "My Post Title"` reaches go-task as one argument rather than three. `r` re-runs with whatever the run was started with; `a` from the run view
 re-runs with something different.
+
+**`⇥` completes the word under the caret**, `⇧⇥` walks back up the list, and the footer
+shows where `⇥` goes next — the alternatives, in the order it will reach them, since the
+one you are on is already spelled out in the prompt beside them:
+
+```
+task deploy ENV=prod█   ENV=staging  ENV=eu-west  1/3 ⇥
+```
+
+Four sources, in the order they are offered:
+
+| | |
+|---|---|
+| declared variables | the `requires: { vars: [...] }` names, as `NAME=` — the same lookup that pre-filled the prompt, so `⇥` costs nothing extra |
+| past runs | the arguments this same task was actually run with before, newest first, out of the run archive — past an `=` only that variable's values are offered |
+| mined examples | every `task <name> -- …` the description spells out, not just the first: a description carrying three examples is three completions, on a Taskfile nobody had to edit |
+| files and directories | paths under the project root, because that is where the task will run; directories keep their trailing slash so the next `⇥` walks into them |
+
+The word ends at the caret rather than at the next space, so completing in the middle of a
+line leaves the rest of it alone. Dotfiles wait until you type the dot. Anything typed ends
+the cycle, so the list can never be stale — and a `⇥` with nothing to offer says so rather
+than doing nothing, which is what a prompt with no completion at all looks like.
 
 ## Customising
 
@@ -946,6 +1037,27 @@ Three things are yours: what it looks like, what the keys do, and how much outpu
 shows. All of it lives in one optional file at `~/.config/taskui/config.yaml`
 (`$XDG_CONFIG_HOME/taskui/config.yaml` if that is set, or `--config PATH`), and a missing
 file is the normal case rather than an error.
+
+A project may add to two of those settings, and only two. `.taskui.yaml` (or `.taskui.yml`)
+in the project root is read after your own config, and may set `pin:` and `pivots:` — which
+tasks are the ones people here actually run, and how this repository's names group:
+
+```yaml
+# .taskui.yaml — checked in, and it may say only this much
+pin:
+  - dev
+  - "test:*"
+pivots:
+  - name: service
+    regex: "^(?P<group>[^:]+):"
+```
+
+**It may add, never override.** Config in a repository is config you did not write and did
+not read: a theme from somebody else's checkout taking over your terminal, or their `keys:`
+block moving `q` while you are holding it, is a surprise and not a feature. Extra pins and
+extra pivots are additive, land after yours where the two disagree, and show up in the header
+the moment they take effect. Anything else in the file is refused and said out loud — a key
+that silently did nothing would be worse than one that explains itself.
 
 ```
 taskui completion zsh  # shell completion — and it completes task names, not just flags

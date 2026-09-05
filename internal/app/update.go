@@ -90,8 +90,10 @@ func (a *App) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.PollRun()
 		a.PollWatch()
+		a.PollTaskfile()
 		a.collectDetails()
 		a.collectCoverage()
+		a.collectReload()
 		a.refreshProfile()
 		a.noteFinished()
 		return a, tea.Batch(a.tick(), a.ringBell())
@@ -614,6 +616,18 @@ func (a *App) handleHelpKey(k Key) bool {
 }
 
 func (a *App) handleArgsKey(k Key) {
+	// ⇥ walks the completion; everything else ends the cycle it was walking, so the list
+	// can never outlive the word it was built for.
+	if k.kind == keyTab || k.kind == keyBackTab {
+		delta := 1
+		if k.kind == keyBackTab {
+			delta = -1
+		}
+		a.CompleteArgs(delta)
+		return
+	}
+	a.argsComp = nil
+
 	switch {
 	case k.kind == keyEsc:
 		a.CancelArgs()
@@ -800,6 +814,11 @@ func (a *App) handlePickerKey(k Key) bool {
 	// Ignore go-task's up-to-date checks on the next run.
 	case act() == keys.Force:
 		a.ToggleForce()
+
+	// Re-run whenever the source changes — the marked set if there is one, which is the
+	// half of this that only the picker can offer, because marks are made here.
+	case act() == keys.Watch:
+		a.ToggleWatch()
 
 	case act() == keys.Help:
 		a.ToggleHelp()

@@ -64,6 +64,62 @@ func find(lines []string, want string) (string, bool) {
 	return "", false
 }
 
+// Force is armed until you disarm it, and it used to vanish from the header the moment you
+// started filtering — which is exactly when you cannot tell whether the next `⏎` will skip
+// go-task's up-to-date checks.
+func TestTheArmedModifiersStayVisibleUnderAFilter(t *testing.T) {
+	a := viewSample(t)
+	a.ToggleForce()
+	a.ToggleInteractive()
+	for _, query := range []string{"", "a"} {
+		a.Query = query
+		header := a.RenderHeadless(100, 12)[0]
+		for _, want := range []string{"force", "interactive"} {
+			if !strings.Contains(header, want) {
+				t.Errorf("query %q: header %q is missing %q", query, header, want)
+			}
+		}
+	}
+}
+
+// A filter is a view of the list, not a change to what the program is doing — so a run you
+// cannot see is still named under one, by count.
+func TestWhatIsRunningSurvivesAFilter(t *testing.T) {
+	a := viewSample(t)
+	r := run.Detached("atlas:build", run.GraphFrom(run.Edge{Parent: "atlas:build"}))
+	a.OpenRunForTest(r)
+	a.Screen = ScreenPicker
+
+	if header := a.RenderHeadless(100, 12)[0]; !strings.Contains(header, "atlas:build running") {
+		t.Errorf("header %q should name the one run", header)
+	}
+	a.Query = "a"
+	if header := a.RenderHeadless(100, 12)[0]; !strings.Contains(header, "1 running") {
+		t.Errorf("header %q should still say something is running", header)
+	}
+}
+
+// `⇧R` arms --force from the run view, and it stays armed for whatever you start next —
+// including a different task from the picker. The screen that armed it has to say so.
+func TestTheRunViewSaysForceIsArmedForTheNextRun(t *testing.T) {
+	a := viewSample(t)
+	r := run.Detached("atlas:build", run.GraphFrom(run.Edge{Parent: "atlas:build"}))
+	r.Finish(0)
+	a.OpenRunForTest(r)
+	a.Screen = ScreenRun
+
+	if header := a.RenderHeadless(100, 12)[0]; strings.Contains(header, "force") {
+		t.Errorf("header %q says force before anything armed it", header)
+	}
+	a.ForceRerunSelected()
+	if !a.ForceNext {
+		t.Fatal("⇧R should have armed force")
+	}
+	if header := a.RenderHeadless(100, 12)[0]; !strings.Contains(header, "force next") {
+		t.Errorf("header %q does not say force is armed", header)
+	}
+}
+
 // The header names both halves of the pivot and accents the one you are in, which is what
 // let the footer stop saying `p group by verb`.
 func TestHeaderNamesBothPivotsAndAccentsTheActiveOne(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/ddromanidis/taskui/internal/graph"
 	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/ddromanidis/taskui/internal/task"
 )
 
 // KeepRuns is how many runs' *output* to keep. A full `task all` on a large repo is a lot of
@@ -88,6 +89,11 @@ type Manifest struct {
 	Force bool `json:"force,omitempty"`
 	// Dir is the project directory it ran in.
 	Dir string `json:"dir"`
+	// Repo is the checkout this directory belongs to, identified by the git directory every
+	// worktree of one repository shares. Empty outside a checkout, and for every manifest
+	// written before this existed — which is why the history list falls back to Dir rather
+	// than treating an absent Repo as its own repository.
+	Repo string `json:"repo,omitempty"`
 	// Commit is the git revision the project was at. Recorded so "passed and failed at the
 	// same commit" — which is what flaky means and what alternating outcomes only hint at —
 	// is a fact rather than a guess. Empty for a directory that is not a git checkout, and
@@ -112,7 +118,7 @@ func (m Manifest) Command() string {
 	if len(m.Args) == 0 {
 		return "task " + m.Root + force
 	}
-	return "task " + m.Root + force + " " + strings.Join(m.Args, " ")
+	return "task " + m.Root + force + " " + task.JoinArgs(m.Args)
 }
 
 // StateDir is `$XDG_STATE_HOME/taskui` if set, else `~/.local/state/taskui`.
@@ -332,6 +338,7 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 		Args:            r.Args,
 		Force:           r.Force,
 		Dir:             projectDir,
+		Repo:            RepoOf(projectDir),
 		Commit:          headCommit(projectDir),
 		StartedUnix:     started,
 		DurationMs:      r.Duration.Milliseconds(),
@@ -411,6 +418,31 @@ func uniqueID(base, want string) string {
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// RepoOf identifies the repository a directory belongs to, the same for every worktree of
+// it.
+//
+// `--git-common-dir` is the one path that does not move: a linked worktree has its own
+// `.git` file pointing at `…/.git/worktrees/<name>`, and its *common* dir is the main
+// checkout's `.git`. So two worktrees of one repository agree here and two clones of it do
+// not, which is exactly the line the history scope wants to draw.
+//
+// Empty for a directory that is not a checkout. Symlinks are resolved because macOS hands
+// out `/var` and `/private/var` for the same place, and a scope that depended on which one
+// you typed would split a repository in half.
+func RepoOf(dir string) string {
+	out, err := gitOutput(dir, "rev-parse", "--git-common-dir")
+	if err != nil || out == "" {
+		return ""
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(dir, out)
+	}
+	if resolved, err := filepath.EvalSymlinks(out); err == nil {
+		out = resolved
+	}
+	return filepath.Clean(out)
 }
 
 // headCommit is the project's git revision, or empty.
@@ -622,7 +654,11 @@ type Point struct {
 	// Root is the run it was part of. `test:one` reached from a `task all` and from a `task
 	// test:one` are the same task and different circumstances, and the difference explains
 	// most of the surprising durations.
-	Root     string
+	Root string
+	// Args are what that run was invoked with, for the same reason Root is kept: a task run
+	// with `-p ingest` and the same task run with `-p api` are one name over two different
+	// pieces of work, and a series that does not say which is a series of two things.
+	Args     []string
 	WhenUnix int64
 	// Commit is the git revision the project was at, or empty.
 	Commit     string
@@ -636,7 +672,12 @@ type Point struct {
 func (p Point) Ok() bool { return p.Status == "Ok" }
 
 // Command is how the run this task was part of was invoked, for naming it on screen.
-func (p Point) Command() string { return "task " + p.Root }
+func (p Point) Command() string {
+	if len(p.Args) == 0 {
+		return "task " + p.Root
+	}
+	return "task " + p.Root + " " + task.JoinArgs(p.Args)
+}
 
 // Timeline is every stored appearance of one task, newest first.
 //
@@ -657,7 +698,7 @@ func Timeline(base, project, task string) []Point {
 				continue
 			}
 			out = append(out, Point{
-				RunID: m.ID, Root: m.Root, WhenUnix: m.StartedUnix, Commit: m.Commit,
+				RunID: m.ID, Root: m.Root, Args: m.Args, WhenUnix: m.StartedUnix, Commit: m.Commit,
 				Status: e.Status, DurationMs: e.DurationMs, Lines: e.Lines, File: e.File,
 			})
 		}
@@ -713,9 +754,12 @@ func Prune(base string, keep int) (int, error) {
 	return removed, nil
 }
 
-// Flake is a task that has both passed and failed at the same commit.
+// Flake is a task that has both passed and failed at the same commit, invoked the same way.
 type Flake struct {
 	Task string
+	// Args are the arguments the run carried, kept because they are part of what "the same
+	// question" means.
+	Args []string
 	// Commit is where it happened, and Passed/Failed how many times each way.
 	Commit         string
 	Passed, Failed int
@@ -732,8 +776,13 @@ type Flake struct {
 //
 // Runs from a dirty tree are excluded: `headCommit` marks them, and two runs of uncommitted
 // work are not two runs of the same code.
+//
+// Arguments are part of the key for the same reason. `deploy ENV=staging` failing where
+// `deploy ENV=prod` passed is two answers to two different questions, and reporting it as a
+// flake is the confident kind of wrong — it sends someone to look for nondeterminism in a
+// task that behaved exactly as it was told to. The archive has held `Args` all along.
 func Flaky(base, project string) []Flake {
-	type key struct{ task, commit string }
+	type key struct{ task, args, commit string }
 	seen := map[key]*Flake{}
 
 	for _, m := range List(base) {
@@ -744,10 +793,10 @@ func Flaky(base, project string) []Flake {
 			if e.Status != "Ok" && e.Status != "Failed" {
 				continue
 			}
-			k := key{e.Name, m.Commit}
+			k := key{e.Name, task.JoinArgs(m.Args), m.Commit}
 			f, ok := seen[k]
 			if !ok {
-				f = &Flake{Task: e.Name, Commit: m.Commit}
+				f = &Flake{Task: e.Name, Args: m.Args, Commit: m.Commit}
 				seen[k] = f
 			}
 			if e.Status == "Ok" {
@@ -765,14 +814,45 @@ func Flaky(base, project string) []Flake {
 			out = append(out, *f)
 		}
 	}
-	// Most recent first, then by name so the order is stable when timestamps collide.
+	// Most recent first, then by name so the order is stable when timestamps collide — and
+	// then by arguments, which is now the only thing left to tell two entries apart.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].LastUnix != out[j].LastUnix {
 			return out[i].LastUnix > out[j].LastUnix
 		}
-		return out[i].Task < out[j].Task
+		if out[i].Task != out[j].Task {
+			return out[i].Task < out[j].Task
+		}
+		return task.JoinArgs(out[i].Args) < task.JoinArgs(out[j].Args)
 	})
 	return out
+}
+
+// QuestionKey identifies what a run was asked: one commit, one command line.
+//
+// The flaky definition rests on "the same question, two answers", and this is that question
+// written down — so the report and the timeline that marks its rows cannot drift into two
+// ideas of what same means.
+func QuestionKey(commit string, args []string) string {
+	return commit + "\x00" + task.JoinArgs(args)
+}
+
+// Question is this point's key, for matching it against a flake.
+func (p Point) Question() string { return QuestionKey(p.Commit, p.Args) }
+
+// Question is this flake's key, for matching points against it.
+func (f Flake) Question() string { return QuestionKey(f.Commit, f.Args) }
+
+// Invocation names the arguments a flake belongs to, empty when there were none.
+//
+// Deliberately not "task <name> <args>": Task is the task that went both ways, Args are
+// what the *run* carried, and a task reached from an aggregate never saw them on its own
+// command line.
+func (f Flake) Invocation() string {
+	if len(f.Args) == 0 {
+		return ""
+	}
+	return task.JoinArgs(f.Args)
 }
 
 // Short is the commit, abbreviated for display.

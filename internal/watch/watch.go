@@ -5,6 +5,7 @@
 package watch
 
 import (
+	"errors"
 	"io/fs"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,9 @@ type Watch struct {
 	Settle       time.Duration
 	pendingSince time.Time
 	LastChanged  string
+	// names, when set, is the file names this watch is about — everything else in the
+	// directories it registered is ignored.
+	names map[string]bool
 }
 
 // Start watches dir and everything under it.
@@ -68,6 +72,41 @@ func Start(dir string) (*Watch, error) {
 	if err := w.addTree(dir); err != nil {
 		_ = watcher.Close()
 		return nil, err
+	}
+	return w, nil
+}
+
+// Files watches a named set of files rather than a whole tree.
+//
+// The tree walk Start does is the wrong shape for a Taskfile: it sits at the top of a
+// project whose build output churns, and watching all of it to hear about one file would
+// fire on every artefact. fsnotify reports on directories either way, so the parents are
+// what gets registered and the names are what filter the events back down.
+//
+// Matched by base name, not by path. An event carries the directory as it was registered,
+// so comparing whole paths would depend on which spelling of a symlinked temp directory the
+// caller happened to pass — and a second file of the same name in another watched directory
+// is, for the only caller this has, exactly the thing worth hearing about.
+func Files(paths []string) (*Watch, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
+	w := &Watch{watcher: watcher, Settle: 400 * time.Millisecond, names: map[string]bool{}}
+	dirs := map[string]bool{}
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		w.names[filepath.Base(path)] = true
+		dirs[filepath.Dir(path)] = true
+	}
+	if len(w.names) == 0 {
+		_ = watcher.Close()
+		return nil, errors.New("no files to watch")
+	}
+	for dir := range dirs {
+		_ = watcher.Add(dir)
 	}
 	return w, nil
 }
@@ -107,6 +146,16 @@ drain:
 		case event, ok := <-w.watcher.Events:
 			if !ok {
 				return "", false
+			}
+			// A named watch answers for its own files and nothing else — including the
+			// editor droppings beside them, which never match a name it was given.
+			if w.names != nil {
+				if !w.names[filepath.Base(event.Name)] {
+					continue
+				}
+				w.LastChanged = event.Name
+				sawAny = true
+				continue
 			}
 			if isNoise(event.Name) {
 				continue

@@ -332,6 +332,9 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		config.Theme = picked
 		config.Problems = append(config.Problems, problems...)
 	}
+	// And the project gets the last word on the two things that are about its own task list
+	// — which never includes what your terminal looks like or what your keys do.
+	config = config.WithProject(theme.LoadProject(root))
 
 	// Searching the archive reads stored runs, not the project — it must work from
 	// anywhere, including a directory with no Taskfile in it.
@@ -416,6 +419,10 @@ func rootRun(cmd *cobra.Command, args []string) error {
 	// Where each task is written, and whether it is up to date. Started here rather than in
 	// New because it shells out, and only the interactive path has a use for the answer.
 	a.StartEnrichment()
+
+	// And notice when that file changes underneath us — including when `e` is what changed
+	// it. Interactive only: a one-shot has nothing to keep up to date.
+	a.WatchTaskfile()
 
 	// Which aggregates run which namespace. The interactive path only, and for a stronger
 	// reason than the listing: this is a `task --summary` per node of every aggregate's
@@ -657,8 +664,17 @@ func printFlaky(out io.Writer, root string) error {
 		return nil
 	}
 	for _, f := range flakes {
+		// The invocation is a column of its own rather than part of the task name: the name
+		// is what went both ways, the arguments are what the run carried, and a task reached
+		// from an aggregate never saw them on its own command line.
+		name := f.Task
+		if args := f.Invocation(); args != "" {
+			name += "\t" + args
+		} else {
+			name += "\t"
+		}
 		fmt.Fprintf(out, "%s\t%s\t%d passed\t%d failed\t%s\n",
-			f.Task, f.Short(), f.Passed, f.Failed, ago(f.LastUnix))
+			name, f.Short(), f.Passed, f.Failed, ago(f.LastUnix))
 	}
 	fmt.Fprintf(out, "-- %d flaky\n", len(flakes))
 	return exitBecause(ExitFound, "%d %s went both ways at one commit",

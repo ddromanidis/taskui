@@ -553,11 +553,14 @@ func (a *App) historyHeader() line {
 			failed++
 		}
 	}
-	scope := "this project"
-	if a.HistoryAllProjects {
-		scope = "all projects"
-	} else if base := baseName(a.Root); base != "" {
-		scope = base
+	scope := a.HistoryScope.String()
+	// The narrow scope names the directory rather than saying "this project", which is the
+	// one rung where you already know what it means and the name is more use. The repository
+	// rung cannot: the whole point of it is that it is more than one directory.
+	if a.HistoryScope == ScopeProject {
+		if base := baseName(a.Root); base != "" {
+			scope = base
+		}
 	}
 
 	state := []span{styled(scope, fg(t.Colors.Stored))}
@@ -683,8 +686,15 @@ func (a *App) runHeader() line {
 	if r.Interactive && !r.Finished() {
 		l = append(l, styled("   interactive", fg(t.Colors.Interactive)))
 	}
-	if a.Watching != "" {
-		l = append(l, styled("   watching "+a.Watching, fg(t.Colors.Interactive)))
+	if label := a.WatchLabel(); label != "" {
+		l = append(l, styled("   watching "+label, fg(t.Colors.Interactive)))
+	}
+	// Armed here, spent anywhere: `⇧R` leaves `--force` on for whatever you run next,
+	// including a different task from the picker. Named "force next" rather than "force"
+	// because the subject line beside it already carries this run's own `--force`, and the
+	// two are different runs — this one is history, that one has not happened yet.
+	if a.ForceNext {
+		l = append(l, styled("   force next", fg(t.Colors.Notice)))
 	}
 	switch {
 	case r.Cancelled():
@@ -1155,30 +1165,39 @@ func (a *App) pickerHeader() line {
 		state = append(state, styled("   by "+a.OrderLabel(), fg(t.Colors.Mode)))
 	}
 
-	if a.Query == "" {
-		if a.InteractiveNext {
-			state = append(state, styled("   interactive", fg(t.Colors.Interactive)))
-		}
-		if a.ForceNext {
-			state = append(state, styled("   force", fg(t.Colors.Notice)))
-		}
-		// Leaving the run view does not stop anything; say so, or it is easy to forget —
-		// and with several slots open the picker is the only screen that would not
-		// otherwise mention the ones you are not looking at.
-		switch n := a.InFlightCount(); n {
-		case 0:
-		case 1:
-			name := ""
-			for _, s := range a.Slots() {
-				if s.Status == run.Running {
-					name = s.Root
-					break
-				}
+	// The armed modifiers show whether or not a filter is running. They are state you are
+	// holding rather than something that just happened, they change what the next `⏎` does,
+	// and a filter is exactly the moment you would otherwise have no way of seeing that
+	// force is still on — you filter, run, and wonder why the checks were skipped.
+	if a.InteractiveNext {
+		state = append(state, styled("   interactive", fg(t.Colors.Interactive)))
+	}
+	if a.ForceNext {
+		state = append(state, styled("   force", fg(t.Colors.Notice)))
+	}
+
+	// Leaving the run view does not stop anything; say so, or it is easy to forget — and
+	// with several slots open the picker is the only screen that would not otherwise
+	// mention the ones you are not looking at. A filter is a view of the list rather than a
+	// change to what the program is doing, so it says so under one too — as the count
+	// alone, because the header is right-anchored against the match count and a task name
+	// is the part of this line with no bound on its length.
+	switch n := a.InFlightCount(); {
+	case n == 0:
+	case n == 1 && a.Query == "":
+		name := ""
+		for _, s := range a.Slots() {
+			if s.Status == run.Running {
+				name = s.Root
+				break
 			}
-			state = append(state, styled("   ▶ "+name+" running", fg(t.Colors.Notice)))
-		default:
-			state = append(state, styled(fmt.Sprintf("   ▶ %d running", n), fg(t.Colors.Notice)))
 		}
+		state = append(state, styled("   ▶ "+name+" running", fg(t.Colors.Notice)))
+	default:
+		state = append(state, styled(fmt.Sprintf("   ▶ %d running", n), fg(t.Colors.Notice)))
+	}
+
+	if a.Query == "" {
 		state = append(state, styled(fmt.Sprintf("   %d tasks", len(a.Tasks)), fg(t.Colors.Dim)))
 	} else {
 		state = append(state,
@@ -1784,14 +1803,54 @@ func (a *App) argsPrompt() (line, bool) {
 		styled(t.Glyphs.Cursor, fg(t.Colors.Accent)),
 		plain(string(runes[at:])),
 	}
+	// While ⇥ is cycling, the alternatives take the line the hint would have had: the hint
+	// says what an argument looks like, and the candidates say what it could be — and when
+	// you are tabbing through them, the second is the question you are asking.
+	if a.argsComp != nil {
+		used := 0
+		for _, s := range l {
+			used += utf8.RuneCountInString(s.text)
+		}
+		return append(l, a.argsCandidateStrip(used)...), true
+	}
+	// Said out loud, and only while it is true: a line you did not type is a line you have
+	// to be told about, or the first `⏎` runs last week's command believing it is empty.
+	// It stops being said the moment you change a character of it.
+	if a.argsFromHistory && a.ArgsInput == a.argsPrefill {
+		return append(l, styled("   last run   ⏎ runs it again", fg(t.Colors.Notice))), true
+	}
 	// A hint, not a default: the descriptions trail off into prose often enough that
 	// pre-filling would hand you a subtly wrong command.
 	if hint, ok := a.ArgsHint(); ok {
 		l = append(l, styled("   e.g. "+hint, fg(t.Colors.Dim)))
 	} else {
-		l = append(l, styled("   ⏎ run   esc cancel", fg(t.Colors.Dim)))
+		l = append(l, styled("   ⏎ run   esc cancel   ⇥ complete", fg(t.Colors.Dim)))
 	}
 	return l, true
+}
+
+// argsCandidateStrip is where ⇥ goes next, in the order it will get there.
+//
+// It starts at the candidate *after* the one being shown, not at the front of the list: the
+// active one is already on the line, in the prompt, spelled out — printing it again beside
+// itself spends the scarcest row on the screen saying the same word twice.
+func (a *App) argsCandidateStrip(used int) []span {
+	c := a.argsComp
+	t := a.Theme
+	count := fmt.Sprintf("   %d/%d ⇥", c.idx+1, len(c.cands))
+	budget := a.Width - 1 - used - utf8.RuneCountInString(count)
+
+	var out []span
+	for i := 1; i < len(c.cands); i++ {
+		pick := c.cands[(c.idx+i)%len(c.cands)]
+		width := 2 + utf8.RuneCountInString(pick)
+		if width > budget {
+			break
+		}
+		budget -= width
+		out = append(out, styled("  "+pick, fg(t.Colors.Dim)))
+	}
+	return append(out, styled(count, fg(t.Colors.Dim)))
 }
 
 // markBar replaces the hints while a set is waiting: `⏎` means something different with

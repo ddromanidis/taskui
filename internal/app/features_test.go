@@ -9,6 +9,7 @@ import (
 
 	"github.com/ddromanidis/taskui/internal/pivot"
 	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/ddromanidis/taskui/internal/store"
 	"github.com/ddromanidis/taskui/internal/task"
 	"github.com/ddromanidis/taskui/internal/theme"
 )
@@ -563,5 +564,112 @@ func TestBellSettingParses(t *testing.T) {
 	}
 	if _, ok := theme.ParseBell("sometimes"); ok {
 		t.Error("a value it does not understand should be reported, not guessed at")
+	}
+}
+
+// A worktree is a different directory holding the same project, so the archive keyed by
+// directory loses every task's history the day you branch. The middle rung is what gets it
+// back, and it must not also drag in the repositories you were not asking about.
+func TestTheRepoScopeReachesOtherWorktreesAndNothingElse(t *testing.T) {
+	a := appWith(t, []string{"test"})
+	a.repo, a.repoRead = "/main/.git", true
+
+	here := store.Manifest{Dir: a.Root, Repo: "/main/.git"}
+	worktree := store.Manifest{Dir: "/main/.worktrees/backend", Repo: "/main/.git"}
+	elsewhere := store.Manifest{Dir: "/other", Repo: "/other/.git"}
+
+	for _, c := range []struct {
+		scope                          HistoryScope
+		here, wantWorktree, wantOthers bool
+	}{
+		{ScopeProject, true, false, false},
+		{ScopeRepo, true, true, false},
+		{ScopeEverywhere, true, true, true},
+	} {
+		a.HistoryScope = c.scope
+		if got := a.inHistoryScope(here); got != c.here {
+			t.Errorf("%v: this directory = %v", c.scope, got)
+		}
+		// Everywhere is answered by reloadHistory rather than by the predicate, which only
+		// has to agree with it on the two narrow rungs.
+		if c.scope != ScopeEverywhere {
+			if got := a.inHistoryScope(worktree); got != c.wantWorktree {
+				t.Errorf("%v: a sibling worktree = %v", c.scope, got)
+			}
+			if got := a.inHistoryScope(elsewhere); got != c.wantOthers {
+				t.Errorf("%v: another repository = %v", c.scope, got)
+			}
+		}
+	}
+}
+
+// An old manifest has no repository recorded. Answering "not this repo" for a run made in
+// this very directory would lose history the narrow scope always showed.
+func TestARunWithNoRecordedRepoIsStillThisDirectorys(t *testing.T) {
+	a := appWith(t, []string{"test"})
+	a.repo, a.repoRead = "/main/.git", true
+	a.HistoryScope = ScopeRepo
+	if !a.inHistoryScope(store.Manifest{Dir: a.Root}) {
+		t.Error("a run from before Repo existed dropped out of its own directory's history")
+	}
+}
+
+// The rung in the middle is skipped where it would show the same list twice — outside a
+// checkout, or in a clone with no other worktrees in the archive.
+func TestWideningSkipsTheRepoRungWhenThereIsNothingThere(t *testing.T) {
+	a := appWith(t, []string{"test"})
+	a.repo, a.repoRead = "", true
+	if got := a.nextHistoryScope(); got != ScopeEverywhere {
+		t.Errorf("outside a checkout, widening went to %v", got)
+	}
+	a.HistoryScope = ScopeEverywhere
+	if got := a.nextHistoryScope(); got != ScopeProject {
+		t.Errorf("widening past everything went to %v, want back to this project", got)
+	}
+}
+
+// Marks say "these belong together"; watch mode is the loop that keeps saying it. A `check`
+// split across three tasks is the case watch mode was always one task short of.
+func TestWatchingTheMarkedSet(t *testing.T) {
+	a := sample(t)
+	parkOn(t, a, "backend:lint")
+	press(a, Char('m'))
+	parkOn(t, a, "backend:build")
+	press(a, Char('m'))
+
+	press(a, Char('W'))
+	if len(a.Watching) != 2 {
+		t.Fatalf("watching %v, want both marked tasks", a.Watching)
+	}
+	if !strings.Contains(a.Status, "2 marked tasks") {
+		t.Errorf("status = %q", a.Status)
+	}
+	// The marks stay: this arms a mode that keeps referring to them, where `⏎` spends them.
+	if len(a.Marked()) != 2 {
+		t.Error("arming watch consumed the marks")
+	}
+	// The header names what is being watched without spelling out a list that will not fit.
+	if a.WatchLabel() != "2 tasks" {
+		t.Errorf("label = %q", a.WatchLabel())
+	}
+
+	press(a, Char('W'))
+	if len(a.Watching) != 0 {
+		t.Errorf("watch did not turn off: %v", a.Watching)
+	}
+}
+
+// With nothing marked it is still the one task it always was — the row under the cursor in
+// the picker, which is where `⇧W` did not used to reach at all.
+func TestWatchingOneTaskFromThePicker(t *testing.T) {
+	a := sample(t)
+	parkOn(t, a, "backend:lint")
+
+	press(a, Char('W'))
+	if len(a.Watching) != 1 || a.Watching[0] != "backend:lint" {
+		t.Fatalf("watching %v, want the task under the cursor", a.Watching)
+	}
+	if a.WatchLabel() != "backend:lint" {
+		t.Errorf("label = %q", a.WatchLabel())
 	}
 }
