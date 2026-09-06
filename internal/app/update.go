@@ -510,8 +510,10 @@ func (a *App) handleConfirmKey(k Key) bool {
 // It returns true if the key was consumed. `g` on its own only arms the pair; anything
 // else disarms it, so a forgotten `g` cannot silently swallow the next keystroke.
 func (a *App) handleVimMotion(k Key) bool {
-	// Prompts own every key while they are open.
-	if a.EnteringArgs || a.Searching || a.SendingInput || a.HistorySearching || a.Jumping {
+	// Prompts own every key while they are open. Every one of them: a `g` typed into the
+	// filter is a letter of a task name, not a jump to the top of the list it is narrowing.
+	if a.EnteringArgs || a.Searching || a.SendingInput || a.HistorySearching || a.Jumping ||
+		a.Filtering || a.HelpFinding {
 		return false
 	}
 	switch {

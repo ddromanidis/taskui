@@ -434,6 +434,34 @@ func TestEscClearsAFilterBeforeItCounts(t *testing.T) {
 	}
 }
 
+// `g` typed into a prompt is a letter, not a motion. `gg` and `G` are handled ahead of every
+// screen so they reach all of them, which is exactly how they got in front of the prompts
+// too: filtering for "migrate" jumped the cursor to the top and typed nothing.
+func TestGIsTypedIntoAPromptRatherThanJumping(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('/'))
+	for _, c := range "mig" {
+		press(a, Char(c))
+	}
+	if a.Query != "mig" {
+		t.Errorf("query = %q, want the `g` in it", a.Query)
+	}
+
+	press(a, Char('G'))
+	if a.Query != "migG" {
+		t.Errorf("query = %q, want the `G` in it too", a.Query)
+	}
+
+	// The keymap's own find prompt reads its keys the same way.
+	b := appAt(t, "backend:lint")
+	press(b, Char('?'))
+	press(b, Char('t'))
+	press(b, Char('g'))
+	if b.HelpQuery != "g" {
+		t.Errorf("help query = %q", b.HelpQuery)
+	}
+}
+
 // Stopping everything is reachable without leaving — and it too asks, because most of what
 // it reaches is not on screen.
 func TestStopAllAsksThenStopsEverySlot(t *testing.T) {
