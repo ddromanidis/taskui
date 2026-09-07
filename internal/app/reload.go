@@ -2,8 +2,6 @@ package app
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/ddromanidis/taskui/internal/task"
@@ -26,16 +24,6 @@ import (
 // Re-reading is `task --list-all` again, which is the cheap call (~76ms); the JSON listing
 // and the coverage walk are the expensive ones and are restarted in the background exactly
 // as they were at startup.
-
-// taskfileNames are the files a project's task list can be read from, before go-task has
-// been asked. The listing replaces this with the real set — including every `includes:` —
-// the moment it lands.
-var taskfileNames = []string{
-	"Taskfile.yml", "Taskfile.yaml",
-	"taskfile.yml", "taskfile.yaml",
-	"Taskfile.dist.yml", "Taskfile.dist.yaml",
-	"taskfile.dist.yml", "taskfile.dist.yaml",
-}
 
 // reloaded is the answer to one re-read: a new list, or the reason there is not one.
 type reloaded struct {
@@ -96,20 +84,12 @@ func (a *App) taskfilePaths() []string {
 	// not any task is written in it: an `includes:`-only file at the top of a project
 	// defines no tasks itself and is exactly where a new namespace gets added.
 	//
-	// The first name that exists, and then stop — the way go-task itself picks one. On a
-	// case-insensitive filesystem every spelling in the list stats the same file, and
-	// carrying all eight would make the watched set look different on macOS to the way it
-	// looks on Linux for the same project.
-	for _, name := range taskfileNames {
-		path := filepath.Join(a.Root, name)
-		if _, err := os.Stat(path); err != nil {
-			continue
-		}
-		if !seen[path] {
-			seen[path] = true
-			out = append(out, path)
-		}
-		break
+	// Only the one go-task would read, not all eight spellings of it: the task package
+	// picks it the way go-task does, which keeps the watched set the same on a
+	// case-insensitive filesystem as it is on Linux.
+	if path := task.Find(a.Root); path != "" && !seen[path] {
+		seen[path] = true
+		out = append(out, path)
 	}
 	slices.Sort(out)
 	return out

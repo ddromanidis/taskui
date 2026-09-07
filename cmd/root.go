@@ -356,6 +356,16 @@ func rootRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Everything from here on needs a task list, and there is no list without a file. Asked
+	// before go-task rather than after it fails, so that the answer is taskui's own — see
+	// starter.go for why go-task's is the wrong one to pass on.
+	if task.FindUp(root) == "" {
+		created, err := offerStarter(root, config)
+		if err != nil || !created {
+			return err
+		}
+	}
+
 	tasks, err := task.Discover(root)
 	if err != nil {
 		return err

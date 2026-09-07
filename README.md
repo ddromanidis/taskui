@@ -221,6 +221,33 @@ binding, grouped by context, and `t` there searches that list rather than scroll
 eight sections is a page and a half to get to "which key copies a line". The footer shows a
 subset of the same table — one source of truth, so the two cannot disagree.
 
+### Starting from nothing
+
+Run `taskui` somewhere with no Taskfile — and none in any directory above it — and it offers
+to write one:
+
+```
+  no Taskfile here, nor in any directory above
+  ~/src/scratch
+
+    g   write a starter Taskfile.yml here, and browse it
+    e   write it and open it in $EDITOR first
+    q   quit, and add your own Taskfile.yml
+```
+
+The starter is a hello-world that runs, and a worked example of the three things taskui
+reads out of a Taskfile: a `desc:`, which is the line beside the name in the picker; a colon
+in a name, which is what folds into a namespace; and the `(NAME=Ada)` convention in a
+description, which is where the args prompt gets its hint. Edit it into your own — the
+picker reloads whenever the file changes, so you can leave taskui open while you do.
+
+It is deliberately not `task --init`, whose Taskfile has one task called `default:` — the
+one name taskui does not list, because a default that runs the listing would appear in its
+own list. Taking that suggestion leaves you looking at an empty picker.
+
+Nothing is offered when there is nobody to ask: a pipe, a script or any of the print-and-exit
+flags gets the same refusal it always did, worded to say what would fix it.
+
 The picker is one column at any width. A list can be columnised; a tree cannot — the
 columns fill in sequence, so a group header ends in one while its own children continue in
 the next, and the indentation that says which task belongs to what stops meaning anything.

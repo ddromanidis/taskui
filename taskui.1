@@ -542,6 +542,38 @@ and
 set, because output is captured through a pipe and tools that auto\-detect a
 terminal would otherwise drop their colour.
 .SH NOTES
+.SS Starting from nothing
+Run
+.B taskui
+in a directory with no Taskfile \(em and none in any directory above it \(em and
+it offers to write one:
+.B g
+writes a starter
+.IR Taskfile.yml ,
+.B e
+writes it and opens it in
+.BR $EDITOR ,
+and
+.B q
+leaves you to add your own.
+.PP
+The starter is a hello\-world that runs, and a worked example of the three things
+taskui reads out of a Taskfile: a
+.BR desc: ,
+which is the line beside the name in the picker; a colon in a name, which is what
+folds into a namespace; and the
+.B (NAME=Ada)
+convention in a description, which is where the args prompt gets its hint. Edit it
+into your own \(em the picker reloads whenever the file changes.
+.PP
+Deliberately not what
+.B "task \-\-init"
+writes, whose only task is
+.BR default: ,
+the one name taskui does not list.
+.PP
+The offer needs somebody to answer it. A pipe, a script or any of the
+print\-and\-exit options gets an error naming the same two ways out instead.
 .SS Peek windows
 A task at rest shows a window on the last few lines it printed, marked
 .BR ▿ .
