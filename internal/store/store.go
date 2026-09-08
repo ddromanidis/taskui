@@ -747,7 +747,16 @@ func Prune(base string, keep int) (int, error) {
 	all := List(base)
 	removed := 0
 	for i := keep; i < len(all); i++ {
-		if os.RemoveAll(RunDir(base, all[i].ID)) == nil {
+		dir := RunDir(base, all[i].ID)
+		// Only what is actually on disk. List merges the ledger with the directories, and
+		// the ledger remembers far more runs than it keeps output for — so past `keep` this
+		// is mostly ids pruned long ago. RemoveAll answers nil for a path that is not there,
+		// which made every Save do some two thousand no-op syscalls and then report them all
+		// as runs it had removed.
+		if _, err := os.Stat(dir); err != nil {
+			continue
+		}
+		if os.RemoveAll(dir) == nil {
 			removed++
 		}
 	}

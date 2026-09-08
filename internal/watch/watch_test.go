@@ -14,7 +14,7 @@ func TestBuildOutputIsIgnored(t *testing.T) {
 		"/proj/.task/checksum/lint",
 		"/proj/app/node_modules/x/index.js",
 	} {
-		if !isNoise(path) {
+		if !isNoise("/proj", path) {
 			t.Errorf("%s should be ignored", path)
 		}
 	}
@@ -28,7 +28,7 @@ func TestEditorScratchFilesAreIgnored(t *testing.T) {
 		"/proj/src/4913",
 		"/proj/.DS_Store",
 	} {
-		if !isNoise(path) {
+		if !isNoise("/proj", path) {
 			t.Errorf("%s should be ignored", path)
 		}
 	}
@@ -40,7 +40,7 @@ func TestSourceFilesAreNot(t *testing.T) {
 		"/proj/Taskfile.yml",
 		"/proj/backend/internal/api/api.go",
 	} {
-		if isNoise(path) {
+		if isNoise("/proj", path) {
 			t.Errorf("%s should not be ignored", path)
 		}
 	}

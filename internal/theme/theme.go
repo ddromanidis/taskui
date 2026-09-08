@@ -812,7 +812,7 @@ func FromViper(v *viper.Viper) Config {
 	// two visible stops and one that lies about which it is.
 	if v.IsSet("peek-lines") {
 		switch n := v.GetInt("peek-lines"); {
-		case n == 0:
+		case n < 1:
 			config.Problems = append(config.Problems, "peek-lines: must be at least 1")
 		case n > 100:
 			config.Problems = append(config.Problems, "peek-lines: 100 is already the whole screen")

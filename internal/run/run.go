@@ -298,9 +298,8 @@ const stopGrace = time.Second
 // one means signalling a stranger. Between EOF and that wait is the whole window, and it
 // belongs to the goroutine that owns both.
 type stop struct {
-	// requested: something asked this run to stop.
-	requested atomic.Bool
-	// now: …and asked again, or is quitting: skip what is left of the grace.
+	// now: something asked this run to stop and then asked again, or is quitting: skip what
+	// is left of the grace.
 	now atomic.Bool
 }
 
@@ -584,7 +583,6 @@ func (r *Run) Cancel() {
 	r.cancelled = true
 	// Tell the capture goroutine this was a stop, not an ending. It is what turns the
 	// group's survivors into its problem rather than nobody's.
-	r.stop.requested.Store(true)
 	r.mu.Lock()
 	proc := r.proc
 	r.mu.Unlock()
@@ -659,7 +657,6 @@ func (r *Run) Kill() {
 	r.killed = true
 	// Set both: a Kill that arrives before anything was asked politely still has to leave
 	// the capture goroutine a stopped run to clean up after.
-	r.stop.requested.Store(true)
 	r.stop.now.Store(true)
 	if r.Finished() {
 		// The capture goroutine has already reaped the group on its way out, and the pid

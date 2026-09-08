@@ -30,8 +30,20 @@ var ignored = [...]string{
 
 // isNoise decides whether a change is worth a re-run. Editors write swap files, lock files
 // and backups constantly, and each one would fire a build.
-func isNoise(path string) bool {
-	for part := range strings.SplitSeq(filepath.ToSlash(path), "/") {
+//
+// The directory names are matched against the path *below the watched root*, not against
+// the whole thing. Callers hand this absolute paths, so matching all of it meant any
+// ancestor on the list poisoned everything under it — and one of the names on the list is
+// `.worktrees`, which is exactly where this tool expects to be run from. In a linked
+// worktree the walk skipped every subdirectory and the poll dropped every event, so watch
+// mode registered nothing and then silently never fired again. A checkout under `dist`, or
+// anywhere below a dotted home directory, did the same.
+func isNoise(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		rel = path
+	}
+	for part := range strings.SplitSeq(filepath.ToSlash(rel), "/") {
 		for _, dir := range ignored {
 			if part == dir {
 				return true
@@ -57,6 +69,10 @@ type Watch struct {
 	// names, when set, is the file names this watch is about — everything else in the
 	// directories it registered is ignored.
 	names map[string]bool
+	// root is what noise is judged relative to. Kept on the watch rather than passed down,
+	// because Poll calls addTree again for every directory that appears, and judging those
+	// against themselves would ignore where they sit.
+	root string
 }
 
 // Start watches dir and everything under it.
@@ -68,7 +84,7 @@ func Start(dir string) (*Watch, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &Watch{watcher: watcher, Settle: 400 * time.Millisecond}
+	w := &Watch{watcher: watcher, Settle: 400 * time.Millisecond, root: dir}
 	if err := w.addTree(dir); err != nil {
 		_ = watcher.Close()
 		return nil, err
@@ -119,7 +135,7 @@ func (w *Watch) addTree(root string) error {
 		if !d.IsDir() {
 			return nil
 		}
-		if path != root && isNoise(path) {
+		if path != root && isNoise(w.root, path) {
 			return filepath.SkipDir
 		}
 		_ = w.watcher.Add(path)
@@ -157,7 +173,7 @@ drain:
 				sawAny = true
 				continue
 			}
-			if isNoise(event.Name) {
+			if isNoise(w.root, event.Name) {
 				continue
 			}
 			// A directory that has just appeared has to be watched too, or everything
