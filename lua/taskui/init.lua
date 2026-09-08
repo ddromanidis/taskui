@@ -11,6 +11,9 @@
 
 local cli = require("taskui.cli")
 local config = require("taskui.config")
+
+-- How long to leave an esc alone before sending what follows it. See M.run.
+local escGap = 200
 local events = require("taskui.events")
 local term = require("taskui.term")
 
@@ -54,13 +57,31 @@ function M.run(name)
   local started = term.job ~= nil
   term.open()
   vim.defer_fn(function()
-    -- `t` jumps rather than `/` filtering: a jump lands the cursor *on* the
-    -- task, opening whatever folds hid it, where a filter narrows the list and
-    -- leaves the cursor whereever it was — which on a namespace row means the
-    -- next enter says "that groups tasks but is not one".
+    -- Jump rather than `/` filtering: a jump lands the cursor *on* the task,
+    -- opening whatever folds hid it, where a filter narrows the list and leaves
+    -- the cursor whereever it was — which on a namespace row means the next
+    -- enter says "that groups tasks but is not one".
+    --
+    -- The key comes from config so a taskui `keys: jump:` has somewhere to be
+    -- answered; it is the one taskui binding this plugin has to know, because
+    -- reaching a task means typing at the terminal.
     --
     -- esc first, so this means the same thing whatever was on screen.
-    term.send("\27t" .. name .. "\r\r")
+    -- esc goes on its own, and the rest only after the terminal has given up
+    -- waiting for what might follow it. A terminal encodes Alt+x as esc then x,
+    -- so an esc written in the same breath as the next key arrives as that
+    -- chord rather than as two presses — the jump key is swallowed and the task
+    -- name is typed at the picker instead, where `e` opens an editor. Measured
+    -- against the real binary through a pty: 50ms still merges, 80ms does not,
+    -- so this leaves a wide margin over a threshold that is not ours to pin.
+    --
+    -- It went unnoticed for as long as the jump key was `t`, because the merge
+    -- ate the esc and the first letter of `test` is a `t` — the name typed its
+    -- own way into the prompt.
+    term.send("\27")
+    vim.defer_fn(function()
+      term.send(config.options.jump_key .. name .. "\r\r")
+    end, escGap)
   end, started and 80 or 500)
 end
 

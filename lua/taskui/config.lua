@@ -17,6 +17,7 @@ local M = {}
 ---@field open_quickfix boolean Open the quickfix window when it is filled from a failure.
 ---@field notify boolean Say how a run went — for when the terminal is not the window you are in.
 ---@field keys table<string, string|false> The two keys the host owns inside the terminal; the rest belong to taskui.
+---@field jump_key string taskui's own jump key, which `run()` types to reach a task. Set it if a taskui config moved it.
 M.defaults = {
   binary = "taskui",
   project = nil,
@@ -33,6 +34,13 @@ M.defaults = {
   quickfix = "on_failure",
   open_quickfix = false,
   notify = true,
+  -- taskui's default jump key. This is the one taskui binding the plugin has to
+  -- know, because `run()` reaches a task by typing it into the terminal rather
+  -- than through a socket, and a keystroke is only as stable as the keymap it
+  -- goes to. It is here so that a `keys: jump:` line in a taskui config has
+  -- somewhere to be answered — without it, rebinding jump silently stops
+  -- `:TaskUI run` working, with the keystroke landing on whatever took the key.
+  jump_key = "f",
   keys = {
     -- The two keys the host owns, bound *inside* the terminal buffer only, so
     -- they cost nothing anywhere else. Everything else in there is taskui's:
