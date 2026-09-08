@@ -23,10 +23,37 @@ import (
 // Graph maps a task name to the tasks it invokes, in the order it invokes them.
 type Graph struct {
 	Edges map[string][]string
+	// Deps is the subset of Edges that came from `deps:` rather than from a `task:` command.
+	//
+	// Kept apart because go-task runs `deps:` concurrently and commands in order, and the
+	// run parser cannot tell from the output which it is watching: with `--output prefixed`
+	// two concurrent deps interleave their lines, and a parser that reads "someone else
+	// spoke" as "the last one finished" closes a task that is still going. Nothing persists
+	// this — a stored run is already finished, so the distinction only matters live.
+	Deps map[string][]string
 }
 
 func New() Graph {
-	return Graph{Edges: map[string][]string{}}
+	return Graph{Edges: map[string][]string{}, Deps: map[string][]string{}}
+}
+
+// Concurrent reports whether two tasks can be running at once: siblings under one parent's
+// `deps:`, which go-task starts together.
+func (g Graph) Concurrent(a, b string) bool {
+	if a == b {
+		return false
+	}
+	for _, deps := range g.Deps {
+		var seenA, seenB bool
+		for _, d := range deps {
+			seenA = seenA || d == a
+			seenB = seenB || d == b
+		}
+		if seenA && seenB {
+			return true
+		}
+	}
+	return false
 }
 
 func (g Graph) Children(task string) []string {
@@ -79,8 +106,13 @@ const (
 )
 
 // parseSummary returns a task's direct edges, dependencies first (go-task runs those
-// before the commands).
-func parseSummary(text string) []string {
+// before the commands), and separately the dependencies on their own.
+//
+// Both, because the two are run differently — `deps:` concurrently, commands in order — and
+// the run parser has to know which it is watching. Flattening them into one list, which is
+// all the graph used to keep, is why a parallel build reported half of itself finished the
+// moment the other half printed anything.
+func parseSummary(text string) ([]string, []string) {
 	at := sectionNone
 	deps := []string{}
 	var cmds []string
@@ -119,7 +151,9 @@ func parseSummary(text string) []string {
 		}
 	}
 
-	return append(deps, cmds...)
+	// Copied rather than appended in place: the caller keeps both, and `append(deps, …)`
+	// would hand it two slices over one array.
+	return append(append([]string{}, deps...), cmds...), deps
 }
 
 // RequiredVars lists the variables a task declares with `requires: { vars: [NAME] }`.
@@ -297,10 +331,11 @@ func resolveParallel(root, dir string) Graph {
 			batch := frontier[start:end]
 
 			results := make([][]string, len(batch))
+			depResults := make([][]string, len(batch))
 			var wg sync.WaitGroup
 			for i, task := range batch {
 				wg.Go(func() {
-					results[i] = parseSummary(summaryOf(dir, task))
+					results[i], depResults[i] = parseSummary(summaryOf(dir, task))
 				})
 			}
 			wg.Wait()
@@ -312,6 +347,9 @@ func resolveParallel(root, dir string) Graph {
 					}
 				}
 				g.Edges[task] = results[i]
+				if len(depResults[i]) > 0 {
+					g.Deps[task] = depResults[i]
+				}
 			}
 		}
 

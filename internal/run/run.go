@@ -783,6 +783,30 @@ func (r *Run) pushLine(task string, line Line) (int, bool) {
 	return len(t.Lines) - 1, true
 }
 
+// dropProvisional discards an unterminated line that turned out to belong to somewhere
+// else, taking it back out of the task it was guessed into.
+//
+// A Partial carries no `[name]`: the read boundary can fall anywhere in the stream, so the
+// fragment is attributed to whatever spoke last, and on a run's very first read there is
+// nothing to go on but the root. When the newline finally arrives carrying a different tag
+// the guess is simply wrong, and what it leaves behind is a truncated copy of another
+// task's line sitting in a task that never printed it — permanently, since the supersede
+// path only ever matched a fragment against its own guess. PendingPrompt reads that stale
+// fragment too, so one ending in `:` or `?` had the run view insisting a task was waiting
+// for input for as long as the run lasted.
+func (r *Run) dropProvisional() {
+	p := r.provisional
+	r.provisional = nil
+	if p == nil {
+		return
+	}
+	t, ok := r.Tasks[p.task]
+	if !ok || p.index >= len(t.Lines) {
+		return
+	}
+	t.Lines = append(t.Lines[:p.index], t.Lines[p.index+1:]...)
+}
+
 func (r *Run) apply(event Event) {
 	switch e := event.(type) {
 	case Redacting:
@@ -810,6 +834,9 @@ func (r *Run) apply(event Event) {
 			}
 			return
 		}
+		// A fragment for a different task than the one already holding one: the old guess is
+		// never coming back, so it goes rather than being orphaned in place.
+		r.dropProvisional()
 		if index, ok := r.pushLine(name, newLine(e.Text, false)); ok {
 			r.provisional = &provisionalLine{task: name, index: index}
 		}
@@ -838,12 +865,18 @@ func (r *Run) apply(event Event) {
 			r.apply(Skipping{Task: task, Why: why})
 		}
 		// A completed line supersedes the provisional one it grew out of.
-		if r.provisional != nil && r.provisional.task == name {
-			at := r.provisional.index
-			r.provisional = nil
-			if t, ok := r.Tasks[name]; ok && at < len(t.Lines) {
-				t.Lines[at] = newLine(e.Raw, e.IsCommand)
-				return
+		if r.provisional != nil {
+			if r.provisional.task == name {
+				at := r.provisional.index
+				r.provisional = nil
+				if t, ok := r.Tasks[name]; ok && at < len(t.Lines) {
+					t.Lines[at] = newLine(e.Raw, e.IsCommand)
+					return
+				}
+			} else {
+				// The tag says the fragment was attributed to the wrong task. This line is
+				// the whole of it, so the fragment is a duplicate and comes out.
+				r.dropProvisional()
 			}
 		}
 		r.pushLine(name, newLine(e.Raw, e.IsCommand))
@@ -880,12 +913,22 @@ func (r *Run) touch(name string) {
 	ancestors := r.ancestorsOf(name)
 	now := time.Now()
 	for other, t := range r.Tasks {
-		if t.Status == Running && other != name && !ancestors[other] {
-			// A parent stays Running while its children work; a sibling that has stopped
-			// producing output has finished.
-			t.Status = Ok
-			t.close(now)
+		if t.Status != Running || other == name || ancestors[other] {
+			continue
 		}
+		// Two tasks under one parent's `deps:` are started together, so the other one
+		// speaking says nothing about this one. go-task interleaves their lines under
+		// `--output prefixed`, and closing on the first line from a sibling marked half a
+		// parallel build ✓ the moment the other half printed anything — with a duration
+		// frozen at however long it had run so far, and no way back, since the reopen guard
+		// below only reopens what is still Pending.
+		if r.Graph.Concurrent(name, other) {
+			continue
+		}
+		// A parent stays Running while its children work; a sibling that has stopped
+		// producing output has finished.
+		t.Status = Ok
+		t.close(now)
 	}
 
 	// Open the whole chain, not just the task itself. An aggregate like `lint` whose

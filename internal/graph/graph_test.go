@@ -45,21 +45,21 @@ commands:
 
 func TestParsesTaskEdgesFromCommands(t *testing.T) {
 	want := []string{"api:check", "backend:lint", "app:lint", "infra:lint"}
-	if got := parseSummary(lint); !reflect.DeepEqual(got, want) {
+	if got, _ := parseSummary(lint); !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
 // Dependencies run before commands, so they come first in the child order.
 func TestDependenciesPrecedeCommands(t *testing.T) {
-	if got := parseSummary(mid); !reflect.DeepEqual(got, []string{"a", "b"}) {
+	if got, _ := parseSummary(mid); !reflect.DeepEqual(got, []string{"a", "b"}) {
 		t.Errorf("got %v", got)
 	}
 }
 
 // Shell commands under `commands:` are not edges.
 func TestShellCommandsAreNotEdges(t *testing.T) {
-	if got := parseSummary(shellOnly); len(got) != 0 {
+	if got, _ := parseSummary(shellOnly); len(got) != 0 {
 		t.Errorf("got %v", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestShellCommandsAreNotEdges(t *testing.T) {
 // but a sloppy parser that just scanned for colons would swallow them.
 func TestEnvDumpYieldsNoEdges(t *testing.T) {
 	envOnly := "task: x\n\nenv:\n  API_TOKEN: \"cfut_secret\"\n  OTHER: \"Task: nope\"\n"
-	if got := parseSummary(envOnly); len(got) != 0 {
+	if got, _ := parseSummary(envOnly); len(got) != 0 {
 		t.Errorf("got %v", got)
 	}
 }
@@ -187,7 +187,7 @@ func resolveWith(root string, fetch func(string) string) Graph {
 		if _, known := g.Edges[task]; known {
 			continue
 		}
-		children := parseSummary(fetch(task))
+		children, _ := parseSummary(fetch(task))
 		for _, c := range children {
 			if _, known := g.Edges[c]; !known {
 				queue = append(queue, c)

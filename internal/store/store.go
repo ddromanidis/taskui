@@ -241,6 +241,30 @@ func sortNewestFirst(m []Manifest) {
 	})
 }
 
+// savedOrder is the tasks in the order they ran.
+//
+// Save wrote `r.TaskNames()`, which sorts, and Load rebuilds a stored run's Order from the
+// array it finds — so every archived run came back alphabetical, and `search.InRun`'s
+// promise that `n` walks a run the way it happened was false for all of them. A task that
+// never started has no place in an execution order, so those follow, sorted, rather than
+// being dropped.
+func savedOrder(r *run.Run) []string {
+	seen := make(map[string]bool, len(r.Tasks))
+	out := make([]string, 0, len(r.Tasks))
+	for _, name := range r.Order {
+		if _, ok := r.Tasks[name]; ok && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, name := range r.TaskNames() {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // safeName exists because task names contain colons and can contain slashes; neither
 // belongs in a filename.
 func safeName(task string) string {
@@ -293,9 +317,19 @@ func Save(base, projectDir string, r *run.Run) (string, error) {
 	}
 
 	var entries []TaskEntry
-	for _, name := range r.TaskNames() {
+	used := map[string]bool{}
+	for _, name := range savedOrder(r) {
 		t := r.Tasks[name]
 		file := safeName(name)
+		// safeName maps every character that is not a letter or digit to `.`, so `a:b` and
+		// `a.b` reach here as one name and wrote over each other's output — after which the
+		// manifest handed both tasks whichever file survived. The suffix is only reached by a
+		// real collision, and `File` is recorded per task, so a reader never has to work the
+		// name out and archives written before this load exactly as they did.
+		for n := 2; used[file]; n++ {
+			file = fmt.Sprintf("%s-%d", safeName(name), n)
+		}
+		used[file] = true
 
 		var plain, ansi strings.Builder
 		for _, l := range t.Lines {
