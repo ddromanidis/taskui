@@ -76,3 +76,14 @@ func TestAReadmeWithNoMarkersIsUntouched(t *testing.T) {
 		t.Errorf("rewrote a file with no markers: %q", next)
 	}
 }
+
+// A block that loses its end marker used to swallow everything up to the *next* block's
+// one — the prose between them and that block's table with it — and report nothing wrong.
+func TestALostEndMarkerDoesNotEatTheNextTable(t *testing.T) {
+	in := "# t\n" + beginTable + "Picker -->\n" +
+		"prose between the tables\n" +
+		beginTable + "Diff -->\n| key | |\n" + endTable + "\ntail\n"
+	if _, err := RegenerateReadme(in); err == nil {
+		t.Error("no error for a table whose end marker belongs to the next one")
+	}
+}

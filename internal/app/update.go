@@ -1089,15 +1089,6 @@ func (a *App) handleRunKey(k Key) bool {
 	case act() == keys.Profile:
 		a.OpenProfile()
 
-	case k.kind == keyPageDown:
-		a.RunMoveCursor(15)
-	case k.kind == keyPageUp:
-		a.RunMoveCursor(-15)
-	case k.kind == keyHome:
-		a.RunMoveCursor(-len(a.RunRows))
-	case k.kind == keyEnd:
-		a.RunMoveCursor(len(a.RunRows))
-
 	case k.isChar(' '), k.kind == keyRight, k.kind == keyLeft:
 		a.RunToggleFold()
 	case act() == keys.Fold:

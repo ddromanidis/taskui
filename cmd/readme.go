@@ -109,6 +109,14 @@ func RegenerateReadme(current string) (string, error) {
 		if to < 0 {
 			return "", fmt.Errorf("README has no %q after the %s table", endTable, title[0])
 		}
+		// The end marker has to be this block's own. Without the check a block that lost its
+		// end marker swallows everything up to the *next* block's — the prose between them
+		// and that block's table with it — and reports nothing wrong, which is the one
+		// outcome a generator must never have.
+		if next := strings.Index(head[len(beginTable):], beginTable); next >= 0 && next+len(beginTable) < to {
+			return "", fmt.Errorf("the %s key table has no %q before the next table starts",
+				title[0], endTable)
+		}
 
 		out.WriteString(rest[:from])
 		out.WriteString(head[:shut+len("-->")])

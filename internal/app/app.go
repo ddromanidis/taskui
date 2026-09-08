@@ -1876,7 +1876,7 @@ func (a *App) ToggleHelp() {
 // BeginHelpFind opens the find prompt on the `?` screen.
 //
 // The keymap is 140 bindings over eight screens, which is a page and a half of scrolling to
-// answer "which key copies a line". `t` is the same key that finds a task in the picker, so
+// answer "which key copies a line". It is the same key that finds a task in the picker, so
 // the thing you press to look something up does not change with the screen you are on.
 func (a *App) BeginHelpFind() {
 	a.HelpFinding = true

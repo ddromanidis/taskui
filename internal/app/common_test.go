@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ddromanidis/taskui/internal/keys"
@@ -108,5 +109,55 @@ func TestAPromptStillTakesTheQuitKey(t *testing.T) {
 	}
 	if a.Query != "q" {
 		t.Errorf("query = %q", a.Query)
+	}
+}
+
+// Every footer pins a pointer to the full keymap on its right edge. It named `?` outright,
+// so a rebound help key left every screen in the program pointing at a key that did nothing.
+func TestTheFooterPointerFollowsAReboundHelpKey(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	a.Keymap.Rebind(keys.Help, keys.Plain('z'))
+	a.Width, a.Height = 90, 12
+
+	lines := a.RenderHeadless(90, 12)
+	footer := lines[len(lines)-1]
+	if !strings.HasSuffix(strings.TrimSpace(footer), "z keys") {
+		t.Errorf("footer = %q", footer)
+	}
+	if strings.Contains(footer, "? keys") {
+		t.Errorf("footer still points at the old key: %q", footer)
+	}
+}
+
+// The `?` screen is what a first-time reader opens to find out how to leave, and there is
+// no `? keys` on it to point them anywhere else.
+func TestTheKeymapScreenSaysHowToQuit(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('?'))
+	lines := a.RenderHeadless(90, 12)
+	if footer := lines[len(lines)-1]; !strings.Contains(footer, "q quit") {
+		t.Errorf("footer = %q", footer)
+	}
+}
+
+// With a query kept, `esc` clears it rather than closing the screen — so the footer must
+// not offer both meanings of the one key on the one line.
+func TestTheKeptQueryFooterDoesNotOfferEscTwice(t *testing.T) {
+	a := appAt(t, "backend:lint")
+	press(a, Char('?'))
+	press(a, Char('f'))
+	for _, c := range "quit" {
+		press(a, Char(c))
+	}
+	press(a, Enter())
+	if a.HelpFinding || a.HelpQuery == "" {
+		t.Fatalf("wanted a kept query: finding=%v query=%q", a.HelpFinding, a.HelpQuery)
+	}
+	footer := a.RenderHeadless(90, 12)[11]
+	if !strings.Contains(footer, "esc clear") {
+		t.Errorf("footer = %q", footer)
+	}
+	if strings.Contains(footer, "close") {
+		t.Errorf("`esc` is offered as close and clear at once: %q", footer)
 	}
 }

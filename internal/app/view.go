@@ -536,7 +536,11 @@ func (a *App) helpFooter() line {
 		// hints are the ones that still do something.
 		hints := "   ⏎ keep   esc clear"
 		if !a.HelpFinding {
-			hints = "   " + keys.Footer(&keys.HelpSection, a.Keymap) + "   esc clear"
+			// Not the section's own footer: that one offers `esc … close`, and in this state
+			// `esc` clears the query instead. Advertising both on one line makes the key look
+			// like it does whichever the reader guesses.
+			find, _ := a.Keymap.KeyOf(keys.Jump)
+			hints = "   j k ↑ ↓ scroll   " + find.Display() + " find   esc clear"
 		}
 		return append(l, styled(hints, fg(t.Colors.Dim)))
 	}
@@ -1766,13 +1770,21 @@ const hintGap = 3
 //
 // The keys are accented and the labels are not, so the line reads as a row of controls
 // rather than a paragraph of grey. It stops at a binding boundary: a hint you cannot finish
-// reading — `t jump   s deta` — is worse than one that was never offered, and `?` already
-// documents every last one of them.
+// reading — one clipped mid-word — is worse than one that was never offered, and the `?`
+// screen already documents every last one of them.
 func (a *App) hintBar(section *keys.Section) line {
 	t := a.Theme
-	const tail = "? keys"
+	// Spelled from the keymap like every other hint on the line. It was the last piece of
+	// any footer that named a key instead of an action, which meant a rebound `help` left
+	// every screen still pointing at `?`.
+	help, hasHelp := a.Keymap.KeyOf(keys.Help)
+	tail := ""
+	if hasHelp {
+		tail = help.Display() + " keys"
+	}
+	tailW := utf8.RuneCountInString(tail)
 	hints := keys.FooterHints(section, a.Keymap)
-	fits := keys.FooterFits(hints, a.Width-1, len(tail)+hintGap)
+	fits := keys.FooterFits(hints, a.Width-1, tailW+hintGap)
 
 	l := line{plain(" ")}
 	used := 1
@@ -1784,8 +1796,11 @@ func (a *App) hintBar(section *keys.Section) line {
 		l = append(l, styled(b.Keys, fg(t.Colors.Accent)), plain(" "), styled(b.Footer, fg(t.Colors.Dim)))
 		used += utf8.RuneCountInString(b.Keys) + 1 + utf8.RuneCountInString(b.Footer)
 	}
-	l = append(l, plain(strings.Repeat(" ", max(hintGap, a.Width-used-len(tail)-1))))
-	return append(l, styled("?", fg(t.Colors.Accent)), styled(" keys", fg(t.Colors.Dim)))
+	l = append(l, plain(strings.Repeat(" ", max(hintGap, a.Width-used-tailW-1))))
+	if !hasHelp {
+		return l
+	}
+	return append(l, styled(help.Display(), fg(t.Colors.Accent)), styled(" keys", fg(t.Colors.Dim)))
 }
 
 // argsPrompt is shared by both screens that can open it.

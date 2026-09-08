@@ -306,11 +306,11 @@ var profileActions = []Action{Edit, Help, Quit}
 var diffActions = []Action{Edit, ContextMore, ContextLess, Help, Quit}
 
 // The detail panel reads what a task will run, which is the moment you want to run it, run
-// it differently, or go and change it. `s` closes it again, as it opened it.
+// it differently, or go and change it. The detail key closes it again, as it opened it.
 var detailActions = []Action{Args, Edit, Detail, Help, Quit}
 
 // The `?` screen has three keys of its own, and they are the same three actions they are
-// everywhere else — `t` finds a binding here exactly as it finds a task in the picker.
+// everywhere else — jump finds a binding here exactly as it finds a task in the picker.
 var helpActions = []Action{Jump, Help, Quit}
 
 func defaultKey(action Action) rune {
@@ -817,7 +817,9 @@ var HelpSection = Section{
 	Bindings: scrolls(
 		f("{jump}", "find a binding — ⏎ keeps what is left, esc clears the query", "find"),
 		f("esc {help}", "close, and go back to where you were", "close"),
-		b("{quit}", "quit"),
+		// The one screen where quit earns the space: it is what a first-time reader opened
+		// this to find out, and there is no `? keys` here to point them anywhere else.
+		f("{quit}", "quit — always asks first", "quit"),
 	),
 }
 
