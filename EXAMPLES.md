@@ -58,7 +58,7 @@ want to see *all* the linting tasks:
  └ lint           Rust lints (clippy warnings are errors) + format check
 ```
 
-**`t` jumps** — moves the cursor to the match and leaves the tree intact. Use it when you
+**`f` jumps** — moves the cursor to the match and leaves the tree intact. Use it when you
 know what you want and the surroundings still matter:
 
 ```
@@ -85,7 +85,7 @@ The aggregate sits directly above its own fan-out, so this doubles as a preview 
 
 ## Working out what a task will do before running it
 
-`s` on a task:
+`d` on a task:
 
 ```
  taskui ▸ wt:new                                                              

@@ -108,7 +108,7 @@ func TestHalfPageReachesEveryScreen(t *testing.T) {
 
 	t.Run("detail", func(t *testing.T) {
 		a := appAt(t, "backend:lint")
-		press(a, Char('s'))
+		press(a, Char('d'))
 		if a.Screen != ScreenDetail {
 			t.Fatalf("screen = %v", a.Screen)
 		}

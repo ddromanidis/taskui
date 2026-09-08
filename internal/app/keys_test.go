@@ -455,7 +455,7 @@ func TestGIsTypedIntoAPromptRatherThanJumping(t *testing.T) {
 	// The keymap's own find prompt reads its keys the same way.
 	b := appAt(t, "backend:lint")
 	press(b, Char('?'))
-	press(b, Char('t'))
+	press(b, Char('f'))
 	press(b, Char('g'))
 	if b.HelpQuery != "g" {
 		t.Errorf("help query = %q", b.HelpQuery)
@@ -773,7 +773,7 @@ func TestBracesStepOverAnUnfoldedRun(t *testing.T) {
 func TestTFindsABindingInTheHelp(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-	press(a, Char('t'))
+	press(a, Char('f'))
 	if !a.HelpFinding {
 		t.Fatal("the find prompt should be open")
 	}
@@ -821,7 +821,7 @@ func TestEveryBindingTheFindLeavesSaysWhatYouTyped(t *testing.T) {
 func TestTheHelpFindPromptSwallowsItsOwnBindings(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-	press(a, Char('t'))
+	press(a, Char('f'))
 
 	for _, c := range "quit" {
 		if press(a, Char(c)); a.Screen != ScreenHelp {
@@ -842,7 +842,7 @@ func TestTheHelpFindPromptSwallowsItsOwnBindings(t *testing.T) {
 func TestEnterKeepsTheFindAndEscDropsItFirst(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-	press(a, Char('t'))
+	press(a, Char('f'))
 	press(a, Char('y'))
 
 	press(a, Enter())
@@ -871,7 +871,7 @@ func TestEnterKeepsTheFindAndEscDropsItFirst(t *testing.T) {
 func TestClosingTheHelpForgetsTheQuery(t *testing.T) {
 	a := appAt(t, "backend:lint")
 	press(a, Char('?'))
-	press(a, Char('t'))
+	press(a, Char('f'))
 	press(a, Char('y'))
 	press(a, Enter())
 

@@ -14,7 +14,7 @@ previous runs.
  └ migrate        Apply pending migrations                                   ⚠
  ▸ deploy                                                               ⚠    9
  ─────────────────────────────────────────────────────────────────────────────
- space o fold   ⏎ run   a args   / filter   t jump   s detail           ? keys
+ space fold   o output   ⏎ run   m mark   a args   / filter   f jump   ? keys
 ```
 
 ## What it is
@@ -217,7 +217,7 @@ stale. `taskui examples <topic>` prints just one.
 `man taskui` covers the options, the commands, the keys and the files — its reference
 sections are generated from the same flag set and keymap table the program uses, and a test
 fails if they drift. `?` from any screen lists every
-binding, grouped by context, and `t` there searches that list rather than scrolling it —
+binding, grouped by context, and `f` there searches that list rather than scrolling it —
 eight sections is a page and a half to get to "which key copies a line". The footer shows a
 subset of the same table — one source of truth, so the two cannot disagree.
 
@@ -279,8 +279,8 @@ In the picker:
 | `⇧F` | arm --force: ignore go-task's up-to-date checks — again to disarm |
 | `⇧W` | watch: re-run the marked set, or this task, whenever the source changes |
 | `/` | filter the list down to matching tasks |
-| `t` | jump to a task, leaving the list intact |
-| `s` | what this task is, and what it will run |
+| `f` | jump to a task, leaving the list intact |
+| `d` | what this task is, and what it will run |
 | `v` | the whole screen for whatever is running, or the last run |
 | `⇧H` | how this one task has been going, run after run |
 | `e` | open this task's own definition in $EDITOR |
@@ -527,7 +527,7 @@ the task it is about:
 ```
 
 `⇧R` re-runs with `--force`, which is the answer to most of them. Before running anything,
-`s` says the same thing in advance — `would run — but go-task says it is up to date` — so
+`d` says the same thing in advance — `would run — but go-task says it is up to date` — so
 that `⏎` doing nothing is a prediction rather than a discovery.
 
 ### Where the time went

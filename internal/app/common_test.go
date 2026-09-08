@@ -14,7 +14,7 @@ func TestTheHelpKeyWorksOnEveryScreen(t *testing.T) {
 		open func(*App)
 	}{
 		{"picker", func(*App) {}},
-		{"detail", func(a *App) { press(a, Char('s')) }},
+		{"detail", func(a *App) { press(a, Char('d')) }},
 		{"history", func(a *App) { a.OpenHistory() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -40,7 +40,7 @@ func TestQuitIsReboundOnEveryScreen(t *testing.T) {
 		open func(*App)
 	}{
 		{"picker", func(*App) {}},
-		{"detail", func(a *App) { press(a, Char('s')) }},
+		{"detail", func(a *App) { press(a, Char('d')) }},
 		{"help", func(a *App) { press(a, Char('?')) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestCtrlCLeavesFromAnyPrompt(t *testing.T) {
 	}{
 		{"filter", func(a *App) { press(a, Char('/')) }},
 		{"args", func(a *App) { press(a, Char('a')) }},
-		{"jump", func(a *App) { press(a, Char('t')) }},
+		{"jump", func(a *App) { press(a, Char('f')) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := appAt(t, "backend:lint")
