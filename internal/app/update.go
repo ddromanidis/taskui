@@ -338,6 +338,9 @@ func Enter() Key { return Key{kind: keyEnter} }
 // Esc is the escape key.
 func Esc() Key { return Key{kind: keyEsc} }
 
+// Ctrl builds a control chord, for tests and for `--keys`.
+func Ctrl(c rune) Key { return Key{kind: keyChar, ch: c, mods: keys.ModCtrl} }
+
 // Tab is the ⇥ key.
 func Tab() Key { return Key{kind: keyTab} }
 
@@ -379,6 +382,10 @@ func (a *App) action(k Key, screen Screen) keys.Action {
 		return a.Keymap.Diff(c)
 	case ScreenProfile:
 		return a.Keymap.Profile(c)
+	case ScreenDetail:
+		return a.Keymap.Detail(c)
+	case ScreenHelp:
+		return a.Keymap.Help(c)
 	default:
 		return keys.None
 	}
@@ -415,8 +422,11 @@ func (a *App) handleKey(k Key) bool {
 	// Before the per-screen handlers, not after: the run screen returns early, and with
 	// this below it `gg` and `G` reached every screen except the one with the most rows to
 	// move through. The prompt guards inside it keep a run's own `i` and `/` intact.
-	if a.handleVimMotion(k) {
+	if a.handleNavKey(k) {
 		return false
+	}
+	if taken, quitting := a.handleCommonKey(k); taken {
+		return quitting
 	}
 	switch a.Screen {
 	case ScreenRun:
@@ -505,19 +515,91 @@ func (a *App) handleConfirmKey(k Key) bool {
 	return false
 }
 
-// handleVimMotion handles `gg` and `G` once for every screen.
+// promptOpen is true while something on screen is taking typed characters — a filter, a
+// search, an argument line, or the running child's own stdin.
+func (a *App) promptOpen() bool {
+	return a.EnteringArgs || a.Searching || a.SendingInput || a.HistorySearching ||
+		a.Jumping || a.Filtering || a.HelpFinding
+}
+
+// promptOwns says whether the prompt on screen answers this particular motion key itself.
 //
-// It returns true if the key was consumed. `g` on its own only arms the pair; anything
-// else disarms it, so a forgotten `g` cannot silently swallow the next keystroke.
-func (a *App) handleVimMotion(k Key) bool {
-	// Prompts own every key while they are open. Every one of them: a `g` typed into the
-	// filter is a letter of a task name, not a jump to the top of the list it is narrowing.
-	if a.EnteringArgs || a.Searching || a.SendingInput || a.HistorySearching || a.Jumping ||
-		a.Filtering || a.HelpFinding {
-		return false
+// Asked key by key rather than as a blanket "something is open", because these prompts use
+// different parts of the keyboard and a motion the open one has no use for should still
+// move the list behind it: `^d` pages the run while you are searching it, because the
+// search line has nothing to do with `^d` and the output is right there.
+//
+// The filter and the help's find own no motions at all, which is what makes narrowing and
+// then picking one gesture rather than two.
+func (a *App) promptOwns(k Key) bool {
+	switch {
+	// Every key is the child's while you are typing at it — `^d` most of all, since that
+	// is the one that closes its stdin.
+	case a.SendingInput:
+		return true
+	// A line editor: this is where the caret goes.
+	case a.EnteringArgs:
+		return k.kind == keyLeft || k.kind == keyRight || k.kind == keyHome || k.kind == keyEnd
+	// ↑ and ↓ step through what the query matched, which is the whole point of typing it.
+	case a.Searching, a.HistorySearching, a.Jumping:
+		return k.kind == keyUp || k.kind == keyDown
+	}
+	return false
+}
+
+// promptTakes says whether an open prompt should get this key rather than the screen
+// behind it. Both of the handlers that run ahead of the per-screen ones ask this, so a
+// prompt cannot be answered by one of them and ignored by the other.
+func (a *App) promptTakes(k Key) bool {
+	if k.typed() {
+		return a.promptOpen()
+	}
+	return a.promptOwns(k)
+}
+
+// handleCommonKey answers the two keys that mean the same thing on every screen.
+//
+// `esc` is deliberately not one of them: it closes a filter here and a panel there and a
+// whole run somewhere else, and that difference is the point of it. Quitting and the `?`
+// screen have no such difference, and eight copies of them is how the detail panel came to
+// advertise `? keys` in its footer and then not answer it.
+//
+// Returns whether it took the key, and — because leaving has to travel back out to Bubble
+// Tea — whether the app is going.
+func (a *App) handleCommonKey(k Key) (bool, bool) {
+	if a.promptTakes(k) {
+		return false, false
 	}
 	switch {
-	case k.isChar('g'):
+	case k.isCtrl('c'), a.action(k, a.Screen) == keys.Quit:
+		return true, a.quit()
+	case a.action(k, a.Screen) == keys.Help:
+		a.ToggleHelp()
+		return true, false
+	}
+	return false, false
+}
+
+// handleNavKey moves the cursor, on whatever screen is showing.
+//
+// Every screen here is a list and every list moves the same way, so the keys that move one
+// are written once rather than eight times over — which is how the run view came to have no
+// Home or End, and the detail panel and the `?` screen no `^d`. MoveBy, GotoTop and
+// GotoBottom do the per-screen half; this is only the keys.
+//
+// It runs before the per-screen handlers, so a motion wins over an action rebound onto the
+// same key. That is the bargain `gg` and `G` have always had, now extended to the rest: the
+// motions are the one part of the keymap you can rely on without reading it.
+//
+// Returns true if the key was consumed.
+func (a *App) handleNavKey(k Key) bool {
+	if a.promptTakes(k) {
+		return false
+	}
+
+	// `g` on its own only arms the pair. Everything below disarms it, and so does every key
+	// that falls through, so a forgotten `g` cannot silently swallow the next keystroke.
+	if k.isChar('g') {
 		if a.PendingG {
 			a.PendingG = false
 			a.GotoTop()
@@ -525,49 +607,59 @@ func (a *App) handleVimMotion(k Key) bool {
 			a.PendingG = true
 		}
 		return true
-	case k.isChar('G'):
-		a.PendingG = false
+	}
+	a.PendingG = false
+
+	switch {
+	case k.isChar('j'), k.kind == keyDown:
+		a.MoveBy(1)
+	case k.isChar('k'), k.kind == keyUp:
+		a.MoveBy(-1)
+	case k.isCtrl('d'):
+		a.MoveBy(a.HalfPage())
+	case k.isCtrl('u'):
+		a.MoveBy(-a.HalfPage())
+	case k.isCtrl('f'), k.kind == keyPageDown:
+		a.MoveBy(a.Page())
+	case k.isCtrl('b'), k.kind == keyPageUp:
+		a.MoveBy(-a.Page())
+	case k.isChar('G'), k.kind == keyEnd:
 		a.GotoBottom()
-		return true
+	case k.kind == keyHome:
+		a.GotoTop()
 	default:
-		a.PendingG = false
 		return false
 	}
+	return true
 }
 
 func (a *App) handleDetailKey(k Key) bool {
+	act := func() keys.Action { return a.action(k, ScreenDetail) }
+
 	switch {
-	case k.isChar('q'), k.isCtrl('c'):
-		return a.quit()
-	case k.kind == keyEsc, k.isChar('s'):
+	case k.kind == keyEsc, act() == keys.Detail:
 		a.CloseDetail()
-	case k.isChar('j'), k.kind == keyDown:
-		a.DetailScroll(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.DetailScroll(-1)
-	case k.kind == keyPageDown:
-		a.DetailScroll(10)
-	case k.kind == keyPageUp:
-		a.DetailScroll(-10)
 	// Running it is the point of having read this.
 	case k.kind == keyEnter:
 		if name := a.DetailOf; name != "" {
 			a.CloseDetail()
 			a.RequestRun(name, nil)
 		}
-	case k.isChar('a'):
+	case act() == keys.Args:
 		if name := a.DetailOf; name != "" {
 			a.CloseDetail()
 			a.BeginArgs(name)
 		}
 	// Reading what a task will run is the moment you most want to change it.
-	case k.isChar('e'):
+	case act() == keys.Edit:
 		a.EditDefinition(a.DetailOf)
 	}
 	return false
 }
 
 func (a *App) handleHelpKey(k Key) bool {
+	act := func() keys.Action { return a.action(k, ScreenHelp) }
+
 	// The find prompt owns every key that is not a way out of it or a way to scroll what it
 	// left — `q` and `?` are bindings out there and letters in here, and typing `quit` to
 	// look up how to quit must not quit.
@@ -591,28 +683,18 @@ func (a *App) handleHelpKey(k Key) bool {
 	}
 
 	switch {
-	case k.isChar('q'), k.isCtrl('c'):
-		return a.quit()
 	// `esc` drops the query first and closes the screen second, so backing out of a search
 	// does not also throw away the keymap you were reading.
 	case k.kind == keyEsc && a.HelpQuery != "":
 		a.ClearHelpFind()
-	case k.isChar('?'), k.kind == keyEsc:
+	case k.kind == keyEsc:
 		a.ToggleHelp()
 
 	// Find a binding in the keymap itself. The same key that finds a task in the picker,
-	// because "show me the one I mean" should not change name with the screen.
-	case a.action(k, ScreenPicker) == keys.Jump:
+	// because "show me the one I mean" should not change name with the screen — and
+	// rebinding `jump` moves both, because Rebind reaches every screen that offers it.
+	case act() == keys.Jump:
 		a.BeginHelpFind()
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.HelpScroll(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.HelpScroll(-1)
-	case k.kind == keyPageDown:
-		a.HelpScroll(10)
-	case k.kind == keyPageUp:
-		a.HelpScroll(-10)
 	}
 	return false
 }
@@ -710,26 +792,6 @@ func (a *App) handlePickerKey(k Key) bool {
 			a.Status = "nothing left to leave — press q to quit"
 		}
 
-	case act() == keys.Quit, k.isCtrl('c'):
-		return a.quit()
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.MoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.MoveCursor(-1)
-	case k.isCtrl('d'):
-		a.MoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.MoveCursor(-a.HalfPage())
-	case k.kind == keyPageDown:
-		a.MoveCursor(15)
-	case k.kind == keyPageUp:
-		a.MoveCursor(-15)
-	case k.kind == keyHome:
-		a.MoveCursor(-len(a.Rows))
-	case k.kind == keyEnd:
-		a.MoveCursor(len(a.Rows))
-
 	// Vim's paragraph keys, over the tree's groups: `}` past whatever is under this group
 	// to the next header, `{` back to the previous one.
 	case k.isChar('}'):
@@ -822,9 +884,6 @@ func (a *App) handlePickerKey(k Key) bool {
 	case act() == keys.Watch:
 		a.ToggleWatch()
 
-	case act() == keys.Help:
-		a.ToggleHelp()
-
 	// Back to whatever is still running.
 	case act() == keys.ResumeRun:
 		a.ResumeRun()
@@ -888,8 +947,6 @@ func (a *App) handleHistoryKey(k Key) bool {
 	act := func() keys.Action { return a.action(k, ScreenHistory) }
 
 	switch {
-	case act() == keys.Quit, k.isCtrl('c'):
-		return a.quit()
 	case k.kind == keyEsc:
 		a.Screen = ScreenPicker
 		a.Status = ""
@@ -900,25 +957,7 @@ func (a *App) handleHistoryKey(k Key) bool {
 
 	case act() == keys.Search:
 		a.BeginHistorySearch()
-	case act() == keys.Help:
-		a.ToggleHelp()
 
-	case k.isChar('j'), k.kind == keyDown:
-		a.HistoryMoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.HistoryMoveCursor(-1)
-	case k.isCtrl('d'):
-		a.HistoryMoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.HistoryMoveCursor(-a.HalfPage())
-	case k.kind == keyPageDown:
-		a.HistoryMoveCursor(15)
-	case k.kind == keyPageUp:
-		a.HistoryMoveCursor(-15)
-	case k.kind == keyHome:
-		a.HistoryMoveCursor(-len(a.History))
-	case k.kind == keyEnd:
-		a.HistoryMoveCursor(len(a.History))
 	case k.kind == keyEnter:
 		a.OpenStoredRun()
 	}
@@ -991,9 +1030,6 @@ func (a *App) handleRunKey(k Key) bool {
 	act := func() keys.Action { return a.action(k, ScreenRun) }
 
 	switch {
-	case k.isCtrl('c'), act() == keys.Quit:
-		return a.quit()
-
 	// Stop the run without leaving the view.
 	case act() == keys.Stop:
 		a.CancelRun()
@@ -1028,15 +1064,6 @@ func (a *App) handleRunKey(k Key) bool {
 	case k.kind == keyEsc:
 		a.Screen = ScreenPicker
 		a.Status = ""
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.RunMoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.RunMoveCursor(-1)
-	case k.isCtrl('d'):
-		a.RunMoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.RunMoveCursor(-a.HalfPage())
 
 	// Reading an error usually ends with pasting it somewhere.
 	case act() == keys.Yank:
@@ -1138,9 +1165,6 @@ func (a *App) handleRunKey(k Key) bool {
 			a.BeginArgs(name)
 		}
 
-	case act() == keys.Help:
-		a.ToggleHelp()
-
 	// Jump straight to a slot, as the bar numbers them. Last, so that rebinding an action
 	// onto a digit still wins — the keymap is the thing users can change.
 	case k.typed() && k.ch >= '1' && k.ch <= '9':
@@ -1153,29 +1177,8 @@ func (a *App) handleTimelineKey(k Key) bool {
 	act := func() keys.Action { return a.action(k, ScreenTimeline) }
 
 	switch {
-	case act() == keys.Quit, k.isCtrl('c'):
-		return a.quit()
 	case k.kind == keyEsc:
 		a.CloseTimeline()
-	case act() == keys.Help:
-		a.ToggleHelp()
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.TimelineMoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.TimelineMoveCursor(-1)
-	case k.isCtrl('d'):
-		a.TimelineMoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.TimelineMoveCursor(-a.HalfPage())
-	case k.kind == keyPageDown:
-		a.TimelineMoveCursor(15)
-	case k.kind == keyPageUp:
-		a.TimelineMoveCursor(-15)
-	case k.kind == keyHome:
-		a.TimelineMoveCursor(-len(a.Timeline))
-	case k.kind == keyEnd:
-		a.TimelineMoveCursor(len(a.Timeline))
 
 	// What changed between this run and the one before it — the question the list is
 	// arranged to make you ask.
@@ -1192,29 +1195,8 @@ func (a *App) handleProfileKey(k Key) bool {
 	act := func() keys.Action { return a.action(k, ScreenProfile) }
 
 	switch {
-	case act() == keys.Quit, k.isCtrl('c'):
-		return a.quit()
 	case k.kind == keyEsc:
 		a.CloseProfile()
-	case act() == keys.Help:
-		a.ToggleHelp()
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.ProfileMoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.ProfileMoveCursor(-1)
-	case k.isCtrl('d'):
-		a.ProfileMoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.ProfileMoveCursor(-a.HalfPage())
-	case k.kind == keyPageDown:
-		a.ProfileMoveCursor(15)
-	case k.kind == keyPageUp:
-		a.ProfileMoveCursor(-15)
-	case k.kind == keyHome:
-		a.ProfileMoveCursor(-len(a.ProfileRows))
-	case k.kind == keyEnd:
-		a.ProfileMoveCursor(len(a.ProfileRows))
 
 	// The point of finding the slow step is going to look at it.
 	case k.kind == keyEnter:
@@ -1232,29 +1214,8 @@ func (a *App) handleDiffKey(k Key) bool {
 	act := func() keys.Action { return a.action(k, ScreenDiff) }
 
 	switch {
-	case act() == keys.Quit, k.isCtrl('c'):
-		return a.quit()
 	case k.kind == keyEsc:
 		a.CloseDiff()
-	case act() == keys.Help:
-		a.ToggleHelp()
-
-	case k.isChar('j'), k.kind == keyDown:
-		a.DiffMoveCursor(1)
-	case k.isChar('k'), k.kind == keyUp:
-		a.DiffMoveCursor(-1)
-	case k.isCtrl('d'):
-		a.DiffMoveCursor(a.HalfPage())
-	case k.isCtrl('u'):
-		a.DiffMoveCursor(-a.HalfPage())
-	case k.kind == keyPageDown:
-		a.DiffMoveCursor(15)
-	case k.kind == keyPageUp:
-		a.DiffMoveCursor(-15)
-	case k.kind == keyHome:
-		a.DiffMoveCursor(-len(a.DiffRows))
-	case k.kind == keyEnd:
-		a.DiffMoveCursor(len(a.DiffRows))
 
 	// More or less of the unchanged output around each change.
 	case act() == keys.ContextMore:
@@ -1269,15 +1230,44 @@ func (a *App) handleDiffKey(k Key) bool {
 	return false
 }
 
-// KeyFor maps one character of a `--keys` string to a keypress. `\t` folds everything and
-// `\n` runs, which is how a screenshot exercises the two things a letter cannot reach.
+// KeyFor maps one character of a `--keys` string to a keypress.
+//
+// The control characters are the keys that make them: ⇥ is 0x09, ⏎ is 0x0a, esc is 0x1b.
+// That is how a screenshot reaches the three keys no letter can.
 func KeyFor(c rune) Key {
 	switch c {
 	case '\t':
 		return Tab()
 	case '\n':
 		return Enter()
+	case 0x1b:
+		return Esc()
 	default:
 		return Char(c)
 	}
+}
+
+// KeysFrom turns a whole `--keys` string into the presses it names.
+//
+// One rune is one press, except `^` and the character after it, which is a control chord:
+// `^d` is ⌃d. Written that way because the alternative is a recipe carrying a literal 0x04,
+// which nobody can read in a Taskfile or edit without a hex editor — and the motion keys
+// this reaches are exactly the ones a screenshot could not demonstrate before. `^^` is a
+// literal caret, which nothing is bound to but which the escape would otherwise swallow.
+func KeysFrom(feed string) []Key {
+	runes := []rune(feed)
+	out := make([]Key, 0, len(runes))
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != '^' || i+1 >= len(runes) {
+			out = append(out, KeyFor(runes[i]))
+			continue
+		}
+		i++
+		if runes[i] == '^' {
+			out = append(out, Char('^'))
+			continue
+		}
+		out = append(out, Ctrl(unicode.ToLower(runes[i])))
+	}
+	return out
 }

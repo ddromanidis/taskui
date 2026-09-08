@@ -455,7 +455,7 @@ func helpMatch(b keys.Binding, query string) bool {
 func (a *App) helpMatches() int {
 	n := 0
 	for _, section := range keys.Sections {
-		for _, b := range section.Bindings {
+		for _, b := range keys.Spelled(section, a.Keymap) {
 			if helpMatch(b, a.HelpQuery) {
 				n++
 			}
@@ -468,7 +468,7 @@ func (a *App) drawHelp(width, height int) []string {
 	t := a.Theme
 	// Widest key column across every section, so the descriptions line up as one table
 	// rather than five.
-	pad := keys.WidestKeys()
+	pad := keys.WidestKeys(a.Keymap)
 
 	var lines []line
 	for _, section := range keys.Sections {
@@ -476,7 +476,7 @@ func (a *App) drawHelp(width, height int) []string {
 		// a binding lives, so an empty one would answer the question with a heading and
 		// nothing under it.
 		var body []line
-		for _, binding := range section.Bindings {
+		for _, binding := range keys.Spelled(section, a.Keymap) {
 			if !helpMatch(binding, a.HelpQuery) {
 				continue
 			}
@@ -536,11 +536,11 @@ func (a *App) helpFooter() line {
 		// hints are the ones that still do something.
 		hints := "   ⏎ keep   esc clear"
 		if !a.HelpFinding {
-			hints = "   j k scroll   t find   esc clear"
+			hints = "   " + keys.Footer(&keys.HelpSection, a.Keymap) + "   esc clear"
 		}
 		return append(l, styled(hints, fg(t.Colors.Dim)))
 	}
-	return line{plain(" "), styled("j k scroll   t find   ? esc close   q quit", fg(t.Colors.Dim))}
+	return line{plain(" "), styled(keys.Footer(&keys.HelpSection, a.Keymap), fg(t.Colors.Dim))}
 }
 
 // --- history ----------------------------------------------------------------------
@@ -1771,7 +1771,7 @@ const hintGap = 3
 func (a *App) hintBar(section *keys.Section) line {
 	t := a.Theme
 	const tail = "? keys"
-	hints := keys.FooterHints(section)
+	hints := keys.FooterHints(section, a.Keymap)
 	fits := keys.FooterFits(hints, a.Width-1, len(tail)+hintGap)
 
 	l := line{plain(" ")}

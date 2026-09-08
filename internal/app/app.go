@@ -1767,6 +1767,43 @@ func (a *App) HalfPage() int {
 	return max(1, a.Viewport/2)
 }
 
+// Page is what `^f` and `^b` move by. The body height of the last frame, not the 15 rows
+// PgUp and PgDn used to assume: on a tall terminal that was two thirds of a screen and on a
+// short one it was four screens, and a page key that does not move a page is a worse guess
+// than the number it is guessing at.
+func (a *App) Page() int {
+	return max(1, a.Viewport)
+}
+
+// MoveBy moves whatever the screen on show is moving, by delta rows.
+//
+// The counterpart to GotoTop and GotoBottom, and there for the same reason: every screen
+// here is a list, every list moves the same way, and this is the one place that knows which
+// cursor belongs to which screen. The keys that drive it — see handleNavKey — then do not
+// have to know, so adding a motion adds it everywhere at once.
+func (a *App) MoveBy(delta int) {
+	switch a.Screen {
+	case ScreenPicker:
+		a.MoveCursor(delta)
+	case ScreenRun:
+		a.RunMoveCursor(delta)
+	case ScreenHistory:
+		a.HistoryMoveCursor(delta)
+	case ScreenTimeline:
+		a.TimelineMoveCursor(delta)
+	case ScreenDiff:
+		a.DiffMoveCursor(delta)
+	case ScreenProfile:
+		a.ProfileMoveCursor(delta)
+	// The detail panel and the `?` screen are text rather than rows, so they have an offset
+	// and no cursor. Moving them is scrolling them, which is the same key either way.
+	case ScreenDetail:
+		a.DetailScroll(delta)
+	case ScreenHelp:
+		a.HelpScroll(delta)
+	}
+}
+
 // GotoTop is `gg` — first row of whatever is on screen.
 func (a *App) GotoTop() {
 	switch a.Screen {

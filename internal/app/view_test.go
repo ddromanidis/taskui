@@ -650,7 +650,7 @@ func TestTheFooterNeverEndsMidBinding(t *testing.T) {
 			t.Errorf("%d wide: footer %q loses the pointer to the full keymap", w, footer)
 		}
 		whole := map[string]bool{"? keys": true}
-		for _, hint := range keys.FooterHints(&keys.Picker) {
+		for _, hint := range keys.FooterHints(&keys.Picker, a.Keymap) {
 			whole[hint.Keys+" "+hint.Footer] = true
 		}
 		// Every piece the footer offers is a complete hint, never a prefix of one.

@@ -208,12 +208,14 @@ func manCommands() string {
 // manKeys renders the keymap from the same table `?` and the footer read.
 func manKeys() string {
 	var b strings.Builder
+	// The page documents what taskui ships with, not what one machine's config did to it.
+	defaults := keys.NewKeymap()
 	for _, section := range keys.Sections {
 		fmt.Fprintf(&b, ".SS %s\n", section.Title)
 		if section.Note != "" {
 			b.WriteString(sentence(section.Note) + "\n.PP\n")
 		}
-		for _, binding := range section.Bindings {
+		for _, binding := range keys.Spelled(section, defaults) {
 			b.WriteString(".TP\n")
 			fmt.Fprintf(&b, ".B %s\n", roff(binding.Keys))
 			b.WriteString(sentence(binding.What) + "\n")

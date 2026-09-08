@@ -256,88 +256,140 @@ not depend on each other.
 
 In the picker:
 
+<!-- GENERATED KEYS Picker — regenerate with `task man` -->
+
 | key | |
 |---|---|
 | `j` `k` `↑` `↓` | move |
-| `{` `}` | previous / next group |
-| `space` `←` `→` | fold / unfold a group |
+| `^d` `^u` | half a screen down / up |
+| `^f` `^b` | a whole screen — PgDn and PgUp do the same |
+| `gg` `G` | first / last row — so do Home and End |
+| `{` `}` | previous / next group, over whatever is under this one |
+| `p` | cycle the grouping: by domain, by verb, by file, and any your config added |
+| `⇧S` | cycle the order rows are read in: name, file, recent, failed, size |
+| `space` | fold or unfold a group |
+| `←` `→` | the same fold, for hands that reach for a tree's keys |
 | `o` | how much of the run under a task: hidden, a peek, all of it |
 | `⇧O` `⇥` | fold or unfold every group |
-| `⏎` | run — or every marked task, each in its own slot — and stay here |
-| `p` | toggle the pivot |
-| `⇧S` | cycle the order: name, file, recent, failed, size |
-| `a` | run with arguments |
+| `⏎` | run the task, or every marked one — the run unfolds under its row |
+| `m` | mark a task to run alongside others |
+| `⇧M` | clear every mark |
+| `a` | run it with arguments |
 | `i` | arm interactive mode for the next run — again to disarm |
-| `⇧F` | arm `--force`: ignore go-task's up-to-date checks — again to disarm |
+| `⇧F` | arm --force: ignore go-task's up-to-date checks — again to disarm |
 | `⇧W` | watch: re-run the marked set, or this task, whenever the source changes |
-| `/` | filter by name |
+| `/` | filter the list down to matching tasks |
 | `t` | jump to a task, leaving the list intact |
 | `s` | what this task is, and what it will run |
-| `m` `⇧M` | mark a task to run alongside others / clear the marks |
-| `e` | open this task's definition in `$EDITOR` |
 | `v` | the whole screen for whatever is running, or the last run |
-| `h` | past runs — `a` widens to this repo's other worktrees, then to every project |
-| `⇧H` | past runs of *this* task |
-| `x` | stop this task's run, wherever it is |
-| `⇧K` | stop every run |
-| `esc` | back out of a filter or a panel — it does not quit |
-| `q` | quit (always asks first) |
+| `⇧H` | how this one task has been going, run after run |
+| `e` | open this task's own definition in $EDITOR |
+| `h` | past runs |
+| `x` | stop this task's run, wherever it is — again to kill it |
+| `⇧K` | stop every run, staying here |
+| `?` | this screen |
+| `esc` | back out of a filter, a jump, a panel — it does not quit |
+| `q` | quit — always asks first |
+
+<!-- END KEYS -->
 
 In a run:
 
+<!-- GENERATED KEYS Run — regenerate with `task man` -->
+
 | key | |
 |---|---|
-| `space` `o` `←` `→` | cycle a task's output: hidden, peek, full |
-| `⇧O` | move every task through the same cycle |
+| `j` `k` `↑` `↓` | move |
+| `^d` `^u` | half a screen down / up |
+| `^f` `^b` | a whole screen — PgDn and PgUp do the same |
+| `gg` `G` | first / last row — so do Home and End |
+| `space` `o` | how much output: hidden, a peek at the last few lines, all of it |
+| `←` `→` | the same three states, for hands that reach for a tree's keys |
+| `⇧O` | move every task through the same three states |
 | `/` | search the output |
-| `n` `N` | next / previous match |
-| `f` | filter to just the matching lines |
+| `n` `⇧N` | next / previous match |
+| `f` | filter to matching lines only |
 | `[` `]` | less / more context around each hit |
-| `r` | re-run the task under the cursor |
-| `⇧R` | the same, with `--force` |
+| `r` | re-run this task, same arguments |
+| `⇧R` | the same, with --force — ignore go-task's up-to-date checks |
 | `⇧F` | re-run everything in this run that failed, each in its own slot |
-| `a` | re-run with different arguments |
-| `i` | answer the task, or re-run it interactively |
-| `x` | stop the run (again to kill it) |
-| `⇧K` | stop every run |
-| `⇥` `⇧⇥` `1`…`9` | switch between open runs |
-| `⇧X` | close the slot (once its run has stopped) |
-| `⇧A` | detach: let this run outlive taskui |
-| `⇧T` | where this run's time went |
-| `w` | resume following |
-| `y` `⇧Y` | copy the line, or everything the task printed |
-| `e` | open the `file:line` under the cursor in `$EDITOR` |
+| `a` | re-run it with different arguments |
+| `i` | type at the running task — works even when you cannot see the prompt |
+| `⇧I` | re-run this task interactively, so prompts are visible |
+| `x` | stop the run — press it again to SIGKILL the group |
+| `⇧K` | stop every run, not just this one |
+| `y` | copy the line under the cursor |
+| `⇧Y` | copy everything this task printed |
+| `e` | open the file:line under the cursor in $EDITOR |
 | `⇧D` | what changed since this task last passed |
-| `h` | past runs — `a` widens to this repo's other worktrees, then to every project |
-| `⇧H` | past runs of *this* task |
-| `esc` | back to the picker (every run keeps going) |
+| `⇧H` | how this one task has been going, run after run |
+| `⇧T` | where this run's time went, slowest first |
+| `w` | resume following the running task |
+| `⇧W` | watch: re-run the marked set, or this task, whenever the source changes |
+| `h` | past runs |
+| `⇥` `⇧⇥` | switch to the next / previous run |
+| `1…9` | switch straight to that slot |
+| `⇧X` | close the slot — only once its run has stopped |
+| `⇧A` | detach: let this run outlive taskui, output stops here |
+| `?` | this screen |
+| `esc` | back to the picker — every run keeps going |
+| `q` | quit, stopping every run — asks first |
+
+<!-- END KEYS -->
 
 On a timeline (`⇧H`):
 
+<!-- GENERATED KEYS Timeline — regenerate with `task man` -->
+
 | key | |
 |---|---|
-| `j` `k` `gg` `⇧G` | move |
+| `j` `k` `↑` `↓` | move |
+| `^d` `^u` | half a screen down / up |
+| `^f` `^b` | a whole screen — PgDn and PgUp do the same |
+| `gg` `G` | first / last row — so do Home and End |
 | `⏎` | open that run |
-| `⇧D` | what changed at it — against the last run that went differently |
-| `esc` | back |
+| `⇧D` | what changed at this run — against the last one that went differently |
+| `?` | this screen |
+| `esc` | back to wherever you opened this from |
+| `q` | quit |
+
+<!-- END KEYS -->
 
 In a diff:
 
+<!-- GENERATED KEYS Diff — regenerate with `task man` -->
+
 | key | |
 |---|---|
-| `j` `k` `gg` `⇧G` | scroll |
+| `j` `k` `↑` `↓` | move |
+| `^d` `^u` | half a screen down / up |
+| `^f` `^b` | a whole screen — PgDn and PgUp do the same |
+| `gg` `G` | first / last row — so do Home and End |
 | `[` `]` | less / more unchanged context |
-| `e` | open the `file:line` under the cursor in `$EDITOR` |
-| `esc` | back |
+| `e` | open the file:line under the cursor in $EDITOR |
+| `?` | this screen |
+| `esc` | back to the run, or to the timeline |
+| `q` | quit |
+
+<!-- END KEYS -->
 
 In a profile (`⇧T`):
 
+<!-- GENERATED KEYS Profile — regenerate with `task man` -->
+
 | key | |
 |---|---|
-| `j` `k` `gg` `⇧G` | move |
+| `j` `k` `↑` `↓` | move |
+| `^d` `^u` | half a screen down / up |
+| `^f` `^b` | a whole screen — PgDn and PgUp do the same |
+| `gg` `G` | first / last row — so do Home and End |
 | `⏎` | go to that task in the run |
-| `e` | open its definition in `$EDITOR` |
+| `e` | open its definition in $EDITOR |
+| `?` | this screen |
 | `esc` | back to the run |
+| `q` | quit |
+
+<!-- END KEYS -->
 
 ## Going where it broke
 

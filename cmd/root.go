@@ -165,7 +165,7 @@ func init() {
 		&opts.keys,
 		"keys",
 		"",
-		"keys to play before a --screenshot, as if typed: \\t is ⇥, \\n is ⏎, everything else is itself",
+		"keys to play before a --screenshot, as if typed: `^d` is a control chord, 0x09 0x0a 0x1b are ⇥ ⏎ esc, everything else is itself",
 	)
 	f.StringVar(&opts.themeName, "theme", "", "look to use — see --list-themes")
 	f.BoolVar(
@@ -843,7 +843,7 @@ func runHeadless(dir, target string, argv []string, quickfix bool) error {
 // deadlock. Keys are paced so the child has time to reach its prompt between them.
 func drive(a *app.App, feed string) {
 	deadline := time.Now().Add(30 * time.Second)
-	pending := []rune(feed)
+	pending := app.KeysFrom(feed)
 	nextKey := time.Now().Add(400 * time.Millisecond)
 
 	for {
@@ -854,7 +854,7 @@ func drive(a *app.App, feed string) {
 		}
 		if time.Now().After(nextKey) || time.Now().Equal(nextKey) {
 			if len(pending) > 0 {
-				a.HandleKey(app.KeyFor(pending[0]))
+				a.HandleKey(pending[0])
 				pending = pending[1:]
 				nextKey = time.Now().Add(400 * time.Millisecond)
 			} else if a.Run != nil && a.Run.Finished() {
@@ -882,8 +882,8 @@ func screenshot(a *app.App, size, feed string) error {
 	if err != nil {
 		return err
 	}
-	for _, c := range feed {
-		a.HandleKey(app.KeyFor(c))
+	for _, k := range app.KeysFrom(feed) {
+		a.HandleKey(k)
 		// A key can start a run, and `⏎` now leaves you in the picker with that run
 		// unfolded under its task — so the run is part of the frame, and every key after
 		// it is aimed at what it printed. Let it finish before playing the next one, or

@@ -67,7 +67,7 @@ Help for taskui.
 Machine\-readable form of \-\-list, \-\-run (newline\-delimited events) or \-\-timeline.
 .TP
 .BI \-\-keys " STRING"
-Keys to play before a \-\-screenshot, as if typed: \et is ⇥, \en is ⏎, everything else is itself.
+Keys to play before a \-\-screenshot, as if typed: `^d` is a control chord, 0x09 0x0a 0x1b are ⇥ ⏎ esc, everything else is itself.
 .TP
 .BR \-\-last
 Open the most recent run for this project instead of the picker.
@@ -155,17 +155,17 @@ Browsing the Taskfile.
 .B j k ↑ ↓
 Move.
 .TP
-.B gg G
-First / last row.
-.TP
-.B { }
-Previous / next group, over whatever is under this one.
-.TP
 .B ^d ^u
 Half a screen down / up.
 .TP
-.B PgUp PgDn Home End
-Move faster.
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
+.B gg G
+First / last row — so do Home and End.
+.TP
+.B { }
+Previous / next group, over whatever is under this one.
 .TP
 .B p
 Cycle the grouping: by domain, by verb, by file, and any your config added.
@@ -175,6 +175,9 @@ Cycle the order rows are read in: name, file, recent, failed, size.
 .TP
 .B space
 Fold or unfold a group.
+.TP
+.B ← →
+The same fold, for hands that reach for a tree's keys.
 .TP
 .B o
 How much of the run under a task: hidden, a peek, all of it.
@@ -245,14 +248,20 @@ Watching, or reading back, one run.
 .B j k ↑ ↓
 Move.
 .TP
-.B gg G
-First / last row.
-.TP
 .B ^d ^u
 Half a screen down / up.
 .TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
+.B gg G
+First / last row — so do Home and End.
+.TP
 .B space o
 How much output: hidden, a peek at the last few lines, all of it.
+.TP
+.B ← →
+The same three states, for hands that reach for a tree's keys.
 .TP
 .B ⇧O
 Move every task through the same three states.
@@ -260,7 +269,7 @@ Move every task through the same three states.
 .B /
 Search the output.
 .TP
-.B n N
+.B n ⇧N
 Next / previous match.
 .TP
 .B f
@@ -347,8 +356,14 @@ Runs already finished, scoped to this project.
 .B j k ↑ ↓
 Move.
 .TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
 .B gg G
-First / last row.
+First / last row — so do Home and End.
 .TP
 .B ⏎
 Reopen the run.
@@ -374,8 +389,14 @@ One task, run after run.
 .B j k ↑ ↓
 Move.
 .TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
 .B gg G
-First / last row.
+First / last row — so do Home and End.
 .TP
 .B ⏎
 Open that run.
@@ -396,10 +417,16 @@ What changed between two runs of one task.
 .PP
 .TP
 .B j k ↑ ↓
-Scroll.
+Move.
+.TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
 .TP
 .B gg G
-First / last row.
+First / last row — so do Home and End.
 .TP
 .B [ ]
 Less / more unchanged context.
@@ -422,8 +449,14 @@ Where a run's time went.
 .B j k ↑ ↓
 Move.
 .TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
 .B gg G
-First / last row.
+First / last row — so do Home and End.
 .TP
 .B ⏎
 Go to that task in the run.
@@ -443,8 +476,17 @@ Quit.
 What a task is, before you run it.
 .PP
 .TP
-.B j k
-Scroll.
+.B j k ↑ ↓
+Move.
+.TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
+.B gg G
+First / last row — so do Home and End.
 .TP
 .B ⏎
 Run it.
@@ -458,6 +500,33 @@ Open this task's own definition in $EDITOR.
 .B s esc
 Back to the picker.
 .TP
+.B ?
+This screen.
+.TP
+.B q
+Quit.
+.SS Keys
+This screen.
+.PP
+.TP
+.B j k ↑ ↓
+Scroll the keymap.
+.TP
+.B ^d ^u
+Half a screen down / up.
+.TP
+.B ^f ^b
+A whole screen — PgDn and PgUp do the same.
+.TP
+.B gg G
+First / last row — so do Home and End.
+.TP
+.B t
+Find a binding — ⏎ keeps what is left, esc clears the query.
+.TP
+.B esc ?
+Close, and go back to where you were.
+.TP
 .B q
 Quit.
 .SS Prompts
@@ -469,6 +538,9 @@ While a prompt is open, these take over.
 .TP
 .B search / filter
 ⏎ keep the query · esc clear · ↑ ↓ step through matches.
+.TP
+.B …while one is open
+The letters are the query; ^d ^u ^f ^b still page what is behind it.
 .TP
 .B find (on this screen)
 Opened with t · ⏎ keeps what is left · esc clears, then esc closes.

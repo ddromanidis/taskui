@@ -328,8 +328,8 @@ func draw(height int, keys string, setup func(*app.App)) func(int) []string {
 		if setup != nil {
 			setup(a)
 		}
-		for _, c := range keys {
-			a.HandleKey(app.KeyFor(c))
+		for _, k := range app.KeysFrom(keys) {
+			a.HandleKey(k)
 		}
 		if !stdoutIsTerminal() {
 			return a.RenderHeadless(width, height)

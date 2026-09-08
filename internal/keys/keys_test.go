@@ -8,7 +8,7 @@ import (
 
 // The footer is generated, so it cannot drift from the help screen.
 func TestFootersAreBuiltFromTheSameTable(t *testing.T) {
-	picker := Footer(&Picker)
+	picker := Footer(&Picker, NewKeymap())
 	if !strings.Contains(picker, "⏎ run") {
 		t.Errorf("footer = %q", picker)
 	}
@@ -61,17 +61,24 @@ func TestDemotedBindingsAreStillExplained(t *testing.T) {
 
 func TestEverySectionDocumentsTheHelpKeyOrIsAPrompt(t *testing.T) {
 	for _, section := range Sections {
-		if section.Title == "Prompts" || section.Title == "Detail" {
+		if section.Title == "Prompts" {
 			continue
 		}
+		// Spelled, and compared against the key `help` actually sits on: the table names
+		// the action now, so asserting on a literal `?` would only be testing the default.
+		km := NewKeymap()
+		help, ok := km.KeyOf(Help)
+		if !ok {
+			t.Fatal("no key for help")
+		}
 		found := false
-		for _, b := range section.Bindings {
-			if strings.Contains(b.Keys, "?") {
+		for _, b := range Spelled(section, km) {
+			if strings.Contains(b.Keys, help.Display()) {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("%s does not mention ?", section.Title)
+			t.Errorf("%s does not mention %s", section.Title, help.Display())
 		}
 	}
 }
@@ -79,7 +86,7 @@ func TestEverySectionDocumentsTheHelpKeyOrIsAPrompt(t *testing.T) {
 // Footers get one line, so keep them plausibly short.
 func TestFootersFitAReasonableTerminal(t *testing.T) {
 	for _, section := range Sections {
-		line := Footer(section)
+		line := Footer(section, NewKeymap())
 		if n := utf8.RuneCountInString(line); n >= 110 {
 			t.Errorf("%s: %d chars: %q", section.Title, n, line)
 		}
@@ -207,5 +214,99 @@ func TestUnmatchableChordsAreRefused(t *testing.T) {
 		if got, err := ParseChord(in); err == nil {
 			t.Errorf("%q was accepted as %+v", in, got)
 		}
+	}
+}
+
+// A placeholder that names nothing is left on the screen as `{jmup}` rather than silently
+// losing its key, which is survivable but ugly. This is what keeps one out of a release.
+func TestEveryPlaceholderNamesAnAction(t *testing.T) {
+	km := NewKeymap()
+	for _, section := range Sections {
+		for _, b := range section.Bindings {
+			for _, m := range placeholder.FindAllStringSubmatch(b.Keys+" "+b.What+" "+b.Footer, -1) {
+				action, ok := ActionByName(m[1])
+				if !ok {
+					t.Errorf("%s: `%s` names no action", section.Title, m[0])
+					continue
+				}
+				if _, ok := km.KeyOf(action); !ok {
+					t.Errorf("%s: `%s` is an action no screen offers", section.Title, m[0])
+				}
+			}
+		}
+	}
+}
+
+// The help table used to hold the keys as text, so rebinding moved the key and left every
+// surface still naming the old one.
+func TestTheHelpTableFollowsARebinding(t *testing.T) {
+	km := NewKeymap()
+	km.Rebind(Jump, Plain('z'))
+
+	var found bool
+	for _, b := range Spelled(&Picker, km) {
+		if b.Footer == "jump" {
+			found = true
+			if b.Keys != "z" {
+				t.Errorf("the `?` screen still says %q", b.Keys)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no jump binding in the picker")
+	}
+	if footer := Footer(&Picker, km); !strings.Contains(footer, "z jump") {
+		t.Errorf("the footer still says %q", footer)
+	}
+	// And the screen that documents the keymap itself, which was written out by hand.
+	if footer := Footer(&HelpSection, km); !strings.Contains(footer, "z find") {
+		t.Errorf("the `?` footer still says %q", footer)
+	}
+}
+
+// Rebinding onto a key a screen answers directly used to be silent: the key that was
+// displaced simply stopped working, and nothing here could see it, because it was never in
+// the map to collide with.
+func TestCollidingWithALiteralKeyIsReported(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		chord  Chord
+		expect string
+	}{
+		{"the picker's fold key", Plain(' '), "picker: `space` is both fold a group and help"},
+		{"a group motion", Plain('}'), "picker: `}` is both next group and help"},
+		{"a motion", Plain('j'), "picker: `j` is both move down and help"},
+		{"a half page", Chord{Key: 'd', Mods: ModCtrl}, "picker: `ctrl+d` is both half a page down and help"},
+		{"a run slot", Plain('3'), "run: `3` is both that slot and help"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			km := NewKeymap()
+			km.Rebind(Help, tc.chord)
+			var got []string
+			for _, c := range km.Conflicts() {
+				if strings.Contains(c, "help") {
+					got = append(got, c)
+				}
+			}
+			if len(got) == 0 {
+				t.Fatalf("nothing reported for %s", tc.chord)
+			}
+			var ok bool
+			for _, c := range got {
+				if c == tc.expect {
+					ok = true
+				}
+			}
+			if !ok {
+				t.Errorf("reported %q, want %q", got, tc.expect)
+			}
+		})
+	}
+}
+
+// The defaults must not trip the new check either — every motion is a key no action is on.
+func TestTheDefaultsDoNotCollideWithTheLiterals(t *testing.T) {
+	if c := NewKeymap().Conflicts(); len(c) > 0 {
+		t.Errorf("the shipped keymap reports conflicts: %v", c)
 	}
 }
