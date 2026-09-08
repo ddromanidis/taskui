@@ -3,5 +3,8 @@
 /probe/
 /.task/
 
+# Finder metadata. Not ours, and it turns up in whichever directory was last opened.
+.DS_Store
+
 # The parked designs are private notes, not project documentation.
 IDEAS.md
