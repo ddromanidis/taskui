@@ -41,6 +41,9 @@ vim.fn.writefile({
   "  build:",
   "    desc: Compile it",
   "    cmds: ['echo \"compiling core\"']",
+  "  zap:",
+  "    desc: Zap it",
+  "    cmds: ['echo \"zapped\"']",
   "  test:",
   "    desc: Run the suite",
   "    cmds:",
@@ -174,6 +177,36 @@ check("the quickfix list comes from the binary, with absolute paths", function()
   end
   assert_contains(first.text, "want 1200, got 1180")
   vim.cmd("cclose")
+end)
+
+-- The esc that `run()` sends first has to arrive as an esc. A terminal encodes
+-- Alt+x as esc followed by x, so an esc written in the same breath as the key
+-- after it is read as that chord and never reaches the picker — which is how
+-- `:TaskUI run` came to type the task name at the tree, where a letter of it
+-- opened an editor and the enter that followed ran whatever was under the
+-- cursor. Opening a prompt first is what makes that visible: with a real esc the
+-- prompt closes and the jump happens, and without one the name is typed into the
+-- prompt and nothing runs.
+--
+-- `zap` runs nowhere else in this file, so its arrival is this run and not the
+-- memory of an earlier one.
+check("run() gets out of a prompt before it types a task name", function()
+  term.send("/")
+  wait_for("the filter prompt", function()
+    return screen():find("⏎ accept", 1, true) ~= nil
+  end)
+
+  require("taskui").run("zap")
+  wait_for("zap to be announced", function()
+    return events.runs["zap"] ~= nil
+  end)
+  wait_for("zap to finish", function()
+    local run = events.runs["zap"]
+    return run and run.status ~= "running"
+  end)
+  if events.runs["zap"].exit ~= 0 then
+    error("zap = " .. vim.inspect(events.runs["zap"]))
+  end
 end)
 
 check("a malformed event line is skipped rather than thrown", function()
