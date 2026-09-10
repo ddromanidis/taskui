@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // span is a run of text with one style; line is a row built out of them. The pair stands

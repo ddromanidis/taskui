@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/keys"
 )
 
 // The README's key tables, generated.

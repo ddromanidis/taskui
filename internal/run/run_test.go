@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/graph"
 )
 
 func one(t *testing.T, text string) LineEvent {

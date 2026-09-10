@@ -17,9 +17,9 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/loc"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/loc"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // printQuickfix is `--quickfix`: the most recent stored run of this project, as an error

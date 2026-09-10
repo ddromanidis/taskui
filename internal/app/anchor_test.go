@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // Following moves the view to what is running. What it must not do is move it

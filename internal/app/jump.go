@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/events"
-	"github.com/ddromanidis/taskui/internal/loc"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/events"
+	"github.com/romanidis/taskui/internal/loc"
 )
 
 // resolver indexes the project lazily, and only once.

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"sync"
 
-	taskpkg "github.com/ddromanidis/taskui/internal/task"
+	taskpkg "github.com/romanidis/taskui/internal/task"
 )
 
 // Graph maps a task name to the tasks it invokes, in the order it invokes them.

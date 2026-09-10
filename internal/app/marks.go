@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // ToggleMark marks or unmarks the task under the cursor.

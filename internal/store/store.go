@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // KeepRuns is how many runs' *output* to keep. A full `task all` on a large repo is a lot of

@@ -19,7 +19,7 @@ function M.check()
 
   if vim.fn.executable(binary) == 0 then
     error_(("%q not found on PATH"):format(binary), {
-      "go install github.com/ddromanidis/taskui@latest",
+      "go install github.com/romanidis/taskui@latest",
       "or set the binary option to an absolute path",
     })
     return
@@ -47,7 +47,7 @@ function M.check()
     end
     if #missing > 0 then
       error_(("the installed binary has no %s"):format(table.concat(missing, ", ")), {
-        "reinstall with: go install github.com/ddromanidis/taskui@latest",
+        "reinstall with: go install github.com/romanidis/taskui@latest",
       })
     else
       ok("binary supports --list --json, --run --json and --quickfix")

@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/cover"
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/cover"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // coverPatterns reads `.taskui-cover`, or nothing if there is not one.

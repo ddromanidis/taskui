@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/pivot"
 )
 
 func loadStr(t *testing.T, yaml string) Config {

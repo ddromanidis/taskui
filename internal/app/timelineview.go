@@ -7,9 +7,9 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // --- timeline ---------------------------------------------------------------------

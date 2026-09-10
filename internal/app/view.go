@@ -12,10 +12,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // minRunColumn is the same for output, which needs more width than a task name does, so it

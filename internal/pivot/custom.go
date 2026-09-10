@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // Pivot is one way of grouping the task list.

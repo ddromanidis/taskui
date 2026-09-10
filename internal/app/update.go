@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/keys"
 )
 
 // tickMsg drives the poll loop. A run's capture goroutine fills its queue whenever it

@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // ctrl builds a control chord the way a terminal reports one, so these go through the same

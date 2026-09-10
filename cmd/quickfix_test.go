@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // failedRun is a `ci` that called `test`, which failed with a Go test's own output: a

@@ -10,13 +10,13 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
-	"github.com/ddromanidis/taskui/internal/app"
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/app"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // The examples command.

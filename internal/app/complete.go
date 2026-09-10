@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // Completion for the args prompt.

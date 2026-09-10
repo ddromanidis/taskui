@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // Shape lifted from a real Taskfile: root aggregates, several namespaces, and namespaces

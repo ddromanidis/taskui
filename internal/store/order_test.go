@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // Two task names that differ only in a character `safeName` flattens used to land on one

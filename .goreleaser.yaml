@@ -29,9 +29,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/ddromanidis/taskui/cmd.version={{ .Version }}
-      - -X github.com/ddromanidis/taskui/cmd.commit={{ .Commit }}
-      - -X github.com/ddromanidis/taskui/cmd.date={{ .CommitDate }}
+      - -X github.com/romanidis/taskui/cmd.version={{ .Version }}
+      - -X github.com/romanidis/taskui/cmd.commit={{ .Commit }}
+      - -X github.com/romanidis/taskui/cmd.date={{ .CommitDate }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
@@ -62,7 +62,7 @@ archives:
 homebrew_casks:
   - name: taskui
     repository:
-      owner: ddromanidis
+      owner: romanidis
       name: homebrew-tap
       # The branch the tap actually has. It is a separate repository with its own history
       # and possibly its own users, so this follows it rather than the other way round —
@@ -78,7 +78,7 @@ homebrew_casks:
     # through as an empty string. Running goreleaser by hand, where the variable is simply
     # absent, failed the whole release on a line whose entire job is to make it optional.
     skip_upload: '{{ if index .Env "HOMEBREW_TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
-    homepage: "https://github.com/ddromanidis/taskui"
+    homepage: "https://github.com/romanidis/taskui"
     description: "A folding, searchable front end for go-task"
     license: "MIT"
     manpages:
@@ -137,13 +137,13 @@ changelog:
 
 release:
   github:
-    owner: ddromanidis
+    owner: romanidis
     name: taskui
   draft: false
   prerelease: auto
   footer: |
     ---
-    Install with `go install github.com/ddromanidis/taskui@latest`, or take a binary above.
+    Install with `go install github.com/romanidis/taskui@latest`, or take a binary above.
 
     taskui needs [go-task](https://taskfile.dev) on your PATH — it is a front end for it,
     not a replacement.

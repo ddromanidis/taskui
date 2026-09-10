@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/events"
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/events"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // nopCloser lets a buffer stand in for the socket or file a sink usually owns.

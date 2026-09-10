@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 func tasksNamed(names ...string) []task.Task {

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // Cost is one task's share of a run.

@@ -15,8 +15,8 @@ vars:
   COMMIT:
     sh: git rev-parse --short HEAD 2>/dev/null || echo none
   LDFLAGS: >-
-    -X github.com/ddromanidis/taskui/cmd.version={{.VERSION}}
-    -X github.com/ddromanidis/taskui/cmd.commit={{.COMMIT}}
+    -X github.com/romanidis/taskui/cmd.version={{.VERSION}}
+    -X github.com/romanidis/taskui/cmd.commit={{.COMMIT}}
 
 tasks:
   default:
@@ -234,7 +234,7 @@ tasks:
       - |
         echo
         echo "pushed {{.VERSION}} — the Release workflow is building it now:"
-        echo "  https://github.com/ddromanidis/taskui/actions/workflows/release.yml"
+        echo "  https://github.com/romanidis/taskui/actions/workflows/release.yml"
         echo
         echo "if it goes wrong, take the tag back before anyone fetches it:"
         echo "  task release:untag VERSION={{.VERSION}}"
@@ -276,7 +276,7 @@ tasks:
       # spent: cut the next patch instead.
       - 'git tag -d {{.VERSION}}'
       - 'git push origin :refs/tags/{{.VERSION}}'
-      - 'gh release delete {{.VERSION}} --repo ddromanidis/taskui --yes || true'
+      - 'gh release delete {{.VERSION}} --repo romanidis/taskui --yes || true'
 
   man:
     desc: "Regenerate the man page and the README's key tables from the flags and the keymap"

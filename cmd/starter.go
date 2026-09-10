@@ -15,9 +15,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/term"
 
-	"github.com/ddromanidis/taskui/internal/loc"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/loc"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // What to do about a directory that has no Taskfile.

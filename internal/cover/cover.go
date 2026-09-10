@@ -26,7 +26,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // File is the opt-in file listing tasks no aggregate is expected to reach.

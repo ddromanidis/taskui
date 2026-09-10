@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/ddromanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/pivot"
 )
 
 // A project's own config, and the one rule that makes it safe.

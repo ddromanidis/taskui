@@ -25,16 +25,16 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/ddromanidis/taskui/internal/app"
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/events"
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/search"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/app"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/events"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/search"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // Stamped by the linker at release time; see the Taskfile and .goreleaser.yaml.
@@ -103,7 +103,7 @@ and search afterwards — live and across previous runs.`,
 }
 
 // versionString prefers what the linker stamped, and falls back to what the build itself
-// knows. A `go install github.com/ddromanidis/taskui@latest` gets no ldflags, so without
+// knows. A `go install github.com/romanidis/taskui@latest` gets no ldflags, so without
 // this every such binary calls itself "dev" — including the ones built from a tag, which
 // is the one case where the version is not in doubt.
 func versionString() string {

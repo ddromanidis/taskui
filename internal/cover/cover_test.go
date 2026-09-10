@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // codocShape is the arrangement this check was written against, reduced to the parts that

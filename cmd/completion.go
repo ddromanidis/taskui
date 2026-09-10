@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ddromanidis/taskui/internal/app"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/app"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // Completion for the values, not just the names.

@@ -16,8 +16,8 @@ package app
 import (
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // PickerRow is one row of the picker list: a row of the task tree, or a row of a run

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 func runWith(lines [][2]string) *run.Run {

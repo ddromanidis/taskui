@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/pivot"
 )
 
 func writeProject(t *testing.T, body string) string {

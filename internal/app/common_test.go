@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/keys"
 )
 
 // The footer has always pinned `? keys` to its right edge, on every screen. The detail

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // Ordering: one pass, after the tree is built.

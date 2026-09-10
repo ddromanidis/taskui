@@ -32,9 +32,9 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/redact"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/redact"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 type Status int

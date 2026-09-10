@@ -18,8 +18,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/viper"
 
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/pivot"
 )
 
 // DefaultPeekLines is how many lines a peeking task shows.

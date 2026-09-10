@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 func finishedRun(root string) *run.Run {

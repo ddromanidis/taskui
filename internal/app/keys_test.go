@@ -12,9 +12,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // appAt puts the cursor on a task in a real but empty directory: pressing enter starts a

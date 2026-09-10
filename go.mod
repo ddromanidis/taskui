@@ -1,4 +1,4 @@
-module github.com/ddromanidis/taskui
+module github.com/romanidis/taskui
 
 go 1.27.0
 

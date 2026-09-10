@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // archived saves a finished run of one task into the app's own state directory, aged so

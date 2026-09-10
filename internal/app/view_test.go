@@ -11,13 +11,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 func viewSample(t *testing.T) *App {

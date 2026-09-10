@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/cover"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/cover"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 func TestCoverPatternsReadsGlobsAndSkipsComments(t *testing.T) {

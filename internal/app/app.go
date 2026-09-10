@@ -14,19 +14,19 @@ import (
 
 	"github.com/sahilm/fuzzy"
 
-	"github.com/ddromanidis/taskui/internal/cover"
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/events"
-	"github.com/ddromanidis/taskui/internal/graph"
-	"github.com/ddromanidis/taskui/internal/keys"
-	"github.com/ddromanidis/taskui/internal/loc"
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/search"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/theme"
-	"github.com/ddromanidis/taskui/internal/watch"
+	"github.com/romanidis/taskui/internal/cover"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/events"
+	"github.com/romanidis/taskui/internal/graph"
+	"github.com/romanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/loc"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/search"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/watch"
 )
 
 type Screen int

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/pivot"
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/pivot"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // seedArgs archives one finished run of a task, invoked with these arguments.

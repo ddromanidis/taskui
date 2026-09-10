@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ddromanidis/taskui/internal/task"
-	"github.com/ddromanidis/taskui/internal/watch"
+	"github.com/romanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/watch"
 )
 
 // Re-reading the Taskfile when it changes.

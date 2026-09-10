@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // pickerWithRun puts a run in a slot and leaves the cursor on the task it was started

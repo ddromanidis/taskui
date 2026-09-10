@@ -3,8 +3,8 @@ package app
 import (
 	"fmt"
 
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // Detach lets the focused run outlive taskui.

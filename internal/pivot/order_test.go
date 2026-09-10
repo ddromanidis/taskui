@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // ordered builds the domain tree over bare names with a given ordering, so the assertions

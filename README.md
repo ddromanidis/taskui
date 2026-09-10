@@ -116,11 +116,11 @@ brew install go-task            # or see https://taskfile.dev/installation
 task --version
 ```
 
-Then take a binary from the [releases page](https://github.com/ddromanidis/taskui/releases),
+Then take a binary from the [releases page](https://github.com/romanidis/taskui/releases),
 or, with a Go toolchain:
 
 ```
-go install github.com/ddromanidis/taskui@latest
+go install github.com/romanidis/taskui@latest
 ```
 
 That puts `taskui` in `$GOBIN`, or `$(go env GOPATH)/bin` if you have not set one. Check
@@ -129,7 +129,7 @@ with `taskui --version`.
 From a clone, which is what you want if you are changing it:
 
 ```
-git clone https://github.com/ddromanidis/taskui
+git clone https://github.com/romanidis/taskui
 cd taskui
 task install
 ```
@@ -162,7 +162,7 @@ leave its children running.
 ### Homebrew
 
 ```
-brew install --cask ddromanidis/tap/taskui
+brew install --cask romanidis/tap/taskui
 ```
 
 macOS only, and it pours a prebuilt binary rather than building from source, so it needs no
@@ -170,13 +170,13 @@ Go toolchain and takes a second. `go-task` comes with it as a dependency. On Lin
 archive from the releases page or use `go install`.
 
 To update, `brew upgrade --cask taskui`. To remove, `brew uninstall --cask taskui` — and
-`brew untap ddromanidis/tap` if you want the tap gone too.
+`brew untap romanidis/tap` if you want the tap gone too.
 
 The cask is written by the release itself, so what `brew` gives you is the same build the
 release page does. Setting the tap up is a one-off:
 
 1. Create a public GitHub repository called **`homebrew-tap`**. The `homebrew-` prefix is
-   what makes it a tap; `ddromanidis/tap` is how Homebrew spells the rest.
+   what makes it a tap; `romanidis/tap` is how Homebrew spells the rest.
 2. Make a fine-grained personal access token with **contents: read and write** on that
    repository, and add it to *this* repository as an Actions secret named
    `HOMEBREW_TAP_GITHUB_TOKEN`. The `GITHUB_TOKEN` Actions hands the workflow is scoped to
@@ -1534,7 +1534,7 @@ terminal cannot do from inside itself.
 
 ```lua
 -- lazy.nvim
-{ "ddromanidis/taskui", build = "go install .", cmd = "TaskUI", opts = {} }
+{ "romanidis/taskui", build = "go install .", cmd = "TaskUI", opts = {} }
 ```
 
 Neovim 0.10 or newer, the `taskui` binary on your `PATH`, and go-task — which is what
@@ -1681,14 +1681,14 @@ of both.
 
 `release.yml` fires on a `v*` tag. goreleaser builds darwin and linux binaries for amd64
 and arm64, runs the test suite before it builds anything, attaches the archives and their
-checksums to the GitHub release, and writes a Homebrew cask into `ddromanidis/homebrew-tap`.
+checksums to the GitHub release, and writes a Homebrew cask into `romanidis/homebrew-tap`.
 
 That last step pushes to a *different* repository, which the default workflow token cannot
 do. It needs a `HOMEBREW_TAP_GITHUB_TOKEN` secret — a fine-grained personal access token
-with contents write on `ddromanidis/homebrew-tap`:
+with contents write on `romanidis/homebrew-tap`:
 
 ```
-gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo ddromanidis/taskui
+gh secret set HOMEBREW_TAP_GITHUB_TOKEN --repo romanidis/taskui
 ```
 
 Without it the cask step skips itself and the release still succeeds. A release going red

@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/ddromanidis/taskui/internal/loc"
-	"github.com/ddromanidis/taskui/internal/theme"
+	"github.com/romanidis/taskui/internal/loc"
+	"github.com/romanidis/taskui/internal/theme"
 )
 
 // The config commands.

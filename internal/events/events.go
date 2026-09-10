@@ -6,7 +6,7 @@
 // statusline and open the file a failure named — without reimplementing any of it.
 //
 // The events are differences against a run's own state rather than the engine's internal
-// event stream. That is deliberate: [github.com/ddromanidis/taskui/internal/run.Run.Poll]
+// event stream. That is deliberate: [github.com/romanidis/taskui/internal/run.Run.Poll]
 // folds raw events into state — a line arriving is also a task starting — and a consumer
 // wants the folded version. "Task went from pending to running" has no event of its own and
 // is exactly what a front end draws.
@@ -20,7 +20,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/ddromanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/run"
 )
 
 // The events, one JSON object per line. Separate types rather than one struct with

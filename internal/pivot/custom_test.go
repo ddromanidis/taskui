@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // drawTree draws a tree the way the picker would, marking groups with a trailing slash, so

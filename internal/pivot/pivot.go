@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // The two groupings that were the whole of this package's vocabulary before pivots became

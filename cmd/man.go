@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
-	"github.com/ddromanidis/taskui/internal/keys"
+	"github.com/romanidis/taskui/internal/keys"
 )
 
 // The man page's generated halves.

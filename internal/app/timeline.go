@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ddromanidis/taskui/internal/diff"
-	"github.com/ddromanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/diff"
+	"github.com/romanidis/taskui/internal/store"
 )
 
 // DiffRow is one row of a rendered diff: an edit, plus whether it is the elision marker

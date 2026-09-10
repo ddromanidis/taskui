@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ddromanidis/taskui/internal/run"
-	"github.com/ddromanidis/taskui/internal/store"
-	"github.com/ddromanidis/taskui/internal/task"
+	"github.com/romanidis/taskui/internal/run"
+	"github.com/romanidis/taskui/internal/store"
+	"github.com/romanidis/taskui/internal/task"
 )
 
 // The listing is what a picker somewhere else needs: the colon path to run, the description
